@@ -2,7 +2,7 @@
 
 > **Persistent engineering memory and change intelligence for AI coding agents.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built_with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![MCP Ready](https://img.shields.io/badge/Protocol-MCP-purple.svg)](https://modelcontextprotocol.io/)
 [![Tests](https://img.shields.io/badge/Tests-11%20Passed-brightgreen.svg)]()
@@ -266,4 +266,9 @@ test test_mcp_protocol_handshake_and_tools ... ok
 
 Copyright (c) 2026 **Amal P S**.
 
-This project is licensed under the **[MIT License](LICENSE)**. You are free to use, modify, and distribute it for personal and commercial purposes.
+This project is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+* **Free for Individuals & Noncommercial Use:** You are completely free to inspect, download, modify, use, and run Engram for personal projects, open-source work, education, and non-commercial research without paying any fee.
+* **Commercial Use:** Use of Engram by commercial entities or for activities primarily intended for commercial advantage or monetary compensation requires a separate commercial license.
+
+For commercial licensing inquiries, please contact the author via [GitHub](https://github.com/code-amalps).

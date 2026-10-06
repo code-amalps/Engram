@@ -1,11 +1,22 @@
-# 🧠 Engram
+<p align="center">
+  <img src="assets/engram-logo.png" width="180" height="180" alt="Engram Logo" style="border-radius: 28px;" />
+</p>
 
-> **Persistent engineering memory and change intelligence for AI coding agents.**
+<h1 align="center">Engram</h1>
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-orange.svg)](https://www.rust-lang.org/)
-[![MCP Ready](https://img.shields.io/badge/Protocol-MCP-purple.svg)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/Tests-17%20Passed-brightgreen.svg)]()
+<p align="center">
+  <strong>Persistent engineering memory and change intelligence for AI coding agents.</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
+  <img src="https://img.shields.io/badge/Tests-17%20Passed-brightgreen.svg" alt="Tests: 17 Passed">
+</p>
+
+> 💡 **The Story Behind the Name:**  
+> **Engram** carries a profound double meaning. In cognitive neuroscience, an *engram* is the physical trace of memory stored in brain circuits. In Malayalam, ***Ente Gramam*** (എന്റെ ഗ്രാമം) translates to *"My Village"*—a place where every home, resident, and pathway is intimately known, protected, and remembered. Engram treats your codebase like a cherished village: mapping every home (module), road (dependency), and boundary so AI coding agents never lose their way or break things.
 
 Engram is a blazingly fast, standalone tool written in **Rust** that acts as an **external brain and safety guard** for AI coding assistants (like Cursor, Claude, Windsurf, and Copilot). 
 

@@ -3,10 +3,13 @@
 pub mod analyzer;
 pub mod compiler;
 pub mod constitution;
+pub mod contract;
+pub mod git_history;
 pub mod graph;
 pub mod guard;
 pub mod manifest;
 pub mod mcp;
+pub mod memory;
 pub mod model;
 pub mod printer;
 pub mod setup;

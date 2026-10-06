@@ -9,8 +9,10 @@ use std::{
 
 use crate::analyzer::{ensure_fresh, estimate_tokens, tokens};
 use crate::constitution::{format_constraints, load_constitution};
+use crate::git_history::get_cochanges_for_file;
 use crate::graph::GraphTraversal;
 use crate::manifest::{detect_ecosystem, format_agent_guard};
+use crate::memory::query_relevant_memories;
 use crate::model::Direction;
 use crate::storage::{db, revision, root_path};
 
@@ -33,6 +35,8 @@ pub struct ContextResult {
     pub estimated_tokens: usize,
     pub confidence: String,
     pub constraints: Vec<String>,
+    pub relevant_memories: Vec<String>,
+    pub cochange_alerts: Vec<String>,
     pub ecosystem_guard: Option<String>,
     pub gaps: Vec<String>,
     pub files: Vec<ContextFile>,
@@ -245,6 +249,34 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         Vec::new()
     };
 
+    let touched_paths: Vec<String> = selected.iter().map(|f| f.path.clone()).collect();
+    let memories = query_relevant_memories(&root, task, &touched_paths).unwrap_or_default();
+    let relevant_memories: Vec<String> = memories
+        .into_iter()
+        .map(|m| {
+            format!(
+                "[{}] {}: {} (Reason: {})",
+                m.scope.modules.join(", "),
+                m.title,
+                m.statement,
+                m.reason
+            )
+        })
+        .collect();
+
+    let mut cochange_alerts = Vec::new();
+    for f in &selected {
+        if let Ok(signals) = get_cochanges_for_file(&root, &f.path, 0.4) {
+            for sig in signals {
+                if !touched_paths.contains(&sig.target_file)
+                    && !cochange_alerts.contains(&sig.advisory_message)
+                {
+                    cochange_alerts.push(sig.advisory_message);
+                }
+            }
+        }
+    }
+
     Ok(ContextResult {
         task: task.into(),
         project: root
@@ -258,6 +290,8 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         estimated_tokens: used,
         confidence,
         constraints,
+        relevant_memories,
+        cochange_alerts,
         ecosystem_guard: eco_guard,
         gaps,
         files: selected,
@@ -269,6 +303,22 @@ pub fn format_explain(res: &ContextResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("🧠 Task: \"{}\"\n", res.task));
     out.push_str(&format!("Confidence: {} | Budget: {} / {} tokens\n\n", res.confidence, res.estimated_tokens, res.token_budget));
+
+    if !res.relevant_memories.is_empty() {
+        out.push_str("RELEVANT ENGINEERING MEMORIES:\n");
+        for m in &res.relevant_memories {
+            out.push_str(&format!("  ℹ️ {}\n", m));
+        }
+        out.push('\n');
+    }
+
+    if !res.cochange_alerts.is_empty() {
+        out.push_str("HISTORICAL CO-CHANGE SIGNALS:\n");
+        for a in &res.cochange_alerts {
+            out.push_str(&format!("  ⚡ {}\n", a));
+        }
+        out.push('\n');
+    }
 
     out.push_str("SELECTED FILES:\n");
     for f in &res.files {

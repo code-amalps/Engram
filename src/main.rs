@@ -1,10 +1,13 @@
 pub mod analyzer;
 pub mod compiler;
 pub mod constitution;
+pub mod contract;
+pub mod git_history;
 pub mod graph;
 pub mod guard;
 pub mod manifest;
 pub mod mcp;
+pub mod memory;
 pub mod model;
 pub mod printer;
 pub mod setup;
@@ -66,9 +69,22 @@ enum CommandLine {
         #[arg(long, default_value_t = 1200)]
         token_budget: usize,
     },
-    /// Generate an advisory Change Contract for an analyzed task
+    /// Manage elastic Change Contracts
     Contract {
-        task_id: String,
+        #[command(subcommand)]
+        action: Option<ContractAction>,
+        /// Task ID or goal (shortcut)
+        task_id: Option<String>,
+    },
+    /// Manage durable engineering memory (.engram/memory.yaml)
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+    /// Mine and query Git historical co-change patterns
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
     },
     /// Calculate change impact or query reverse dependencies for a symbol
     Impact {
@@ -108,6 +124,85 @@ enum CommandLine {
     },
     /// Start the Model Context Protocol (MCP) server over stdio
     Mcp,
+}
+
+#[derive(Subcommand)]
+enum ContractAction {
+    /// Create an elastic Change Contract
+    Create {
+        task: String,
+        #[arg(long)]
+        modules: Option<Vec<String>>,
+        #[arg(long)]
+        files: Option<Vec<String>>,
+        #[arg(long)]
+        forbidden: Option<Vec<String>>,
+    },
+    /// Check working tree changes against active or specified contract
+    Check {
+        contract_id: Option<String>,
+    },
+    /// Reconcile contract with human approval/additions
+    Reconcile {
+        contract_id: String,
+        reason: String,
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(long)]
+        add_files: Vec<String>,
+        #[arg(long)]
+        add_modules: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// List all durable engineering memories
+    List,
+    /// Record an architectural decision and rationale into durable memory
+    Record {
+        title: String,
+        statement: String,
+        reason: String,
+        #[arg(long)]
+        modules: Vec<String>,
+        #[arg(long)]
+        files: Vec<String>,
+        #[arg(long)]
+        accepted_by: Option<String>,
+    },
+    /// List pending memory candidates awaiting review
+    Candidates,
+    /// Promote a candidate to durable memory after review
+    Promote {
+        candidate_id: String,
+        #[arg(long)]
+        accepted_by: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Reject a candidate, preventing promotion
+    Reject {
+        candidate_id: String,
+        reason: String,
+        #[arg(long)]
+        rejected_by: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HistoryAction {
+    /// Query co-change signals for a file
+    Cochanges {
+        file: String,
+        #[arg(long, default_value_t = 0.25)]
+        min_probability: f64,
+    },
+    /// Mine and cache Git co-changes
+    Mine {
+        #[arg(long, default_value_t = 200)]
+        window: usize,
+    },
 }
 
 fn print_json(v: impl Serialize) -> Result<()> {
@@ -181,7 +276,106 @@ fn run() -> Result<()> {
             let (id, ctx) = analyze_task(root, &task, token_budget)?;
             print_json(json!({ "task_id": id, "context": ctx }))?;
         }
-        Some(CommandLine::Contract { task_id }) => print_json(make_contract(root, &task_id)?)?,
+        Some(CommandLine::Contract { action, task_id }) => {
+            match action {
+                Some(ContractAction::Create { task, modules, files, forbidden }) => {
+                    let c = contract::create_contract(root, &task, modules, files, forbidden)?;
+                    print_json(c)?;
+                }
+                Some(ContractAction::Check { contract_id }) => {
+                    let id = contract_id.as_deref().unwrap_or("");
+                    let val = validate(root, id)?;
+                    if force_json {
+                        print_json(val)?;
+                    } else {
+                        printer::print_validation(&val);
+                    }
+                }
+                Some(ContractAction::Reconcile { contract_id, reason, actor, add_files, add_modules }) => {
+                    let act = actor.as_deref().unwrap_or("developer");
+                    let c = contract::reconcile_contract(root, &contract_id, &reason, act, add_files, add_modules)?;
+                    print_json(c)?;
+                }
+                None => {
+                    if let Some(id) = task_id {
+                        print_json(make_contract(root, &id)?)?;
+                    } else if let Ok(Some(active)) = contract::get_active_contract(root) {
+                        print_json(active)?;
+                    } else {
+                        println!("No active contract found. Create one with: engram contract create \"<goal>\"");
+                    }
+                }
+            }
+        }
+        Some(CommandLine::Memory { action }) => {
+            match action {
+                MemoryAction::List => {
+                    let doc = memory::load_durable_memories(root)?;
+                    if force_json {
+                        print_json(doc)?;
+                    } else {
+                        println!("🧠 Durable Engineering Memory (.engram/memory.yaml)");
+                        println!("──────────────────────────────────────────");
+                        if doc.memories.is_empty() {
+                            println!("  No durable memories recorded yet.");
+                        }
+                        for m in doc.memories {
+                            println!("  ✓ [{}] {}", m.id, m.title);
+                            println!("    Statement: {}", m.statement);
+                            println!("    Reason:    {}", m.reason);
+                            println!("    Accepted:  {} by {}", m.accepted_at.format("%Y-%m-%d"), m.accepted_by);
+                            println!();
+                        }
+                    }
+                }
+                MemoryAction::Record { title, statement, reason, modules, files, accepted_by } => {
+                    let act = accepted_by.as_deref().unwrap_or("developer");
+                    let m = memory::record_decision(root, &title, &statement, &reason, modules, files, None, act)?;
+                    print_json(m)?;
+                }
+                MemoryAction::Candidates => {
+                    let cands = memory::list_candidates(root)?;
+                    print_json(cands)?;
+                }
+                MemoryAction::Promote { candidate_id, accepted_by, reason } => {
+                    let act = accepted_by.as_deref().unwrap_or("developer");
+                    let m = memory::promote_candidate(root, &candidate_id, act, reason.as_deref())?;
+                    print_json(m)?;
+                }
+                MemoryAction::Reject { candidate_id, reason, rejected_by } => {
+                    let act = rejected_by.as_deref().unwrap_or("developer");
+                    memory::reject_candidate(root, &candidate_id, act, &reason)?;
+                    print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
+                }
+            }
+        }
+        Some(CommandLine::History { action }) => {
+            match action {
+                HistoryAction::Cochanges { file, min_probability } => {
+                    let sigs = git_history::get_cochanges_for_file(root, &file, min_probability)?;
+                    if force_json {
+                        print_json(sigs)?;
+                    } else {
+                        println!("⚡ Historical Co-Change Signals for: {file}");
+                        println!("──────────────────────────────────────────");
+                        if sigs.is_empty() {
+                            println!("  No significant co-changes detected in historical commit window.");
+                        }
+                        for s in sigs {
+                            println!("  • {}", s.advisory_message);
+                        }
+                    }
+                }
+                HistoryAction::Mine { window } => {
+                    let count = git_history::mine_and_persist_cochanges(root, window)?;
+                    if force_json {
+                        print_json(json!({"cochange_edges_mined": count, "window": window}))?;
+                    } else {
+                        println!("✓ Mined and cached {} co-change relationships from the last {} commits.", count, window);
+                    }
+                }
+            }
+        }
         Some(CommandLine::Impact { target }) => {
             let res = impact(root, &target)?;
             if force_json {
@@ -362,5 +556,15 @@ mod tests {
         assert_eq!(record.language, "csharp");
         assert!(symbols.iter().any(|s| s.name == "CartService" && s.kind == "CLASS"));
         assert!(symbols.iter().any(|s| s.name == "Checkout" && s.kind == "METHOD"));
+    }
+
+    #[test]
+    fn test_tree_sitter_rust_extraction() {
+        let code = b"pub struct OrderService;\nimpl OrderService {\n    pub fn process_order(&self) {}\n}\npub trait OrderRepository {}\n";
+        let (record, symbols, _) = parse_file(Path::new("."), "order.rs", code, "rev1").unwrap();
+        assert_eq!(record.language, "rust");
+        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
+        assert!(symbols.iter().any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+        assert!(symbols.iter().any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
     }
 }

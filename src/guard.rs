@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::analyzer::ensure_fresh;
 use crate::compiler::{ContextResult, context};
 use crate::constitution::evaluate_rules;
+use crate::contract::{get_active_contract, get_contract, validate_contract_diff, FileValidationCategory};
 use crate::graph::GraphTraversal;
 use crate::storage::{db, git_changed, hash, now, revision, root_path};
 
@@ -274,11 +275,70 @@ pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
 }
 
 pub fn validate(root: &Path, id: &str) -> Result<Value> {
-    let impact = impact(root, id)?;
     let root = root_path(root)?;
     let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+    let mut valid = true;
 
-    if impact["unexpected_files"]
+    // Resolve contract if provided or active
+    let contract = if id.starts_with("ctr_") {
+        get_contract(&root, id).ok()
+    } else {
+        get_active_contract(&root).ok().flatten()
+    };
+
+    let impact = impact(&root, id).unwrap_or(json!({
+        "actual": {
+            "files": git_changed(&root)
+        }
+    }));
+
+    let changed_files: Vec<String> = impact["actual"]["files"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_else(|| git_changed(&root));
+
+    let mut contract_val_json = None;
+    if let Some(ref c) = contract {
+        let val = validate_contract_diff(c, &changed_files);
+        if !val.is_valid {
+            valid = false;
+        }
+        for class in &val.classifications {
+            match class.category {
+                FileValidationCategory::BoundaryViolation => {
+                    errors.push(json!({
+                        "code": "BOUNDARY_VIOLATION",
+                        "file": class.path,
+                        "message": format!("File '{}' violates forbidden contract boundary", class.path)
+                    }));
+                }
+                FileValidationCategory::ExpectedExpansion => {
+                    warnings.push(json!({
+                        "code": "EXPECTED_EXPANSION",
+                        "file": class.path,
+                        "message": format!("File '{}' is within expected module boundary", class.path)
+                    }));
+                }
+                FileValidationCategory::Unexpected => {
+                    warnings.push(json!({
+                        "code": "UNEXPECTED_CHANGE",
+                        "file": class.path,
+                        "message": format!("File '{}' is outside expected contract boundary", class.path)
+                    }));
+                }
+                FileValidationCategory::Expected => {}
+            }
+        }
+        for missing in &val.missing_expected_changes {
+            warnings.push(json!({
+                "code": "MISSING_EXPECTED_CHANGE",
+                "file": missing,
+                "message": format!("Expected change in '{}' was not performed", missing)
+            }));
+        }
+        contract_val_json = Some(serde_json::to_value(&val)?);
+    } else if impact["unexpected_files"]
         .as_array()
         .is_some_and(|a| !a.is_empty())
     {
@@ -288,11 +348,6 @@ pub fn validate(root: &Path, id: &str) -> Result<Value> {
             "message": "Changed paths are outside the contract boundary."
         }));
     }
-
-    let changed_files: Vec<String> = impact["actual"]["files"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
 
     let conn = db(&root)?;
 
@@ -324,10 +379,11 @@ pub fn validate(root: &Path, id: &str) -> Result<Value> {
 
     Ok(json!({
         "task_id": id,
-        "valid": true,
+        "valid": valid,
         "advisory": true,
-        "errors": [],
+        "errors": errors,
         "warnings": warnings,
+        "contract_validation": contract_val_json,
         "rule_violations": active_violations,
         "overridden_violations": overridden_violations,
         "impact": impact

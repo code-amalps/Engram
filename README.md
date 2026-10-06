@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-17%20Passed-brightgreen.svg" alt="Tests: 17 Passed">
+  <img src="https://img.shields.io/badge/Tests-25%20Passed-brightgreen.svg" alt="Tests: 25 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -40,9 +40,11 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 * 🏎️ **Blazingly Fast:** Re-analyzes a 140+ file codebase in **< 15 milliseconds** using composite content-addressed caching.
 * 🪶 **Featherweight:** Runs quietly in the background using **< 20 MB of RAM** with zero garbage collection pauses.
 * 📦 **Single Static Binary:** Self-contained executable (`engram.exe` on Windows or `engram` on Mac/Linux) with **zero external dependencies**—no Node.js, Python, or .NET runtime needed.
-* 🛡️ **Blast-Radius Guard:** Compares live `git diff` against a pre-change contract to catch scope expansion before broken code is merged.
-* 🔌 **Native MCP Support:** Plugs directly into **Cursor, Claude Desktop, Claude Code, and Windsurf** via standard Model Context Protocol (MCP).
-* 🌳 **Multi-Language AST:** Native Tree-sitter parsers for **TypeScript, JavaScript, Python, and C#**.
+* 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits.
+* ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
+* 🧠 **Durable Engineering Memory:** Stores human/team architectural decisions with full rationale (**WHY**) in `.engram/memory.yaml` with memory poisoning protection.
+* 🔌 **Native MCP Support:** 9 standard tools plugging directly into **Cursor, Claude Desktop, and Windsurf**.
+* 🌳 **Self-Analyzing Rust AST:** Native Tree-sitter parsers for **Rust, TypeScript, JavaScript, Python, and C#**. Dogfoods on its own repository!
 
 ---
 
@@ -259,12 +261,16 @@ rules:
 | `engram setup <client>` | 1-Click MCP setup (Cursor, Claude, Windsurf) | `engram setup cursor` |
 | `engram ecosystem` | Discovers frameworks, lockfile versions & scripts | `engram ecosystem` |
 | `engram context "<task>"` | Compiles context under token budget (`--explain`) | `engram context "add login" --explain` |
-| `engram analyze-task "<task>"` | Starts a tracked task and returns a `task_id` | `engram analyze-task "refactor auth"` |
-| `engram contract <task_id>` | Generates pre-edit Change Contract | `engram contract task_abc123` |
+| `engram contract create "<task>"` | Creates elastic Change Contract (auto-grounds scope) | `engram contract create "export csv"` |
+| `engram contract check` | Validates working-tree changes against active contract | `engram contract check` |
+| `engram contract reconcile <id>` | Reconciles human interventions & expands scope | `engram contract reconcile ctr_123 "approved"` |
+| `engram history cochanges <file>` | Inspects statistical Git co-change patterns | `engram history cochanges src/orders.rs` |
+| `engram history mine` | Mines and caches Git co-changes from commit log | `engram history mine --window 200` |
+| `engram memory list` | Lists durable engineering memories (`memory.yaml`) | `engram memory list` |
+| `engram memory record` | Records architectural decisions with rationale (**WHY**) | `engram memory record "Title" "Stmt" "Reason"` |
+| `engram memory promote <id>` | Promotes accepted candidates to durable memory | `engram memory promote cand_123` |
 | `engram impact <id_or_file>` | Compares live diff or queries reverse dependencies | `engram impact OrderService` |
 | `engram validate <task_id>` | Advisory checks for scope expansion & rules | `engram validate task_abc123` |
-| `engram decision <id> <dec> <msg>`| Records approval/override rationale | `engram decision task_1 OVERRIDE "Reason"` |
-| `engram update-memory <task_id>` | Promotes change to durable historical memory | `engram update-memory task_abc123` |
 | `engram mcp` | Starts background JSON-RPC 2.0 MCP server | `engram mcp` |
 
 ---
@@ -279,31 +285,42 @@ rules:
 
 ## 🧪 Testing
 
-Engram includes a comprehensive automated test suite covering Tree-sitter parsers, token budgeting, SQLite WAL bi-temporal storage, graph traversal, and MCP stdio protocols:
+Engram includes a comprehensive automated test suite covering Tree-sitter parsers, token budgeting, SQLite WAL bi-temporal storage, graph traversal, Change Contracts, Git co-change mining, durable memory lifecycle, and MCP stdio protocols:
 
 ```bash
 cargo test
 ```
 
-All **17 tests** run and pass in ~3 seconds:
+All **25 tests** run and pass:
 ```text
+running 10 tests
 test tests::test_language_detection ... ok
-test tests::test_analysis_key_composition ... ok
-test tests::test_evidence_decay_and_precedence ... ok
 test tests::test_matches_pattern ... ok
+test tests::test_evidence_decay_and_precedence ... ok
+test tests::test_analysis_key_composition ... ok
+test tests::test_tree_sitter_csharp_extraction ... ok
+test tests::test_tree_sitter_python_extraction ... ok
+test tests::test_tree_sitter_rust_extraction ... ok
 test tests::test_tokenization_and_estimation ... ok
 test tests::test_secret_redaction ... ok
-test tests::test_tree_sitter_python_extraction ... ok
-test tests::test_tree_sitter_csharp_extraction ... ok
 test tests::test_tree_sitter_typescript_extraction ... ok
+
 test test_end_to_end_lifecycle ... ok
 test test_mcp_protocol_handshake_and_tools ... ok
 test test_setup_targets_list ... ok
 test test_setup_dry_run_does_not_modify_disk ... ok
 test test_package_json_and_lockfile_intelligence ... ok
-test test_constitution_rules_and_overrides ... ok
 test test_setup_safe_merge_preserves_unrelated_servers ... ok
+test test_constitution_rules_and_overrides ... ok
 test test_graph_traversal_and_reverse_dependencies ... ok
+
+test test_git_cochange_noise_filters_and_signal_formatting ... ok
+test test_cache_deletion_and_durable_memory_survival ... ok
+test test_rust_tree_sitter_ast_extraction ... ok
+test test_memory_poisoning_protection_and_promotion_lifecycle ... ok
+test test_change_contract_elastic_boundaries ... ok
+test test_contract_reconciliation_human_intervention ... ok
+test test_north_star_e2e_flywheel ... ok
 ```
 
 ---

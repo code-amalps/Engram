@@ -78,6 +78,7 @@ pub fn language(path: &Path) -> Option<&'static str> {
         "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
         "py" => Some("python"),
         "cs" => Some("csharp"),
+        "rs" => Some("rust"),
         _ => None,
     }
 }
@@ -87,6 +88,7 @@ pub fn lang_for(name: &str) -> Language {
         "typescript" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         "javascript" => tree_sitter_javascript::LANGUAGE.into(),
         "python" => tree_sitter_python::LANGUAGE.into(),
+        "rust" => tree_sitter_rust::LANGUAGE.into(),
         _ => tree_sitter_c_sharp::LANGUAGE.into(),
     }
 }
@@ -110,6 +112,13 @@ pub fn recognized(kind: &str, lang: &str) -> Option<&'static str> {
         ("csharp", "enum_declaration") => Some("ENUM"),
         ("csharp", "method_declaration") => Some("METHOD"),
         ("csharp", "constructor_declaration") => Some("CONSTRUCTOR"),
+        ("rust", "function_item") => Some("FUNCTION"),
+        ("rust", "struct_item") => Some("STRUCT"),
+        ("rust", "enum_item") => Some("ENUM"),
+        ("rust", "trait_item") => Some("TRAIT"),
+        ("rust", "impl_item") => Some("IMPL"),
+        ("rust", "mod_item") => Some("MODULE"),
+        ("rust", "type_item") => Some("TYPE"),
         _ => None,
     }
 }
@@ -141,6 +150,12 @@ pub fn extract_import_specifier(text: &str, lang: &str) -> String {
         }
     } else if lang == "csharp" && text.starts_with("using ") {
         return text[6..].trim().trim_matches(';').to_string();
+    } else if lang == "rust" {
+        if text.starts_with("use ") {
+            return text[4..].trim().trim_matches(';').to_string();
+        } else if text.starts_with("mod ") {
+            return text[4..].trim().trim_matches(';').to_string();
+        }
     }
     text.chars().take(120).collect()
 }
@@ -187,6 +202,7 @@ pub fn visit(
     if let Some(kind) = recognized(n.kind(), lang) {
         let name = n
             .child_by_field_name("name")
+            .or_else(|| n.child_by_field_name("type"))
             .map(|x| node_text(x, src))
             .unwrap_or_else(|| "<anonymous>".into());
         let full = node_text(n, src);
@@ -211,7 +227,7 @@ pub fn visit(
             fingerprint,
         });
     }
-    if n.kind().contains("import") || n.kind() == "using_directive" {
+    if n.kind().contains("import") || n.kind() == "using_directive" || n.kind() == "use_declaration" {
         let raw = node_text(n, src);
         let spec = extract_import_specifier(&raw, lang);
         if !spec.is_empty() {
@@ -282,6 +298,19 @@ pub fn parse_file(
                 line: 1,
             });
         }
+    } else if rel.starts_with("tests/") && rel.ends_with(".rs") {
+        let stem = rel
+            .trim_start_matches("tests/")
+            .trim_end_matches(".rs")
+            .trim_end_matches("_test");
+        rels.push(Relationship {
+            source: rel.into(),
+            target: format!("src/{stem}.rs"),
+            kind: "TESTS".into(),
+            evidence: "NAMING_CONVENTION".into(),
+            confidence: 0.95,
+            line: 1,
+        });
     }
 
     let display = redact(&source);

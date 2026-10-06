@@ -1,3 +1,5 @@
+//! MCP Server implementation: stdio JSON-RPC 2.0 protocol exposing engineering intelligence.
+
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::{
@@ -6,7 +8,12 @@ use std::{
 };
 
 use crate::compiler::context;
-use crate::guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
+use crate::constitution::evaluate_rules;
+use crate::contract::create_contract;
+use crate::git_history::get_cochanges_for_file;
+use crate::guard::{analyze_task, impact, validate};
+use crate::memory::{load_durable_memories, query_relevant_memories, record_decision};
+use crate::storage::{db, root_path};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,40 +27,106 @@ pub fn json_result(v: Value) -> Value {
 }
 
 pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
+    let root = root_path(root)?;
     Ok(match name {
-        "engram_get_context" => json_result(serde_json::to_value(context(
-            root,
-            args["task"].as_str().unwrap_or(""),
-            args["token_budget"].as_u64().unwrap_or(1200) as usize,
-        )?)?),
+        "engram_get_context" => {
+            let task = args["task"].as_str().unwrap_or("");
+            let budget = args["token_budget"].as_u64().unwrap_or(1200) as usize;
+            json_result(serde_json::to_value(context(&root, task, budget)?)?)
+        }
         "engram_analyze_task" => {
-            let (id, ctx) = analyze_task(
-                root,
-                args["task"].as_str().unwrap_or(""),
-                args["token_budget"].as_u64().unwrap_or(1200) as usize,
-            )?;
+            let task = args["task"].as_str().unwrap_or("");
+            let budget = args["token_budget"].as_u64().unwrap_or(1200) as usize;
+            let (id, ctx) = analyze_task(&root, task, budget)?;
             json_result(json!({"task_id": id, "context": ctx}))
         }
         "engram_create_change_contract" => {
-            json_result(make_contract(root, args["task_id"].as_str().unwrap_or(""))?)
+            let task = args["task"]
+                .as_str()
+                .or_else(|| args["task_id"].as_str())
+                .unwrap_or("");
+
+            let modules = args["expected_modules"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            let files = args["expected_files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            let forbidden = args["forbidden"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+
+            let contract = create_contract(&root, task, modules, files, forbidden)?;
+            json_result(serde_json::to_value(contract)?)
         }
-        "engram_get_impact" => json_result(impact(root, args["task_id"].as_str().unwrap_or(""))?),
         "engram_validate_change" => {
-            json_result(validate(root, args["task_id"].as_str().unwrap_or(""))?)
+            let id = args["contract_id"]
+                .as_str()
+                .or_else(|| args["task_id"].as_str())
+                .unwrap_or("");
+            json_result(validate(&root, id)?)
         }
-        "engram_record_decision" => json_result(record_decision(
-            root,
-            args["task_id"].as_str().unwrap_or(""),
-            args["decision"].as_str().unwrap_or(""),
-            args["reason"].as_str().unwrap_or(""),
-            args["rule_id"].as_str(),
-            args["violation_id"].as_str(),
-        )?),
-        "engram_update_memory" => {
-            json_result(update_memory(root, args["task_id"].as_str().unwrap_or(""))?)
+        "engram_get_impact" => {
+            let target = args["target"]
+                .as_str()
+                .or_else(|| args["task_id"].as_str())
+                .or_else(|| args["symbol"].as_str())
+                .unwrap_or("");
+            json_result(impact(&root, target)?)
+        }
+        "engram_get_cochanges" => {
+            let file_path = args["file_path"].as_str().unwrap_or("");
+            let min_prob = args["min_probability"].as_f64().unwrap_or(0.25);
+            let signals = get_cochanges_for_file(&root, file_path, min_prob)?;
+            json_result(serde_json::to_value(signals)?)
+        }
+        "engram_get_memory" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let files: Vec<String> = args["files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+
+            if query.is_empty() && files.is_empty() {
+                let doc = load_durable_memories(&root)?;
+                json_result(serde_json::to_value(doc.memories)?)
+            } else {
+                let memories = query_relevant_memories(&root, query, &files)?;
+                json_result(serde_json::to_value(memories)?)
+            }
+        }
+        "engram_record_decision" => {
+            let title = args["title"]
+                .as_str()
+                .or_else(|| args["decision"].as_str())
+                .unwrap_or("Decision");
+            let statement = args["statement"].as_str().unwrap_or(title);
+            let reason = args["reason"].as_str().unwrap_or("");
+            let actor = args["accepted_by"].as_str().unwrap_or("developer");
+
+            let modules: Vec<String> = args["modules"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let files: Vec<String> = args["files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+
+            let memory = record_decision(&root, title, statement, reason, modules, files, None, actor)?;
+            json_result(serde_json::to_value(memory)?)
+        }
+        "engram_check_constitution" => {
+            let conn = db(&root)?;
+            let changed_files: Vec<String> = args["files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_else(|| crate::storage::git_changed(&root));
+            let violations = evaluate_rules(&root, &changed_files, &conn)?;
+            json_result(serde_json::to_value(violations)?)
         }
         "engram_get_ecosystem" => {
-            let report = crate::manifest::detect_ecosystem(root)?;
+            let report = crate::manifest::detect_ecosystem(&root)?;
             json_result(serde_json::to_value(report)?)
         }
         _ => return Err(anyhow!("Unknown tool: {name}")),
@@ -96,7 +169,7 @@ pub fn mcp(root: &Path) -> Result<()> {
                 "tools": [
                     {
                         "name": "engram_get_context",
-                        "description": "Compile focused, evidence-backed repository context for a task.",
+                        "description": "Compile focused, evidence-backed context with durable memories and co-change alerts.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -108,7 +181,7 @@ pub fn mcp(root: &Path) -> Result<()> {
                     },
                     {
                         "name": "engram_analyze_task",
-                        "description": "Ground a task and create a task record for a future contract.",
+                        "description": "Ground a task and analyze ambiguity gaps.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -120,59 +193,85 @@ pub fn mcp(root: &Path) -> Result<()> {
                     },
                     {
                         "name": "engram_create_change_contract",
-                        "description": "Create an advisory expected-change boundary for an analyzed task.",
+                        "description": "Create an elastic Change Contract before editing. Auto-grounds scope if fields are omitted.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "task_id": { "type": "string" }
+                                "task": { "type": "string" },
+                                "expected_modules": { "type": "array", "items": { "type": "string" } },
+                                "expected_files": { "type": "array", "items": { "type": "string" } },
+                                "forbidden": { "type": "array", "items": { "type": "string" } }
                             },
-                            "required": ["task_id"]
-                        }
-                    },
-                    {
-                        "name": "engram_get_impact",
-                        "description": "Compare repository changes with the task baseline and contract.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task_id": { "type": "string" }
-                            },
-                            "required": ["task_id"]
+                            "required": ["task"]
                         }
                     },
                     {
                         "name": "engram_validate_change",
-                        "description": "Return advisory scope and architecture validation findings.",
+                        "description": "Validate changes against active Change Contract boundaries and constitution rules.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "task_id": { "type": "string" }
+                                "contract_id": { "type": "string" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "engram_get_impact",
+                        "description": "Query reverse dependencies of a symbol or evaluate overall change impact.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target": { "type": "string" }
                             },
-                            "required": ["task_id"]
+                            "required": ["target"]
+                        }
+                    },
+                    {
+                        "name": "engram_get_cochanges",
+                        "description": "Retrieve historical Git co-change signals and statistics for a given file.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "min_probability": { "type": "number" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "engram_get_memory",
+                        "description": "Retrieve durable architectural decisions and team engineering memories.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string" },
+                                "files": { "type": "array", "items": { "type": "string" } }
+                            }
                         }
                     },
                     {
                         "name": "engram_record_decision",
-                        "description": "Record a developer decision and rationale for the current or specified task.",
+                        "description": "Record an architectural decision and rationale into durable engineering memory.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "task_id": { "type": "string", "description": "Optional; defaults to the most recently analyzed task." },
-                                "decision": { "type": "string" },
-                                "reason": { "type": "string" }
+                                "title": { "type": "string" },
+                                "statement": { "type": "string" },
+                                "reason": { "type": "string" },
+                                "modules": { "type": "array", "items": { "type": "string" } },
+                                "files": { "type": "array", "items": { "type": "string" } }
                             },
-                            "required": ["decision", "reason"]
+                            "required": ["title", "reason"]
                         }
                     },
                     {
-                        "name": "engram_update_memory",
-                        "description": "Promote accepted task knowledge into local engineering memory.",
+                        "name": "engram_check_constitution",
+                        "description": "Evaluate constitution rules against changed files.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "task_id": { "type": "string" }
-                            },
-                            "required": ["task_id"]
+                                "files": { "type": "array", "items": { "type": "string" } }
+                            }
                         }
                     },
                     {
@@ -186,7 +285,7 @@ pub fn mcp(root: &Path) -> Result<()> {
                 ]
             })),
             "tools/call" => mcp_call(
-                root,
+                &root,
                 req["params"]["name"].as_str().unwrap_or(""),
                 &req["params"]["arguments"],
             ),

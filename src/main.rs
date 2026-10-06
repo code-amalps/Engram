@@ -144,9 +144,25 @@ enum ContractAction {
         #[arg(long)]
         forbidden: Option<Vec<String>>,
     },
-    /// Check working tree changes against active or specified contract
+    /// Check working tree, staged index, or PR diff against active Change Contract
     Check {
         contract_id: Option<String>,
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        staged: bool,
+        #[arg(long)]
+        base: Option<String>,
+        #[arg(long)]
+        check_provenance: bool,
+    },
+    /// Ratify a Change Contract boundary expansion with human authorization
+    Ratify {
+        contract_id: String,
+        #[arg(long, default_value = "developer")]
+        by: String,
+        #[arg(long, default_value = "Human ratified boundary expansion")]
+        reason: String,
     },
     /// Reconcile contract with human approval/additions
     Reconcile {
@@ -158,6 +174,16 @@ enum ContractAction {
         add_files: Vec<String>,
         #[arg(long)]
         add_modules: Vec<String>,
+    },
+    /// Install pre-commit hook into .git/hooks/pre-commit
+    InstallHook {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Uninstall pre-commit hook from .git/hooks/pre-commit
+    UninstallHook {
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -291,19 +317,56 @@ fn run() -> Result<()> {
                     let c = contract::create_contract(root, &task, modules, files, forbidden)?;
                     print_json(c)?;
                 }
-                Some(ContractAction::Check { contract_id }) => {
-                    let id = contract_id.as_deref().unwrap_or("");
-                    let val = validate(root, id)?;
+                Some(ContractAction::Check {
+                    contract_id,
+                    strict,
+                    staged,
+                    base,
+                    check_provenance,
+                }) => {
+                    let options = contract::CheckOptions {
+                        contract_id,
+                        strict,
+                        staged,
+                        base_commit: base,
+                        check_provenance,
+                    };
+                    let result = contract::check_contract(root, &options);
                     if force_json {
-                        print_json(val)?;
+                        print_json(&result)?;
                     } else {
-                        printer::print_validation(&val);
+                        let is_github_ci = std::env::var("GITHUB_ACTIONS").is_ok()
+                            || std::env::var("CI").is_ok();
+                        print!("{}", contract::format_check_report(&result, is_github_ci));
+                    }
+                    if result.exit_code != 0 {
+                        std::process::exit(result.exit_code);
+                    }
+                }
+                Some(ContractAction::Ratify {
+                    contract_id,
+                    by,
+                    reason,
+                }) => {
+                    let c = contract::ratify_contract(root, &contract_id, &by, &reason)?;
+                    if force_json {
+                        print_json(&c)?;
+                    } else {
+                        println!("✓ Ratified Change Contract '{}' by {}", c.contract_id, by);
                     }
                 }
                 Some(ContractAction::Reconcile { contract_id, reason, actor, add_files, add_modules }) => {
                     let act = actor.as_deref().unwrap_or("developer");
                     let c = contract::reconcile_contract(root, &contract_id, &reason, act, add_files, add_modules)?;
                     print_json(c)?;
+                }
+                Some(ContractAction::InstallHook { dry_run }) => {
+                    let msg = contract::install_pre_commit_hook(root, dry_run)?;
+                    println!("{msg}");
+                }
+                Some(ContractAction::UninstallHook { dry_run }) => {
+                    let msg = contract::uninstall_pre_commit_hook(root, dry_run)?;
+                    println!("{msg}");
                 }
                 None => {
                     if let Some(id) = task_id {

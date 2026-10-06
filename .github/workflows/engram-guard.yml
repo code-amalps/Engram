@@ -1,0 +1,27 @@
+name: Engram Change Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+      - Development
+
+jobs:
+  change-guard:
+    name: Validate Change Contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Engram standalone CLI
+        run: |
+          chmod +x ./install.sh || true
+          ENGRAM_INSTALL_DIR="$HOME/.engram/bin" ./install.sh
+          echo "$HOME/.engram/bin" >> $GITHUB_PATH
+
+      - name: Verify Engram Change Guard
+        run: |
+          engram contract check --base ${{ github.event.pull_request.base.sha }} --check-provenance

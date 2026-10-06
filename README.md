@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-31%20Passed-brightgreen.svg" alt="Tests: 31 Passed">
+  <img src="https://img.shields.io/badge/Tests-45%20Passed-brightgreen.svg" alt="Tests: 45 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -286,8 +286,10 @@ rules:
 | `engram ecosystem` | Discovers frameworks, lockfile versions & scripts | `engram ecosystem` |
 | `engram context "<task>"` | Compiles context under token budget (`--explain`) | `engram context "add login" --explain` |
 | `engram contract create "<task>"` | Creates elastic Change Contract (auto-grounds scope) | `engram contract create "export csv"` |
-| `engram contract check` | Validates working-tree changes against active contract | `engram contract check` |
+| `engram contract check` | Validates working-tree, staged, or PR changes against contract | `engram contract check --staged` |
+| `engram contract ratify <id>` | Ratifies expanded contract boundary with human authorization | `engram contract ratify ctr_123` |
 | `engram contract reconcile <id>` | Reconciles human interventions & expands scope | `engram contract reconcile ctr_123 "approved"` |
+| `engram contract install-hook` | Installs Change Guard pre-commit hook (`--dry-run`) | `engram contract install-hook` |
 | `engram history cochanges <file>` | Inspects statistical Git co-change patterns | `engram history cochanges src/orders.rs` |
 | `engram history mine` | Mines and caches Git co-changes from commit log | `engram history mine --window 200` |
 | `engram memory list` | Lists durable engineering memories (`memory.yaml`) | `engram memory list` |
@@ -297,6 +299,72 @@ rules:
 | `engram validate <task_id>` | Advisory checks for scope expansion & rules | `engram validate task_abc123` |
 | `engram bench` | Runs scientific benchmark suite (`--verbose`, `--json`) | `engram bench --verbose` |
 | `engram mcp` | Starts background JSON-RPC 2.0 MCP server | `engram mcp` |
+
+---
+
+## 🛡️ Change Guard: Pre-Commit Hooks & CI/CD Enforcement
+
+Engram prevents unintended changes from silently crossing the boundaries of an approved Change Contract. The Change Contract remains the single source of truth; local Git hooks and CI are enforcement surfaces.
+
+### 1. Local Pre-Commit Hook Integration
+
+Install the pre-commit hook into `.git/hooks/pre-commit` (never installed silently):
+
+```bash
+# Preview what would be installed without modifying disk
+engram contract install-hook --dry-run
+
+# Safely install or chain with existing pre-commit hooks (Husky, Lefthook)
+engram contract install-hook
+
+# Uninstall cleanly
+engram contract uninstall-hook
+```
+
+When you run `git commit`, Change Guard automatically runs:
+```bash
+engram contract check --staged
+```
+* If changes stay within allowed boundaries $\to$ **Commit proceeds instantly**.
+* If changes breach an explicit forbidden boundary $\to$ **Commit is halted with diagnostics**.
+
+### 2. GitHub Actions CI Enforcement
+
+Add `.github/workflows/engram-guard.yml` to validate pull requests:
+
+```yaml
+name: Engram Change Guard
+on: [pull_request]
+
+jobs:
+  change-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
+          engram contract check --base ${{ github.event.pull_request.base.sha }} --check-provenance
+```
+
+### 3. Stable Numeric Exit Codes
+
+Change Guard never forces shell scripts or CI runners to parse human prose:
+
+| Exit Code | Constant | Meaning |
+| :---: | :--- | :--- |
+| **`0`** | `PASS` | All changes match expected boundaries. |
+| **`1`** | `CONTRACT_VIOLATION` | Breached a forbidden boundary or strict unexpected change. |
+| **`2`** | `CONTRACT_NOT_FOUND` | No active Change Contract found in repository. |
+| **`3`** | `CONTRACT_INVALID` | Corrupt contract schema or unparseable JSON. |
+| **`4`** | `BASELINE_UNAVAILABLE` | Baseline commit missing from local Git history (shallow clone). |
+| **`5`** | `INTERNAL_ERROR` | System I/O error or Git subprocess exception. |
+
+### 4. Constitution Absolute Precedence & Trust Model
+
+* **Constitution Precedence:** Rules in `.engram/constitution.yaml` take absolute precedence over Change Contracts. If Constitution Rule `RULE-AUTH-LOCK` forbids `src/auth/**`, even if an agent contract declared it as `EXPECTED`, editing it produces a `BOUNDARY_VIOLATION` (Exit Code 1).
+* **PR Provenance & Ratification:** If a contract boundary is expanded after the baseline commit, CI flags `CONTRACT_MODIFIED_IN_PR` until humanly ratified (`engram contract ratify <id>`).
 
 ---
 
@@ -350,9 +418,9 @@ Engram includes a comprehensive automated test suite covering Tree-sitter parser
 cargo test
 ```
 
-All **31 tests** run and pass:
+All **45 tests** run and pass:
 ```text
-running 10 tests
+running 10 tests (Unit Tests)
 test tests::test_language_detection ... ok
 test tests::test_matches_pattern ... ok
 test tests::test_evidence_decay_and_precedence ... ok
@@ -364,6 +432,7 @@ test tests::test_tokenization_and_estimation ... ok
 test tests::test_secret_redaction ... ok
 test tests::test_tree_sitter_typescript_extraction ... ok
 
+running 6 tests (Scientific Benchmark Engine)
 test test_discovery_measured_vs_estimated_separation ... ok
 test test_synthetic_mutation_accuracy ... ok
 test test_memory_compounding_ab_control ... ok
@@ -371,8 +440,29 @@ test test_grounding_multi_entity_recall_precision ... ok
 test test_benchmark_zero_side_effects ... ok
 test test_benchmark_determinism ... ok
 
+running 14 tests (Change Guard & Enforcement Invariants)
+test test_check_no_active_contract ... ok
+test test_check_corrupt_contract_schema ... ok
+test test_check_expected_expansion_passes ... ok
+test test_check_all_expected_passes ... ok
+test test_check_boundary_violation_always_fails ... ok
+test test_check_missing_expected_changes ... ok
+test test_check_unexpected_advisory_vs_strict ... ok
+test test_check_shallow_clone_missing_baseline ... ok
+test test_constitution_precedence_over_contract ... ok
+test test_hook_uninstall_cleans_up ... ok
+test test_hook_installation_and_idempotency ... ok
+test test_ci_pr_base_comparison ... ok
+test test_human_reconciliation_v1_to_v2 ... ok
+test test_contract_modified_in_pr_requires_ratification ... ok
+
+running 1 test (Lifecycle Integration)
 test test_end_to_end_lifecycle ... ok
+
+running 1 test (MCP Protocol Handshake)
 test test_mcp_protocol_handshake_and_tools ... ok
+
+running 6 tests (Phase 2 Intelligence)
 test test_setup_targets_list ... ok
 test test_setup_dry_run_does_not_modify_disk ... ok
 test test_package_json_and_lockfile_intelligence ... ok
@@ -380,6 +470,7 @@ test test_setup_safe_merge_preserves_unrelated_servers ... ok
 test test_constitution_rules_and_overrides ... ok
 test test_graph_traversal_and_reverse_dependencies ... ok
 
+running 7 tests (Phase 3 Flywheel & Dogfooding)
 test test_git_cochange_noise_filters_and_signal_formatting ... ok
 test test_cache_deletion_and_durable_memory_survival ... ok
 test test_rust_tree_sitter_ast_extraction ... ok

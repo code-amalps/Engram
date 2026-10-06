@@ -14,7 +14,7 @@ use crate::compiler::context;
 use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
 use crate::memory::record_decision;
 
-const BENCHMARK_VERSION: &str = "0.1.0";
+const BENCHMARK_VERSION: &str = "0.3.0";
 const DATASET_VERSION: &str = "2026.10-corp-1";
 const ENGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 

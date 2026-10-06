@@ -227,7 +227,10 @@ fn init(root: &Path) -> Result<Value> {
         ),
         (
             "config.yaml",
-            "schema_version: 1\nanalyzer_version: engram-0.1.0\nlanguages: [typescript, javascript, python, csharp]\ndefault_token_budget: 1200\nhistorical_half_life_commits: 200\n",
+            &format!(
+                "schema_version: 1\nanalyzer_version: engram-{}\nlanguages: [typescript, javascript, python, csharp, rust]\ndefault_token_budget: 1200\nhistorical_half_life_commits: 200\n",
+                env!("CARGO_PKG_VERSION")
+            ),
         ),
     ];
     for (name, text) in defaults {
@@ -484,9 +487,9 @@ mod tests {
 
     #[test]
     fn test_analysis_key_composition() {
-        let key1 = analysis_key("hash_a", "0.1.0", "ts-0.25", "python", "cfg_1");
-        let key2 = analysis_key("hash_a", "0.1.0", "ts-0.25", "python", "cfg_1");
-        let key3 = analysis_key("hash_b", "0.1.0", "ts-0.25", "python", "cfg_1");
+        let key1 = analysis_key("hash_a", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
+        let key2 = analysis_key("hash_a", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
+        let key3 = analysis_key("hash_b", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
     }

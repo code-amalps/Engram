@@ -1,6 +1,6 @@
 [package]
 name = "engram"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Local engineering memory and change intelligence for coding agents"
 license = "AGPL-3.0-or-later"

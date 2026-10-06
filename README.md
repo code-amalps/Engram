@@ -86,9 +86,40 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 
 ---
 
-## 🚀 Quickstart: Install in 60 Seconds
+## 🚀 Quickstart: Install in Seconds
 
-### Option A: Build from Source (Requires Rust)
+### Option A: 1-Click Install (Recommended)
+
+No compiler, Rust, or Node.js required. Downloads the self-contained standalone binary, verifies SHA256 integrity, and configures `PATH`:
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/code-amalps/Engram/main/install.ps1 | iex
+```
+
+**macOS & Linux (Bash / Sh):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
+```
+
+---
+
+### Option B: Pre-Compiled Release Binaries
+
+Download standalone archives directly from [GitHub Releases](https://github.com/code-amalps/Engram/releases/latest):
+
+| Platform | Architecture | Target Triple | Format |
+| :--- | :--- | :--- | :--- |
+| **Windows** | 64-bit Intel / AMD | `x86_64-pc-windows-msvc` | `.zip` |
+| **Linux** | 64-bit (musl static) | `x86_64-unknown-linux-musl` | `.tar.gz` |
+| **macOS** | Apple Silicon (M1/M2/M3/M4) | `aarch64-apple-darwin` | `.tar.gz` |
+| **macOS** | Intel | `x86_64-apple-darwin` | `.tar.gz` |
+
+> 🔒 Every release includes a cryptographically verified `SHA256SUMS` manifest.
+
+---
+
+### Option C: Build from Source (Requires Rust)
 
 ```bash
 git clone https://github.com/code-amalps/Engram.git
@@ -99,13 +130,6 @@ cargo build --release
 The compiled standalone binary will be at:
 * **Windows:** `target/release/engram.exe`
 * **macOS / Linux:** `target/release/engram`
-
-Copy `engram` to a directory on your system `PATH` (e.g. `~/.cargo/bin` or `C:\Windows\System32`), or alias it:
-
-```powershell
-# In PowerShell:
-Set-Alias engram "C:\path\to\Engram\target\release\engram.exe"
-```
 
 ---
 

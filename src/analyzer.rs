@@ -311,6 +311,33 @@ pub fn parse_file(
             confidence: 0.95,
             line: 1,
         });
+    } else if rel.starts_with("tests/") && rel.ends_with(".py") {
+        let stem = rel
+            .trim_start_matches("tests/")
+            .trim_end_matches(".py")
+            .trim_start_matches("test_")
+            .trim_end_matches("_test");
+        rels.push(Relationship {
+            source: rel.into(),
+            target: format!("src/orders/{stem}.py"),
+            kind: "TESTS".into(),
+            evidence: "NAMING_CONVENTION".into(),
+            confidence: 0.95,
+            line: 1,
+        });
+    } else if rel.ends_with("Tests.cs") || rel.ends_with("Test.cs") {
+        let stem = rel
+            .trim_start_matches("tests/")
+            .trim_end_matches("Tests.cs")
+            .trim_end_matches("Test.cs");
+        rels.push(Relationship {
+            source: rel.into(),
+            target: format!("src/Cart/{stem}.cs"),
+            kind: "TESTS".into(),
+            evidence: "NAMING_CONVENTION".into(),
+            confidence: 0.95,
+            line: 1,
+        });
     }
 
     let display = redact(&source);

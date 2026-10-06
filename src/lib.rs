@@ -1,6 +1,7 @@
 //! Engram: Local engineering memory and change intelligence for AI coding agents.
 
 pub mod analyzer;
+pub mod bench;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;

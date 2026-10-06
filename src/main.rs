@@ -1,4 +1,5 @@
 pub mod analyzer;
+pub mod bench;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;
@@ -124,6 +125,11 @@ enum CommandLine {
     },
     /// Start the Model Context Protocol (MCP) server over stdio
     Mcp,
+    /// Run scientific empirical benchmarks evaluating discovery, grounding, contracts, and memory lift
+    Bench {
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -439,6 +445,15 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Mcp) => mcp(root)?,
+        Some(CommandLine::Bench { verbose }) => {
+            let rev = storage::revision(root);
+            let results = bench::run_benchmark_suite(&rev)?;
+            if force_json {
+                print_json(results)?;
+            } else {
+                print!("{}", bench::format_human_benchmark_report(&results, verbose));
+            }
+        }
     }
     Ok(())
 }

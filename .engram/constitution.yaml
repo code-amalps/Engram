@@ -1,0 +1,8 @@
+architecture:
+  pattern: unspecified
+rules: []
+conventions: {}
+testing:
+  service_changes_require_unit_tests: false
+security:
+  authentication_required: []

@@ -1,0 +1,11 @@
+# One pattern per line. Prefix with a category to document why it is ignored.
+SECRET:.env
+SECRET:.env.*
+SECRET:*.pem
+SECRET:*.key
+VENDORED:node_modules/
+BUILD:dist/
+BUILD:build/
+BUILD:coverage/
+BUILD:.git/
+GENERATED:*.min.js

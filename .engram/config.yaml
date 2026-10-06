@@ -1,0 +1,9 @@
+schema_version: 1
+analyzer_version: engram-0.1.0
+languages:
+  - typescript
+  - javascript
+  - python
+  - csharp
+default_token_budget: 1200
+historical_half_life_commits: 200

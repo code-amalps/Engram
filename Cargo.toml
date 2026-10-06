@@ -3,7 +3,7 @@ name = "engram"
 version = "0.1.0"
 edition = "2024"
 description = "Local engineering memory and change intelligence for coding agents"
-license = "PolyForm-Noncommercial-1.0.0"
+license = "AGPL-3.0-or-later"
 
 [[bin]]
 name = "engram"

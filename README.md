@@ -2,7 +2,7 @@
 
 > **Persistent engineering memory and change intelligence for AI coding agents.**
 
-[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built_with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![MCP Ready](https://img.shields.io/badge/Protocol-MCP-purple.svg)](https://modelcontextprotocol.io/)
 [![Tests](https://img.shields.io/badge/Tests-11%20Passed-brightgreen.svg)]()
@@ -264,11 +264,18 @@ test test_mcp_protocol_handshake_and_tools ... ok
 
 ## 📜 Copyright & License
 
-Copyright (c) 2026 **Amal P S**.
+Copyright (C) 2026 **Amal P S**.
 
-This project is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+This software is licensed under the **[GNU Affero General Public License v3.0 (AGPL-3.0-or-later)](LICENSE)**.
 
-* **Free for Individuals & Noncommercial Use:** You are completely free to inspect, download, modify, use, and run Engram for personal projects, open-source work, education, and non-commercial research without paying any fee.
-* **Commercial Use:** Use of Engram by commercial entities or for activities primarily intended for commercial advantage or monetary compensation requires a separate commercial license.
+### Freedom for Developers & Open Source
+* **100% Free & Open Source:** Developers, hobbyists, students, and open-source contributors are completely free to inspect, download, use, modify, and build upon Engram without paying any fee.
+* **Network & Copyleft Protection:** Any modified versions hosted as a network service or redistributed must remain free and open-source under the AGPLv3.
+* **Attribution Required:** Under Sections 5(d) and 7 of the AGPLv3, all author attributions and copyright notices for **Amal P S** must remain intact in all copies, distributions, and interactive interfaces.
 
-For commercial licensing inquiries, please contact the author via [GitHub](https://github.com/code-amalps).
+### Commercial & Enterprise Licensing
+If your organization wishes to use, embed, or distribute Engram under proprietary terms without being bound by the copyleft provisions of the AGPLv3, a separate commercial license is required.
+
+For enterprise inquiries, custom deployments, or commercial licensing:
+* **Author:** Amal P S
+* **GitHub:** [https://github.com/code-amalps](https://github.com/code-amalps)

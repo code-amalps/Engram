@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/engram-logo.png" width="180" height="180" alt="Engram Logo" style="border-radius: 28px;" />
+  <img src="assets/engram-banner.png" alt="Engram — Engineering memory for AI agents" width="720" />
 </p>
-
-<h1 align="center">Engram</h1>
 
 <p align="center">
   <strong>Persistent engineering memory and change intelligence for AI coding agents.</strong>

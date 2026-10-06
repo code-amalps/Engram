@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::compiler::context;
-use crate::guard::{analyze_task, decision, impact, make_contract, update_memory, validate};
+use crate::guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -41,14 +41,20 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
         "engram_validate_change" => {
             json_result(validate(root, args["task_id"].as_str().unwrap_or(""))?)
         }
-        "engram_record_decision" => json_result(decision(
+        "engram_record_decision" => json_result(record_decision(
             root,
             args["task_id"].as_str().unwrap_or(""),
             args["decision"].as_str().unwrap_or(""),
             args["reason"].as_str().unwrap_or(""),
+            args["rule_id"].as_str(),
+            args["violation_id"].as_str(),
         )?),
         "engram_update_memory" => {
             json_result(update_memory(root, args["task_id"].as_str().unwrap_or(""))?)
+        }
+        "engram_get_ecosystem" => {
+            let report = crate::manifest::detect_ecosystem(root)?;
+            json_result(serde_json::to_value(report)?)
         }
         _ => return Err(anyhow!("Unknown tool: {name}")),
     })
@@ -167,6 +173,14 @@ pub fn mcp(root: &Path) -> Result<()> {
                                 "task_id": { "type": "string" }
                             },
                             "required": ["task_id"]
+                        }
+                    },
+                    {
+                        "name": "engram_get_ecosystem",
+                        "description": "Discover declared and resolved packages, frameworks, and scripts in the project.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
                         }
                     }
                 ]

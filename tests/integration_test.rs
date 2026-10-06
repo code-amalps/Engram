@@ -44,6 +44,7 @@ fn test_end_to_end_lifecycle() {
 
     // 2. Test Repository Analysis
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_engram"))
+        .arg("--json")
         .arg("-C")
         .arg(&repo)
         .arg("analyze")
@@ -56,6 +57,7 @@ fn test_end_to_end_lifecycle() {
 
     // 3. Test Context Compilation
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_engram"))
+        .arg("--json")
         .arg("-C")
         .arg(&repo)
         .arg("context")

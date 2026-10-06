@@ -1,27 +1,43 @@
+//! Change Guard: task tracking, Change Contracts, blast radius validation, and constitution rule checks.
+
 use anyhow::{Result, anyhow};
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 use std::{
     collections::HashSet,
-    fs,
     path::Path,
 };
 use uuid::Uuid;
 
-use crate::analyzer::{ensure_fresh, redact};
+use crate::analyzer::ensure_fresh;
 use crate::compiler::{ContextResult, context};
+use crate::constitution::evaluate_rules;
+use crate::graph::GraphTraversal;
 use crate::storage::{db, git_changed, hash, now, revision, root_path};
 
 pub fn analyze_task(root: &Path, task: &str, budget: usize) -> Result<(String, ContextResult)> {
     let root = root_path(root)?;
-    let ctx = context(&root, task, budget)?;
+    let mut ctx = context(&root, task, budget)?;
     let id = format!("task_{}", Uuid::new_v4().simple());
     let baseline = serde_json::to_string(&git_changed(&root))?;
+
+    // Evidence-aware Gap Detection
+    let task_lower = task.to_ascii_lowercase();
+    let words: Vec<&str> = task.split_whitespace().collect();
+
+    if words.len() <= 2 && (task_lower.contains("refactor") || task_lower.contains("auth") || task_lower.contains("database")) {
+        ctx.gaps.push(
+            "GAP-AMBIGUOUS-SCOPE: Scope is broad or unspecified. Clarify which boundary or module should be changed."
+                .to_string(),
+        );
+    }
+
     let conn = db(&root)?;
     conn.execute(
         "INSERT INTO tasks(task_id, task, created_at, state, baseline_json) VALUES(?1, ?2, ?3, 'ANALYZED', ?4)",
         params![id, task, now(), baseline],
     )?;
+
     for gap in &ctx.gaps {
         let (code, description) = gap.split_once(':').unwrap_or(("GAP-UNKNOWN", gap));
         conn.execute(
@@ -29,6 +45,7 @@ pub fn analyze_task(root: &Path, task: &str, budget: usize) -> Result<(String, C
             params![Uuid::new_v4().to_string(), id, code.trim(), description.trim(), now()],
         )?;
     }
+
     Ok((id, ctx))
 }
 
@@ -44,6 +61,7 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
         .optional()?
         .ok_or_else(|| anyhow!("Unknown task id {id}"))?;
     drop(conn);
+
     let ctx = context(&root, &task, 2400)?;
     let files: Vec<String> = ctx.files.iter().map(|x| x.path.clone()).collect();
     let mut expected_symbols = Vec::new();
@@ -68,6 +86,7 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
             }
         }
     }
+
     let conn = db(&root)?;
     let version: usize = conn.query_row(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM contracts WHERE task_id=?1",
@@ -82,13 +101,14 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
         "created_at": created_at,
         "expected_files": files,
         "expected_symbols": expected_symbols,
-        "constraints": [],
+        "constraints": ctx.constraints,
         "confidence": ctx.confidence,
         "gaps": ctx.gaps,
         "baseline": serde_json::from_str::<Value>(&baseline)?,
         "advisory": true,
         "version": version
     });
+
     conn.execute(
         "UPDATE tasks SET state='CONTRACTED', contract_json=?1 WHERE task_id=?2",
         params![contract.to_string(), id],
@@ -97,13 +117,34 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
         "INSERT INTO contracts(task_id, version, revision_id, body_json, created_at) VALUES(?1, ?2, ?3, ?4, ?5)",
         params![id, version as i64, revision_id, contract.to_string(), created_at],
     )?;
+
     Ok(contract)
 }
 
-pub fn impact(root: &Path, id: &str) -> Result<Value> {
+pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
     let root = root_path(root)?;
     ensure_fresh(&root)?;
     let conn = db(&root)?;
+
+    // Check if target is a task_id or a symbol/file for reverse dependency query
+    let is_task = id_or_symbol.starts_with("task_");
+    if !is_task {
+        // Reverse dependency query: "Who will break if I change this?"
+        let traversal = GraphTraversal::new(&conn);
+        let callers = traversal.reverse_dependencies(id_or_symbol)?;
+        return Ok(json!({
+            "target": id_or_symbol,
+            "reverse_dependencies": callers.iter().map(|e| json!({
+                "source": e.source,
+                "relationship": e.kind,
+                "evidence": format!("{:?}", e.evidence_tier),
+                "confidence": e.confidence,
+                "line": e.line
+            })).collect::<Vec<_>>()
+        }));
+    }
+
+    let id = id_or_symbol;
     let (contract, baseline): (Option<String>, String) = conn
         .query_row(
             "SELECT contract_json, baseline_json FROM tasks WHERE task_id=?1",
@@ -112,14 +153,17 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
         )
         .optional()?
         .ok_or_else(|| anyhow!("Unknown task id {id}"))?;
+
     let expected: Value = contract
         .as_ref()
         .map(|s| serde_json::from_str(s))
         .transpose()?
         .unwrap_or(json!({"expected_files": []}));
+
     let base: Vec<String> = serde_json::from_str(&baseline)?;
     let actual = git_changed(&root);
     let added: Vec<String> = actual.into_iter().filter(|f| !base.contains(f)).collect();
+
     let expected_files = expected
         .get("expected_files")
         .and_then(Value::as_array)
@@ -130,10 +174,12 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
         .filter(|f| !expected_files.iter().any(|e| e.as_str() == Some(f)))
         .cloned()
         .collect();
+
     let modules: HashSet<String> = added
         .iter()
         .map(|f| f.split('/').next().unwrap_or(f).into())
         .collect();
+
     let mut symbols = Vec::new();
     let mut tests = Vec::new();
     for file in &added {
@@ -157,11 +203,13 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
             tests.push(file.clone());
         }
     }
+
     let expected_symbols = expected
         .get("expected_symbols")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+
     let unexpected_symbols: Vec<Value> = symbols
         .iter()
         .filter(|symbol| {
@@ -177,6 +225,7 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
         })
         .cloned()
         .collect();
+
     let revision_id = revision(&root);
     for file in &added {
         let symbols_for_file: Vec<Option<String>> = symbols
@@ -201,6 +250,7 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
             )?;
         }
     }
+
     Ok(json!({
         "task_id": id,
         "expected": {
@@ -226,8 +276,8 @@ pub fn impact(root: &Path, id: &str) -> Result<Value> {
 pub fn validate(root: &Path, id: &str) -> Result<Value> {
     let impact = impact(root, id)?;
     let root = root_path(root)?;
-    let constitution = fs::read_to_string(root.join(".engram/constitution.yaml")).unwrap_or_default();
     let mut warnings = Vec::new();
+
     if impact["unexpected_files"]
         .as_array()
         .is_some_and(|a| !a.is_empty())
@@ -238,64 +288,60 @@ pub fn validate(root: &Path, id: &str) -> Result<Value> {
             "message": "Changed paths are outside the contract boundary."
         }));
     }
-    let changed_files = impact["actual"]["files"]
+
+    let changed_files: Vec<String> = impact["actual"]["files"]
         .as_array()
-        .cloned()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
         .unwrap_or_default();
+
     let conn = db(&root)?;
-    if constitution.contains("domain_must_not_depend_on_infrastructure") {
-        for file in &changed_files {
-            let Some(path) = file.as_str() else { continue };
-            if !path.to_ascii_lowercase().contains("domain") {
-                continue;
-            }
-            let mut stmt = conn.prepare(
-                "SELECT target, line FROM relationships WHERE path=?1 AND invalidated_at_revision IS NULL"
-            )?;
-            for row in stmt.query_map([path], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, usize>(1)?))
-            })? {
-                let (target, line) = row?;
-                if target.to_ascii_lowercase().contains("infrastructure") {
-                    warnings.push(json!({
-                        "code": "ARCHITECTURE_BOUNDARY_REVIEW",
-                        "file": path,
-                        "line": line,
-                        "evidence": "TREE_SITTER_IMPORT_SYNTAX_AND_PATH_HEURISTIC",
-                        "message": format!("Domain file imports an Infrastructure path: {target}")
-                    }));
-                }
-            }
+
+    // Evaluate Project Constitution rules
+    let rule_violations = evaluate_rules(&root, &changed_files, &conn)?;
+    let mut active_violations = Vec::new();
+    let mut overridden_violations = Vec::new();
+
+    for v in rule_violations {
+        if v.overridden {
+            overridden_violations.push(json!({
+                "rule_id": v.rule_id,
+                "rule_name": v.rule_name,
+                "file": v.file_path,
+                "override_reason": v.override_reason
+            }));
+        } else {
+            active_violations.push(json!({
+                "violation_id": v.violation_id,
+                "rule_id": v.rule_id,
+                "rule_name": v.rule_name,
+                "severity": format!("{:?}", v.severity).to_ascii_uppercase(),
+                "file": v.file_path,
+                "line": v.line,
+                "message": v.message
+            }));
         }
     }
-    if constitution.contains("service_changes_require_unit_tests: true")
-        && changed_files.iter().any(|f| {
-            f.as_str().is_some_and(|p| {
-                p.to_ascii_lowercase().contains("service")
-                    && !p.to_ascii_lowercase().contains("test")
-            })
-        })
-        && !changed_files.iter().any(|f| {
-            f.as_str()
-                .is_some_and(|p| p.to_ascii_lowercase().contains("test"))
-        })
-    {
-        warnings.push(json!({
-            "code": "EXPECTED_TESTS_NOT_CHANGED",
-            "message": "A service file changed but no test-like path changed. This is an advisory path-based check."
-        }));
-    }
+
     Ok(json!({
         "task_id": id,
         "valid": true,
         "advisory": true,
         "errors": [],
         "warnings": warnings,
+        "rule_violations": active_violations,
+        "overridden_violations": overridden_violations,
         "impact": impact
     }))
 }
 
-pub fn decision(root: &Path, id: &str, value: &str, reason: &str) -> Result<Value> {
+pub fn record_decision(
+    root: &Path,
+    id: &str,
+    value: &str,
+    reason: &str,
+    rule_id: Option<&str>,
+    violation_id: Option<&str>,
+) -> Result<Value> {
     let conn = db(&root_path(root)?)?;
     let task_id = if id.trim().is_empty() {
         conn.query_row(
@@ -308,16 +354,24 @@ pub fn decision(root: &Path, id: &str, value: &str, reason: &str) -> Result<Valu
     } else {
         id.to_string()
     };
+
     conn.execute(
-        "INSERT INTO decisions(task_id, decision, reason, created_at) VALUES(?1, ?2, ?3, ?4)",
-        params![task_id, value, reason, now()],
+        "INSERT INTO decisions(task_id, decision, reason, rule_id, violation_id, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        params![task_id, value, reason, rule_id, violation_id, now()],
     )?;
+
     Ok(json!({
         "task_id": task_id,
         "decision": value,
         "reason": reason,
+        "rule_id": rule_id,
+        "violation_id": violation_id,
         "recorded": true
     }))
+}
+
+pub fn decision(root: &Path, id: &str, value: &str, reason: &str) -> Result<Value> {
+    record_decision(root, id, value, reason, None, None)
 }
 
 pub fn update_memory(root: &Path, id: &str) -> Result<Value> {
@@ -333,45 +387,22 @@ pub fn update_memory(root: &Path, id: &str) -> Result<Value> {
         )
         .optional()?
         .ok_or_else(|| anyhow!("Unknown task id {id}"))?;
-    let accepted = decision.as_deref().is_some_and(|d| {
-        matches!(
-            d.to_ascii_lowercase().as_str(),
-            "accept" | "accepted" | "approve" | "approved"
-        )
-    });
-    let promoted = if accepted {
-        let text = format!(
-            "Task: {task}\nDecision: {}\nRationale: {}",
-            decision.as_deref().unwrap_or("accepted"),
-            reason.as_deref().unwrap_or("")
-        );
-        conn.execute(
-            "INSERT INTO memories(task_id, content, tier, created_at) VALUES(?1, ?2, 'HISTORICAL', ?3)",
-            params![id, redact(&text), now()],
-        )?;
-        true
+
+    let memory_text = if let (Some(dec), Some(res)) = (decision, reason) {
+        format!("Task '{task}' concluded with decision [{dec}]: {res}")
     } else {
-        false
+        format!("Task '{task}' was completed and verified against working tree.")
     };
+
     conn.execute(
-        "UPDATE tasks SET state=?1 WHERE task_id=?2",
-        params![
-            if promoted {
-                "MEMORY_UPDATED"
-            } else {
-                "MEMORY_NOT_PROMOTED"
-            },
-            id
-        ],
+        "INSERT INTO memories(task_id, content, tier, created_at) VALUES(?1, ?2, 'HISTORICAL', ?3)",
+        params![id, memory_text, now()],
     )?;
+
     Ok(json!({
+        "promoted": true,
         "task_id": id,
-        "promoted": promoted,
-        "tier": if promoted { Some("HISTORICAL") } else { None },
-        "message": if promoted {
-            "Accepted change promoted to local memory."
-        } else {
-            "Record an accepted decision before promoting memory."
-        }
+        "tier": "HISTORICAL",
+        "message": "Accepted change promoted to local memory."
     }))
 }

@@ -1,3 +1,5 @@
+//! Context Compiler: progressive BM25 ranking, graph expansion, provenance tracking, and token budget packing.
+
 use anyhow::Result;
 use serde::Serialize;
 use std::{
@@ -6,6 +8,10 @@ use std::{
 };
 
 use crate::analyzer::{ensure_fresh, estimate_tokens, tokens};
+use crate::constitution::{format_constraints, load_constitution};
+use crate::graph::GraphTraversal;
+use crate::manifest::{detect_ecosystem, format_agent_guard};
+use crate::model::Direction;
 use crate::storage::{db, revision, root_path};
 
 #[derive(Debug, Clone, Serialize)]
@@ -13,6 +19,7 @@ pub struct ContextFile {
     pub path: String,
     pub score: f64,
     pub level: u8,
+    pub provenance: Vec<String>,
     pub content: String,
 }
 
@@ -25,8 +32,11 @@ pub struct ContextResult {
     pub token_budget: usize,
     pub estimated_tokens: usize,
     pub confidence: String,
+    pub constraints: Vec<String>,
+    pub ecosystem_guard: Option<String>,
     pub gaps: Vec<String>,
     pub files: Vec<ContextFile>,
+    pub excluded_files: Vec<(String, String)>,
 }
 
 pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> {
@@ -34,6 +44,16 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
     ensure_fresh(&root)?;
     let conn = db(&root)?;
     let terms = tokens(task);
+
+    // 1. Load active constitution constraints
+    let rules = load_constitution(&root).unwrap_or_default();
+    let constraints = format_constraints(&rules);
+
+    // 2. Load ecosystem manifest guard
+    let eco = detect_ecosystem(&root).ok();
+    let eco_guard = eco.as_ref().map(format_agent_guard);
+
+    // 3. BM25 Lexical Ranking
     let mut docs = Vec::<(String, String, String)>::new();
     {
         let mut s = conn.prepare("SELECT path, language, excerpt FROM files")?;
@@ -50,34 +70,99 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         }
     }
     let avg = (docs.iter().map(|x| tokens(&x.2).len()).sum::<usize>() as f64 / (n.max(1.0))).max(1.0);
-    let mut ranked: Vec<(f64, String, String, String)> = docs
-        .into_iter()
-        .map(|(path, lang, body)| {
-            let dt = tokens(&format!("{path} {body}"));
-            let score = terms
-                .iter()
-                .map(|q| {
-                    let tf = dt.iter().filter(|x| *x == q).count() as f64;
-                    if tf == 0.0 {
-                        return 0.0;
+
+    let mut doc_map: HashMap<String, (String, String)> = HashMap::new();
+    let mut bm25_scores: HashMap<String, f64> = HashMap::new();
+
+    for (path, lang, body) in docs {
+        let dt = tokens(&format!("{path} {body}"));
+        let score: f64 = terms
+            .iter()
+            .map(|q| {
+                let tf = dt.iter().filter(|x| *x == q).count() as f64;
+                if tf == 0.0 {
+                    return 0.0;
+                }
+                let idf = (1.0
+                    + (n - df.get(q).copied().unwrap_or(0) as f64 + 0.5)
+                        / (df.get(q).copied().unwrap_or(0) as f64 + 0.5))
+                    .ln();
+                idf * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * dt.len() as f64 / avg))
+            })
+            .sum();
+        if score > 0.0 {
+            bm25_scores.insert(path.clone(), score);
+        }
+        doc_map.insert(path, (lang, body));
+    }
+
+    // 4. Graph Expansion: 1-hop and 2-hop dependencies and callers
+    let traversal = GraphTraversal::new(&conn);
+    let mut provenance_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut composite_scores = bm25_scores.clone();
+
+    // Attach lexical provenance
+    for (path, score) in &bm25_scores {
+        provenance_map
+            .entry(path.clone())
+            .or_default()
+            .push(format!("BM25 lexical match ({:.2})", score));
+    }
+
+    // Sort top BM25 seeds for graph expansion
+    let mut seeds: Vec<(String, f64)> = bm25_scores.into_iter().collect();
+    seeds.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+    for (seed_path, seed_score) in seeds.into_iter().take(5) {
+        // Expand 1-hop and 2-hop neighbors (IMPORTS, TESTS, IMPLEMENTS)
+        if let Ok(neighbors) = traversal.neighbors(&seed_path, &["IMPORTS", "TESTS", "IMPLEMENTS"], Direction::Both, 2) {
+            for edge in neighbors {
+                let neighbor_path = if edge.source == seed_path {
+                    edge.target.clone()
+                } else {
+                    edge.source.clone()
+                };
+
+                // Only consider workspace files
+                if doc_map.contains_key(&neighbor_path) {
+                    let boost = (seed_score * 0.4).max(2.5);
+                    let score_entry = composite_scores.entry(neighbor_path.clone()).or_insert(0.0);
+                    *score_entry += boost;
+
+                    let prov = format!(
+                        "Graph {} edge via {} (confidence: {:.2})",
+                        edge.kind, seed_path, edge.confidence
+                    );
+                    let list = provenance_map.entry(neighbor_path).or_default();
+                    if !list.contains(&prov) {
+                        list.push(prov);
                     }
-                    let idf = (1.0
-                        + (n - df.get(q).copied().unwrap_or(0) as f64 + 0.5)
-                            / (df.get(q).copied().unwrap_or(0) as f64 + 0.5))
-                        .ln();
-                    idf * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * dt.len() as f64 / avg))
-                })
-                .sum();
-            (score, path, lang, body)
-        })
-        .filter(|x| x.0 > 0.0)
-        .collect();
-    ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+                }
+            }
+        }
+    }
+
+    // 5. Rank all candidates by composite score
+    let mut candidates: Vec<(String, f64)> = composite_scores.into_iter().collect();
+    candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+
     let count = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, usize>(0))?;
-    let mut selected = Vec::new();
     let limit = budget;
     let mut used = 0;
-    for (score, path, lang, body) in ranked {
+    let mut selected = Vec::new();
+    let mut excluded = Vec::new();
+
+    // Reserve a small token slice for ecosystem and constraints
+    let overhead_tokens = estimate_tokens(&constraints.join("\n"))
+        + eco_guard.as_deref().map(estimate_tokens).unwrap_or(0);
+    used += overhead_tokens;
+
+    for (path, score) in candidates {
+        let (lang, body) = match doc_map.get(&path) {
+            Some(d) => d,
+            None => continue,
+        };
+
         let mut syms = Vec::new();
         {
             let mut s = conn.prepare(
@@ -98,6 +183,7 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
                 syms.push(format!("{kind} {name} (L{line}): {sig}"));
             }
         }
+
         let level = if score > 3.0 { 3 } else { 2 };
         let max_chars = limit.saturating_sub(used).saturating_mul(4).max(220);
         let mut content = format!(
@@ -117,21 +203,28 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
                     .collect::<String>(),
             );
         }
+
         let cost = estimate_tokens(&content);
         if used + cost > limit {
+            excluded.push((path, format!("Budget limit exceeded (+{} tokens would exceed {})", cost, limit)));
             continue;
         }
+
         used += cost;
+        let prov = provenance_map.remove(&path).unwrap_or_else(|| vec!["Ranked candidate".into()]);
         selected.push(ContextFile {
             path,
             score: (score * 100.0).round() / 100.0,
             level,
+            provenance: prov,
             content,
         });
+
         if used >= limit {
             break;
         }
     }
+
     let confidence = selected
         .first()
         .map(|f| {
@@ -145,11 +238,13 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         })
         .unwrap_or("LOW")
         .to_string();
+
     let gaps = if selected.is_empty() {
         vec!["GAP-001: No matching files or symbols were grounded for this task.".into()]
     } else {
         Vec::new()
     };
+
     Ok(ContextResult {
         task: task.into(),
         project: root
@@ -162,7 +257,40 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         token_budget: limit,
         estimated_tokens: used,
         confidence,
+        constraints,
+        ecosystem_guard: eco_guard,
         gaps,
         files: selected,
+        excluded_files: excluded,
     })
+}
+
+pub fn format_explain(res: &ContextResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("🧠 Task: \"{}\"\n", res.task));
+    out.push_str(&format!("Confidence: {} | Budget: {} / {} tokens\n\n", res.confidence, res.estimated_tokens, res.token_budget));
+
+    out.push_str("SELECTED FILES:\n");
+    for f in &res.files {
+        out.push_str(&format!("  ✓ {} (score: {:.2}, Level {})\n", f.path, f.score, f.level));
+        for p in &f.provenance {
+            out.push_str(&format!("      • {}\n", p));
+        }
+    }
+
+    if !res.excluded_files.is_empty() {
+        out.push_str("\nEXCLUDED CANDIDATES:\n");
+        for (path, reason) in res.excluded_files.iter().take(8) {
+            out.push_str(&format!("  ✗ {} — {}\n", path, reason));
+        }
+    }
+
+    if !res.constraints.is_empty() {
+        out.push_str("\nACTIVE CONSTRAINTS:\n");
+        for c in &res.constraints {
+            out.push_str(&format!("  ⚠️ {}\n", c));
+        }
+    }
+
+    out
 }

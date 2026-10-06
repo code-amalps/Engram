@@ -5,7 +5,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built_with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![MCP Ready](https://img.shields.io/badge/Protocol-MCP-purple.svg)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/Tests-11%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-17%20Passed-brightgreen.svg)]()
 
 Engram is a blazingly fast, standalone tool written in **Rust** that acts as an **external brain and safety guard** for AI coding assistants (like Cursor, Claude, Windsurf, and Copilot). 
 
@@ -166,49 +166,76 @@ engram update-memory task_0df9d0952aa64bdf
 
 ---
 
-## 🔌 Connecting to AI Agents via MCP
+---
 
-Engram includes a high-performance **Model Context Protocol (MCP)** server over `stdio`. It connects directly to Cursor, Claude Desktop, Claude Code, and Windsurf.
+## ⚡ 1-Click Verified Agent Setup (MCP)
 
-### 1. Cursor (`.cursor/mcp.json`)
-Add this to your project's `.cursor/mcp.json` or your global Cursor settings:
+No more manually editing JSON files! Engram automatically configures MCP integrations while safely preserving all third-party servers:
 
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "engram",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### 2. Claude Desktop (`claude_desktop_config.json`)
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "engram",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### 3. Claude Code CLI
 ```bash
-claude mcp add engram engram mcp
+# List supported integrations
+engram setup --list
+
+# Auto-configure Cursor (.cursor/mcp.json)
+engram setup cursor
+
+# Auto-configure Claude Desktop
+engram setup claude
+
+# Auto-configure Windsurf
+engram setup windsurf
+
+# Check configuration & live MCP health
+engram setup cursor --status
 ```
 
-### Native Tools Provided to Agents:
-* `engram_get_context(task, token_budget)`: Fetches grounded symbols and file excerpts.
-* `engram_analyze_task(task, token_budget)`: Grounds a task and logs initial state.
-* `engram_create_change_contract(task_id)`: Generates the expected change boundary.
-* `engram_get_impact(task_id)`: Measures live diff against contract.
-* `engram_validate_change(task_id)`: Advisory check for unexpected files and architectural drift.
-* `engram_record_decision(task_id, decision, reason)`: Records developer rationale.
-* `engram_update_memory(task_id)`: Promotes accepted outcomes into durable memory.
+---
+
+## 📦 Package Ecosystem & Reverse Dependency Intelligence
+
+```bash
+# Inspect declared vs resolved versions and runnable scripts:
+engram ecosystem
+
+# Reverse dependency query: "Who will break if I change this file/symbol?"
+engram impact projects/src/app/settings.actions.ts
+
+# Context compilation with full provenance reasons:
+engram context "settings effect" --explain
+```
+
+---
+
+## 🏛️ Project Constitution & Team Rules
+
+Define architectural constraints in `.engram/constitution.yaml`:
+
+```yaml
+schema_version: 1
+architecture:
+  pattern: modular-clean
+rules:
+  - id: RULE-001
+    name: "No direct fetch in components"
+    type: PATTERN
+    severity: WARNING
+    target_files: "**/*.component.ts"
+    pattern: "fetch\\("
+    description: "Use dedicated ApiService or state effects instead of direct window.fetch."
+  - id: RULE-002
+    name: "Domain boundary isolation"
+    type: DEPENDENCY
+    severity: ERROR
+    source: "src/domain/**"
+    forbidden: "src/infrastructure/**"
+```
+
+* **Advisory Checks:** Run `engram validate <task_id>` to check working tree changes against active rules.
+* **Auditable Overrides:** Record an explicit override with rationale:
+  ```bash
+  engram decision <task_id> OVERRIDE "Migration exception approved by team lead" --rule-id RULE-001
+  ```
+  Overrides are permanently preserved in Engineering Memory.
 
 ---
 
@@ -217,15 +244,17 @@ claude mcp add engram engram mcp
 | Command | Description | Example |
 | :--- | :--- | :--- |
 | `engram init` | Initializes `.engram/` config & constitution | `engram init` |
-| `engram .` or `engram analyze` | Analyzes repository AST & updates SQLite index | `engram .` |
-| `engram context "<task>"` | Compiles context under a token budget | `engram context "add login" --token-budget 1000` |
+| `engram .` or `engram analyze` | Analyzes repository AST & updates SQLite WAL | `engram .` |
+| `engram setup <client>` | 1-Click MCP setup (Cursor, Claude, Windsurf) | `engram setup cursor` |
+| `engram ecosystem` | Discovers frameworks, lockfile versions & scripts | `engram ecosystem` |
+| `engram context "<task>"` | Compiles context under token budget (`--explain`) | `engram context "add login" --explain` |
 | `engram analyze-task "<task>"` | Starts a tracked task and returns a `task_id` | `engram analyze-task "refactor auth"` |
 | `engram contract <task_id>` | Generates pre-edit Change Contract | `engram contract task_abc123` |
-| `engram impact <task_id>` | Compares live working tree against baseline | `engram impact task_abc123` |
-| `engram validate <task_id>` | Checks for scope expansion and rule drift | `engram validate task_abc123` |
-| `engram decision <id> <dec> <msg>`| Records approval/override rationale | `engram decision task_abc123 accepted "LGTM"` |
+| `engram impact <id_or_file>` | Compares live diff or queries reverse dependencies | `engram impact OrderService` |
+| `engram validate <task_id>` | Advisory checks for scope expansion & rules | `engram validate task_abc123` |
+| `engram decision <id> <dec> <msg>`| Records approval/override rationale | `engram decision task_1 OVERRIDE "Reason"` |
 | `engram update-memory <task_id>` | Promotes change to durable historical memory | `engram update-memory task_abc123` |
-| `engram mcp` | Starts background JSON-RPC MCP server | `engram mcp` |
+| `engram mcp` | Starts background JSON-RPC 2.0 MCP server | `engram mcp` |
 
 ---
 
@@ -239,13 +268,13 @@ claude mcp add engram engram mcp
 
 ## 🧪 Testing
 
-Engram comes with a comprehensive automated test suite covering Tree-sitter parsers, token budgeting, SQLite bi-temporal versioning, and MCP stdio protocol handshakes:
+Engram includes a comprehensive automated test suite covering Tree-sitter parsers, token budgeting, SQLite WAL bi-temporal storage, graph traversal, and MCP stdio protocols:
 
 ```bash
 cargo test
 ```
 
-All 11 tests run and pass in ~2 seconds:
+All **17 tests** run and pass in ~3 seconds:
 ```text
 test tests::test_language_detection ... ok
 test tests::test_analysis_key_composition ... ok
@@ -258,6 +287,12 @@ test tests::test_tree_sitter_csharp_extraction ... ok
 test tests::test_tree_sitter_typescript_extraction ... ok
 test test_end_to_end_lifecycle ... ok
 test test_mcp_protocol_handshake_and_tools ... ok
+test test_setup_targets_list ... ok
+test test_setup_dry_run_does_not_modify_disk ... ok
+test test_package_json_and_lockfile_intelligence ... ok
+test test_constitution_rules_and_overrides ... ok
+test test_setup_safe_merge_preserves_unrelated_servers ... ok
+test test_graph_traversal_and_reverse_dependencies ... ok
 ```
 
 ---

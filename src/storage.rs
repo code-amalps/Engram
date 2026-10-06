@@ -22,7 +22,12 @@ pub fn root_path(root: &Path) -> Result<PathBuf> {
 }
 
 pub fn project_id(root: &Path) -> String {
-    hash(root.to_string_lossy().to_lowercase().as_bytes())[..24].to_string()
+    let clean = root
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_lowercase()
+        .replace('\\', "/");
+    hash(clean.as_bytes())[..24].to_string()
 }
 
 pub fn dirs_fallback() -> PathBuf {
@@ -33,6 +38,7 @@ pub fn dirs_fallback() -> PathBuf {
 }
 
 pub fn cache_dir(root: &Path) -> Result<PathBuf> {
+    let root = root_path(root)?;
     let base = if cfg!(windows) {
         env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
@@ -45,7 +51,7 @@ pub fn cache_dir(root: &Path) -> Result<PathBuf> {
             .unwrap_or_else(|| dirs_fallback().join(".cache"))
             .join("engram")
     };
-    Ok(base.join(project_id(root)))
+    Ok(base.join(project_id(&root)))
 }
 
 pub fn db(root: &Path) -> Result<Connection> {
@@ -182,6 +188,8 @@ pub fn db(root: &Path) -> Result<Connection> {
             task_id TEXT NOT NULL,
             decision TEXT NOT NULL,
             reason TEXT NOT NULL,
+            rule_id TEXT,
+            violation_id TEXT,
             created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS memories(
@@ -191,6 +199,17 @@ pub fn db(root: &Path) -> Result<Connection> {
             tier TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS project_ecosystem(
+            name TEXT NOT NULL,
+            ecosystem TEXT NOT NULL,
+            declared_version TEXT NOT NULL,
+            resolved_version TEXT,
+            is_dev INTEGER NOT NULL DEFAULT 0,
+            source_manifest TEXT NOT NULL,
+            PRIMARY KEY(name, ecosystem)
+        );
+        CREATE INDEX IF NOT EXISTS relationships_src ON relationships(source_id);
+        CREATE INDEX IF NOT EXISTS relationships_tgt ON relationships(target);
         CREATE TABLE IF NOT EXISTS metadata(
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -200,6 +219,8 @@ pub fn db(root: &Path) -> Result<Connection> {
     for (table, column, definition) in [
         ("files", "analysis_key", "TEXT NOT NULL DEFAULT ''"),
         ("revisions", "analysis_key", "TEXT NOT NULL DEFAULT ''"),
+        ("decisions", "rule_id", "TEXT"),
+        ("decisions", "violation_id", "TEXT"),
     ] {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let columns: Vec<String> = stmt

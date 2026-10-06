@@ -114,6 +114,67 @@ pub fn recognized(kind: &str, lang: &str) -> Option<&'static str> {
     }
 }
 
+pub fn extract_import_specifier(text: &str, lang: &str) -> String {
+    if lang == "typescript" || lang == "javascript" {
+        if let Some(pos) = text.find("from") {
+            let after = text[pos + 4..].trim();
+            return after.trim_matches(|c| c == '\'' || c == '"' || c == ';' || c == ' ').to_string();
+        }
+        if let Some(pos) = text.find("require(") {
+            let after = text[pos + 8..].trim();
+            if let Some(end) = after.find(')') {
+                return after[..end].trim_matches(|c| c == '\'' || c == '"' || c == ' ').to_string();
+            }
+        }
+    } else if lang == "python" {
+        if let Some(pos) = text.find("from ") {
+            let after = text[pos + 5..].trim();
+            if let Some(space) = after.find(' ') {
+                return after[..space].to_string();
+            }
+        } else if let Some(pos) = text.find("import ") {
+            let after = text[pos + 7..].trim();
+            if let Some(space) = after.find(' ') {
+                return after[..space].to_string();
+            }
+            return after.to_string();
+        }
+    } else if lang == "csharp" && text.starts_with("using ") {
+        return text[6..].trim().trim_matches(';').to_string();
+    }
+    text.chars().take(120).collect()
+}
+
+pub fn normalize_rel_path(path: &Path) -> String {
+    let mut components = Vec::new();
+    for c in path.components() {
+        match c {
+            std::path::Component::Normal(p) => components.push(p.to_string_lossy().to_string()),
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::CurDir => {}
+            _ => {}
+        }
+    }
+    components.join("/")
+}
+
+pub fn resolve_import_path(current_file: &str, spec: &str) -> String {
+    if spec.starts_with('.') {
+        let parent = Path::new(current_file).parent().unwrap_or(Path::new(""));
+        let joined = parent.join(spec);
+        let normalized = normalize_rel_path(&joined);
+        if !normalized.contains('.') {
+            format!("{normalized}.ts")
+        } else {
+            normalized
+        }
+    } else {
+        spec.to_string()
+    }
+}
+
 pub fn visit(
     n: Node,
     src: &[u8],
@@ -151,11 +212,13 @@ pub fn visit(
         });
     }
     if n.kind().contains("import") || n.kind() == "using_directive" {
-        let target = node_text(n, src);
-        if !target.is_empty() {
+        let raw = node_text(n, src);
+        let spec = extract_import_specifier(&raw, lang);
+        if !spec.is_empty() {
+            let target = resolve_import_path(path, &spec);
             rels.push(Relationship {
-                source: String::new(),
-                target: target.chars().take(500).collect(),
+                source: path.into(),
+                target,
                 kind: "IMPORTS".into(),
                 evidence: "TREE_SITTER_IMPORT_SYNTAX".into(),
                 confidence: 0.99,
@@ -195,6 +258,32 @@ pub fn parse_file(
         &mut rels,
         rev,
     );
+
+    // Detect test-to-target relationship
+    if rel.ends_with(".spec.ts") {
+        if let Some(t) = rel.strip_suffix(".spec.ts").map(|p| format!("{p}.ts")) {
+            rels.push(Relationship {
+                source: rel.into(),
+                target: t,
+                kind: "TESTS".into(),
+                evidence: "NAMING_CONVENTION".into(),
+                confidence: 0.95,
+                line: 1,
+            });
+        }
+    } else if rel.ends_with(".test.ts") {
+        if let Some(t) = rel.strip_suffix(".test.ts").map(|p| format!("{p}.ts")) {
+            rels.push(Relationship {
+                source: rel.into(),
+                target: t,
+                kind: "TESTS".into(),
+                evidence: "NAMING_CONVENTION".into(),
+                confidence: 0.95,
+                line: 1,
+            });
+        }
+    }
+
     let display = redact(&source);
     let record = FileRecord {
         path: rel.into(),
@@ -495,8 +584,8 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
             );
             tx.execute(
                 "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision) 
-                 VALUES('',?1,?2,?3,?4,?5,?6,?7)",
-                params![r.target, r.kind, r.evidence, r.confidence, rel, r.line as i64, rev]
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![r.source, r.target, r.kind, r.evidence, r.confidence, rel, r.line as i64, rev]
             )?;
             tx.execute(
                 "INSERT INTO observations(observation_id, target_id, revision_id, property_name, value_json, observed_at) 
@@ -531,6 +620,11 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         [&rev]
     )?;
     tx.commit()?;
+
+    // Sync ecosystem manifest intelligence into analytical store
+    if let Ok(eco) = crate::manifest::detect_ecosystem(&root) {
+        let _ = crate::manifest::sync_ecosystem_to_db(&conn, &eco);
+    }
     let active_symbols = conn.query_row(
         "SELECT COUNT(*) FROM entity_versions WHERE invalidated_at_revision IS NULL",
         [],

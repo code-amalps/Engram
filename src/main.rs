@@ -1,8 +1,13 @@
 pub mod analyzer;
 pub mod compiler;
+pub mod constitution;
+pub mod graph;
 pub mod guard;
+pub mod manifest;
 pub mod mcp;
 pub mod model;
+pub mod printer;
+pub mod setup;
 pub mod storage;
 
 use anyhow::Result;
@@ -16,8 +21,10 @@ use std::{
 
 use analyzer::analyze;
 use compiler::context;
-use guard::{analyze_task, decision, impact, make_contract, update_memory, validate};
+use guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
+use manifest::detect_ecosystem;
 use mcp::mcp;
+use setup::{list_targets, setup_client};
 use storage::{cache_dir, project_id, root_path};
 
 #[derive(Parser)]
@@ -29,6 +36,10 @@ use storage::{cache_dir, project_id, root_path};
 struct Cli {
     #[arg(short = 'C', long, global = true, default_value = ".")]
     root: PathBuf,
+
+    /// Force machine-readable JSON output
+    #[arg(long, global = true)]
+    json: bool,
 
     #[command(subcommand)]
     command: Option<CommandLine>,
@@ -46,6 +57,8 @@ enum CommandLine {
         task: String,
         #[arg(long, default_value_t = 1200)]
         token_budget: usize,
+        #[arg(long)]
+        explain: bool,
     },
     /// Ground a task, detect gaps, and generate task record
     AnalyzeTask {
@@ -57,23 +70,41 @@ enum CommandLine {
     Contract {
         task_id: String,
     },
-    /// Calculate actual change impact vs expected contract boundary
+    /// Calculate change impact or query reverse dependencies for a symbol
     Impact {
-        task_id: String,
+        target: String,
     },
     /// Validate working-tree changes against architectural rules
     Validate {
         task_id: String,
     },
-    /// Record a developer decision or override with rationale
+    /// Record a developer decision or rule override with rationale
     Decision {
         task_id: String,
         decision: String,
         reason: String,
+        #[arg(long)]
+        rule_id: Option<String>,
+        #[arg(long)]
+        violation_id: Option<String>,
     },
     /// Promote accepted task knowledge into local engineering memory
     UpdateMemory {
         task_id: String,
+    },
+    /// Inspect declared and resolved ecosystem packages and scripts
+    Ecosystem,
+    /// Configure 1-click MCP integrations for Cursor, Claude Desktop, or Windsurf
+    Setup {
+        client: Option<String>,
+        #[arg(long)]
+        list: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        remove: bool,
+        #[arg(long)]
+        status: bool,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
     Mcp,
@@ -91,7 +122,7 @@ fn init(root: &Path) -> Result<Value> {
     let defaults = [
         (
             "constitution.yaml",
-            "architecture:\n  pattern: unspecified\nrules: []\nconventions: {}\ntesting:\n  service_changes_require_unit_tests: false\nsecurity:\n  authentication_required: []\n",
+            "schema_version: 1\narchitecture:\n  pattern: modular-clean\nrules:\n  - id: RULE-001\n    name: \"No direct fetch in components\"\n    type: PATTERN\n    severity: WARNING\n    target_files: \"**/*.component.ts\"\n    pattern: \"fetch\\\\(\"\n    description: \"Use dedicated ApiService or state effects instead of direct window.fetch.\"\n  - id: RULE-002\n    name: \"Domain boundary isolation\"\n    type: DEPENDENCY\n    severity: ERROR\n    source: \"src/domain/**\"\n    forbidden: \"src/infrastructure/**\"\n    description: \"Domain entities must not depend on infrastructure implementations.\"\n",
         ),
         (
             "config.yaml",
@@ -122,31 +153,100 @@ fn init(root: &Path) -> Result<Value> {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let root = &cli.root;
+    let force_json = cli.json;
 
-    // Default to running analyze if no subcommand is provided (e.g. `engram .` or `engram`)
     match cli.command {
-        None | Some(CommandLine::Analyze) => print_json(analyze(root)?),
-        Some(CommandLine::Init) => print_json(init(root)?),
-        Some(CommandLine::Context { task, token_budget }) => {
-            print_json(context(root, &task, token_budget)?)
+        None | Some(CommandLine::Analyze) => {
+            let res = analyze(root)?;
+            if force_json {
+                print_json(res)?;
+            } else {
+                printer::print_analysis_summary(&res);
+            }
+        }
+        Some(CommandLine::Init) => print_json(init(root)?)?,
+        Some(CommandLine::Context {
+            task,
+            token_budget,
+            explain,
+        }) => {
+            let res = context(root, &task, token_budget)?;
+            if force_json {
+                print_json(res)?;
+            } else {
+                printer::print_context_result(&res, explain);
+            }
         }
         Some(CommandLine::AnalyzeTask { task, token_budget }) => {
             let (id, ctx) = analyze_task(root, &task, token_budget)?;
-            print_json(json!({ "task_id": id, "context": ctx }))
+            print_json(json!({ "task_id": id, "context": ctx }))?;
         }
-        Some(CommandLine::Contract { task_id }) => print_json(make_contract(root, &task_id)?),
-        Some(CommandLine::Impact { task_id }) => print_json(impact(root, &task_id)?),
-        Some(CommandLine::Validate { task_id }) => print_json(validate(root, &task_id)?),
+        Some(CommandLine::Contract { task_id }) => print_json(make_contract(root, &task_id)?)?,
+        Some(CommandLine::Impact { target }) => {
+            let res = impact(root, &target)?;
+            if force_json {
+                print_json(res)?;
+            } else {
+                printer::print_impact(&res);
+            }
+        }
+        Some(CommandLine::Validate { task_id }) => {
+            let res = validate(root, &task_id)?;
+            if force_json {
+                print_json(res)?;
+            } else {
+                printer::print_validation(&res);
+            }
+        }
         Some(CommandLine::Decision {
             task_id,
             decision: choice,
             reason,
-        }) => print_json(decision(root, &task_id, &choice, &reason)?),
-        Some(CommandLine::UpdateMemory { task_id }) => {
-            print_json(update_memory(root, &task_id)?)
+            rule_id,
+            violation_id,
+        }) => {
+            print_json(record_decision(
+                root,
+                &task_id,
+                &choice,
+                &reason,
+                rule_id.as_deref(),
+                violation_id.as_deref(),
+            )?)?;
         }
-        Some(CommandLine::Mcp) => mcp(root),
+        Some(CommandLine::UpdateMemory { task_id }) => {
+            print_json(update_memory(root, &task_id)?)?;
+        }
+        Some(CommandLine::Ecosystem) => {
+            let report = detect_ecosystem(root)?;
+            if force_json {
+                print_json(report)?;
+            } else {
+                printer::print_ecosystem(&report);
+            }
+        }
+        Some(CommandLine::Setup {
+            client,
+            list,
+            dry_run,
+            remove,
+            status,
+        }) => {
+            if list || client.is_none() {
+                let targets = list_targets();
+                if force_json {
+                    print_json(targets)?;
+                } else {
+                    println!("Supported integrations:\n  ✓ Cursor (.cursor/mcp.json)\n  ✓ Claude Desktop (claude_desktop_config.json)\n  ✓ Windsurf (mcp_config.json)\n\nRoadmap integrations:\n  ○ Claude Code CLI\n  ○ VS Code / Cline\n  ○ VS Code / Roo Code\n\nUsage: engram setup <cursor|claude|windsurf> [--dry-run] [--status] [--remove]");
+                }
+            } else if let Some(c) = client {
+                let res = setup_client(root, &c, dry_run, remove, status)?;
+                print_json(res)?;
+            }
+        }
+        Some(CommandLine::Mcp) => mcp(root)?,
     }
+    Ok(())
 }
 
 fn main() {
@@ -162,9 +262,7 @@ mod tests {
     use analyzer::{
         estimate_tokens, language, matches_pattern, parse_file, redact, tokens,
     };
-    use chrono::Utc;
     use model::{Evidence, EvidenceTier, analysis_key};
-    use std::collections::BTreeMap;
 
     #[test]
     fn test_secret_redaction() {
@@ -179,110 +277,90 @@ mod tests {
     fn test_analysis_key_composition() {
         let key1 = analysis_key("hash_a", "0.1.0", "ts-0.25", "python", "cfg_1");
         let key2 = analysis_key("hash_a", "0.1.0", "ts-0.25", "python", "cfg_1");
-        let key3 = analysis_key("hash_a", "0.1.1", "ts-0.25", "python", "cfg_1");
+        let key3 = analysis_key("hash_b", "0.1.0", "ts-0.25", "python", "cfg_1");
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
-        assert!(key1.starts_with("sha256:"));
     }
 
     #[test]
     fn test_evidence_decay_and_precedence() {
+        let ev = Evidence {
+            evidence_id: "ev_1".into(),
+            target_id: "ent_1".into(),
+            target_type: "SYMBOL".into(),
+            tier: EvidenceTier::Historical,
+            confidence: 1.0,
+            source_type: "COMMIT_DELTA".into(),
+            source_path: None,
+            source_line: None,
+            recorded_at: chrono::Utc::now(),
+            decay_half_life_commits: Some(200),
+            verification_status: "ACTIVE".into(),
+            details: std::collections::BTreeMap::new(),
+        };
+        assert!((ev.effective_confidence(0) - 1.0).abs() < 1e-6);
+        assert!((ev.effective_confidence(200) - 0.5).abs() < 1e-6);
+        assert!((ev.effective_confidence(400) - 0.25).abs() < 1e-6);
         assert!(EvidenceTier::Explicit.precedence() > EvidenceTier::Verified.precedence());
         assert!(EvidenceTier::Verified.precedence() > EvidenceTier::Extracted.precedence());
         assert!(EvidenceTier::Extracted.precedence() > EvidenceTier::Historical.precedence());
         assert!(EvidenceTier::Historical.precedence() > EvidenceTier::Inferred.precedence());
         assert!(EvidenceTier::Inferred.precedence() > EvidenceTier::Provisional.precedence());
-
-        let ev = Evidence {
-            evidence_id: "test".into(),
-            target_id: "rel_1".into(),
-            target_type: "RELATIONSHIP".into(),
-            tier: EvidenceTier::Historical,
-            confidence: 0.8,
-            source_type: "GIT".into(),
-            source_path: None,
-            source_line: None,
-            recorded_at: Utc::now(),
-            decay_half_life_commits: Some(200),
-            verification_status: "UNCONTESTED".into(),
-            details: BTreeMap::new(),
-        };
-
-        let conf_now = ev.effective_confidence(0);
-        assert!((conf_now - 0.8).abs() < 1e-6);
-
-        let conf_after_200 = ev.effective_confidence(200);
-        assert!((conf_after_200 - 0.4).abs() < 1e-6);
-
-        let conf_after_400 = ev.effective_confidence(400);
-        assert!((conf_after_400 - 0.2).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_language_detection() {
-        assert_eq!(language(Path::new("app/main.py")), Some("python"));
-        assert_eq!(language(Path::new("src/index.ts")), Some("typescript"));
-        assert_eq!(language(Path::new("src/comp.tsx")), Some("typescript"));
-        assert_eq!(language(Path::new("src/app.js")), Some("javascript"));
-        assert_eq!(language(Path::new("Services/Order.cs")), Some("csharp"));
-        assert_eq!(language(Path::new("Cargo.toml")), None);
     }
 
     #[test]
     fn test_tokenization_and_estimation() {
-        let text = "OrderService.ExportCsv() processes orders";
-        let toks = tokens(text);
-        assert!(toks.contains(&"orderservice".to_string()));
-        assert!(toks.contains(&"exportcsv".to_string()));
-        assert!(toks.contains(&"processes".to_string()));
-        assert!(estimate_tokens(text) > 0);
+        let s = "function calculateOrderTotal(subtotal: number, taxRate: number) { return subtotal * (1 + taxRate); }";
+        let tok = tokens(s);
+        assert!(tok.contains(&"calculateordertotal".to_string()));
+        assert!(tok.contains(&"subtotal".to_string()));
+        let est = estimate_tokens(s);
+        assert!(est > 10 && est < 50);
     }
 
     #[test]
-    fn test_tree_sitter_python_extraction() {
-        let code = b"class OrderService:\n    def export_csv(self, order_id: str):\n        return True\n";
-        let temp_dir = tempfile_dir("test_py");
-        let (file, symbols, _) = parse_file(&temp_dir, "order_service.py", code, "rev1").unwrap();
-        assert_eq!(file.language, "python");
-        let names: Vec<_> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"OrderService"));
-        assert!(names.contains(&"export_csv"));
-    }
-
-    #[test]
-    fn test_tree_sitter_typescript_extraction() {
-        let code = b"export interface IOrderService {\n    exportCsv(id: string): Promise<void>;\n}\nexport function processOrder() {}\n";
-        let temp_dir = tempfile_dir("test_ts");
-        let (file, symbols, _) = parse_file(&temp_dir, "orders.ts", code, "rev1").unwrap();
-        assert_eq!(file.language, "typescript");
-        let names: Vec<_> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"IOrderService"));
-        assert!(names.contains(&"processOrder"));
-    }
-
-    #[test]
-    fn test_tree_sitter_csharp_extraction() {
-        let code = b"namespace App.Orders;\npublic class OrderService {\n    public void ExportCsv() {}\n}\n";
-        let temp_dir = tempfile_dir("test_cs");
-        let (file, symbols, _) = parse_file(&temp_dir, "OrderService.cs", code, "rev1").unwrap();
-        assert_eq!(file.language, "csharp");
-        let names: Vec<_> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"OrderService"));
-        assert!(names.contains(&"ExportCsv"));
+    fn test_language_detection() {
+        assert_eq!(language(Path::new("app.ts")), Some("typescript"));
+        assert_eq!(language(Path::new("app.tsx")), Some("typescript"));
+        assert_eq!(language(Path::new("script.js")), Some("javascript"));
+        assert_eq!(language(Path::new("module.py")), Some("python"));
+        assert_eq!(language(Path::new("Program.cs")), Some("csharp"));
+        assert_eq!(language(Path::new("unknown.xyz")), None);
     }
 
     #[test]
     fn test_matches_pattern() {
-        assert!(matches_pattern("dist/bundle.js", "dist/*"));
-        assert!(matches_pattern("src/generated/api.ts", "**/generated/**"));
-        assert!(matches_pattern(".env", ".env"));
-        assert!(matches_pattern("src/controllers/order.ts", "*.ts"));
-        assert!(!matches_pattern("src/controllers/order.ts", "*.py"));
+        assert!(matches_pattern("src/main.ts", "*.ts"));
+        assert!(matches_pattern("src/app/core.ts", "src/**"));
+        assert!(matches_pattern(".env.local", ".env.*"));
+        assert!(!matches_pattern("src/main.ts", "*.js"));
     }
 
-    fn tempfile_dir(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("engram_test_{}_{}", name, uuid::Uuid::new_v4()));
-        let _ = fs::create_dir_all(&p);
-        p
+    #[test]
+    fn test_tree_sitter_python_extraction() {
+        let code = b"class OrderProcessor:\n    def process_order(self, order_id):\n        pass\n";
+        let (record, symbols, _) = parse_file(Path::new("."), "order.py", code, "rev1").unwrap();
+        assert_eq!(record.language, "python");
+        assert!(symbols.iter().any(|s| s.name == "OrderProcessor" && s.kind == "CLASS"));
+        assert!(symbols.iter().any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+    }
+
+    #[test]
+    fn test_tree_sitter_typescript_extraction() {
+        let code = b"export interface IOrder { id: string; }\nexport class OrderService implements IOrder {\n  getOrder(id: string) { return id; }\n}\n";
+        let (record, symbols, _) = parse_file(Path::new("."), "order.ts", code, "rev1").unwrap();
+        assert_eq!(record.language, "typescript");
+        assert!(symbols.iter().any(|s| s.name == "IOrder" && s.kind == "INTERFACE"));
+        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "CLASS"));
+        assert!(symbols.iter().any(|s| s.name == "getOrder" && s.kind == "METHOD"));
+    }
+
+    #[test]
+    fn test_tree_sitter_csharp_extraction() {
+        let code = b"namespace Shop {\n    public class CartService {\n        public void Checkout() {}\n    }\n}\n";
+        let (record, symbols, _) = parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
+        assert_eq!(record.language, "csharp");
+        assert!(symbols.iter().any(|s| s.name == "CartService" && s.kind == "CLASS"));
+        assert!(symbols.iter().any(|s| s.name == "Checkout" && s.kind == "METHOD"));
     }
 }

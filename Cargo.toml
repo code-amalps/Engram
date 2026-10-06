@@ -5,6 +5,10 @@ edition = "2024"
 description = "Local engineering memory and change intelligence for coding agents"
 license = "AGPL-3.0-or-later"
 
+[lib]
+name = "engram"
+path = "src/lib.rs"
+
 [[bin]]
 name = "engram"
 path = "src/main.rs"

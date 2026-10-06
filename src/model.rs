@@ -228,6 +228,8 @@ pub struct Decision {
     pub decision: String,
     pub reason: String,
     pub actor: String,
+    pub rule_id: Option<String>,
+    pub violation_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -240,3 +242,122 @@ pub struct MemoryEntry {
     pub accepted_revision_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
+
+/// Information about a declared or resolved package in the project ecosystem.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageInfo {
+    pub name: String,
+    pub declared_version: String,
+    pub resolved_version: Option<String>,
+    pub is_dev: bool,
+    pub ecosystem: String,
+}
+
+/// Aggregated ecosystem intelligence extracted from repository manifests.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EcosystemReport {
+    pub frameworks: Vec<PackageInfo>,
+    pub libraries: Vec<PackageInfo>,
+    pub dev_tools: Vec<PackageInfo>,
+    pub scripts: BTreeMap<String, String>,
+}
+
+/// Traversal direction for structural dependency graph queries.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Direction {
+    Outgoing, // Dependencies (source -> target)
+    Incoming, // Callers / Dependents (target <- source)
+    Both,
+}
+
+/// A directed edge in the repository's structural dependency graph.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEdge {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub evidence_tier: EvidenceTier,
+    pub confidence: f64,
+    pub path: String,
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RuleType {
+    Pattern,
+    Dependency,
+    Architecture,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RuleSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+/// Machine-evaluable prescription defined in .engram/constitution.yaml.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstitutionRule {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub rule_type: RuleType,
+    #[serde(default = "default_severity")]
+    pub severity: RuleSeverity,
+    #[serde(default)]
+    pub description: String,
+    pub target_files: Option<String>,
+    pub pattern: Option<String>,
+    pub source: Option<String>,
+    pub forbidden: Option<String>,
+    pub source_kind: Option<String>,
+    pub forbidden_relationship: Option<String>,
+    #[serde(default)]
+    pub exceptions: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_severity() -> RuleSeverity {
+    RuleSeverity::Warning
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// An advisory rule violation detected during diff validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleViolation {
+    pub violation_id: String,
+    pub rule_id: String,
+    pub rule_name: String,
+    pub severity: RuleSeverity,
+    pub file_path: String,
+    pub line: Option<usize>,
+    pub message: String,
+    pub overridden: bool,
+    pub override_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FactStatus {
+    Known,
+    Unknown,
+    Inferred,
+}
+
+/// Evidence-backed factual record; explicitly models UNKNOWN when not statically resolvable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactRecord {
+    pub fact: String,
+    pub status: FactStatus,
+    pub reason: Option<String>,
+    pub evidence_ids: Vec<String>,
+}
+

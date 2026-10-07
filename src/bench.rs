@@ -14,7 +14,7 @@ use crate::compiler::context;
 use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
 use crate::memory::record_decision;
 
-const BENCHMARK_VERSION: &str = "0.5.0";
+const BENCHMARK_VERSION: &str = "0.6.0";
 const DATASET_VERSION: &str = "2026.10-corp-1";
 const ENGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -658,6 +658,83 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 (
                     "vendor/legacy.go".into(),
                     "package vendor\n\nfunc Bypass() {}\n".into(),
+                ),
+            ],
+        },
+
+        // Task 8: Go / Vendor & Replace Directive Grounding
+        BenchmarkTask {
+            id: "TASK-GO-04".into(),
+            name: "Go Vendor and Replace Grounding".into(),
+            language: "go".into(),
+            task_description: "Connect secure checkout with local logger and vendored vault in internal/checkout/checkout.go".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "internal/checkout/checkout.go".into(),
+                    "internal/checkout/checkout_test.go".into(),
+                ],
+                symbols: vec!["CheckoutService".into(), "Execute".into()],
+                modules: vec!["checkout".into()],
+                tests: vec!["internal/checkout/checkout_test.go".into()],
+                dependencies: vec!["local/common/logger.go".into()],
+            },
+            expected_modules: vec!["checkout".into(), "local".into()],
+            expected_files: vec![
+                "internal/checkout/checkout.go".into(),
+                "internal/checkout/checkout_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["legacy/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "internal/checkout/checkout.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "internal/checkout/types.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "cmd/admin/tool.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "legacy/vault.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n\nrequire (\n\tgithub.com/google/uuid v1.6.0\n)\n\nreplace github.com/acme/common => ./local/common\n".into(),
+                ),
+                (
+                    "internal/checkout/checkout.go".into(),
+                    "package checkout\n\nimport (\n\t\"github.com/acme/common\"\n\t\"github.com/secure/vault\"\n)\n\ntype CheckoutService struct {}\n\nfunc (c *CheckoutService) Execute(logger common.Logger) error { return nil }\n".into(),
+                ),
+                (
+                    "internal/checkout/checkout_test.go".into(),
+                    "package checkout\n\nimport \"testing\"\n\nfunc TestCheckoutExecute(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "internal/checkout/types.go".into(),
+                    "package checkout\n\ntype CheckoutSession struct { ID string }\n".into(),
+                ),
+                (
+                    "local/common/logger.go".into(),
+                    "package common\n\ntype Logger struct {}\n".into(),
+                ),
+                (
+                    "vendor/github.com/secure/vault/vault.go".into(),
+                    "package vault\n\ntype Client struct {}\n".into(),
+                ),
+                (
+                    "cmd/admin/tool.go".into(),
+                    "package admin\n\nfunc Run() {}\n".into(),
+                ),
+                (
+                    "legacy/vault.go".into(),
+                    "package legacy\n\ntype LegacyVault struct {}\n".into(),
                 ),
             ],
         },

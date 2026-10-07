@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-62%20Passed-brightgreen.svg" alt="Tests: 62 Passed">
+  <img src="https://img.shields.io/badge/Tests-68%20Passed-brightgreen.svg" alt="Tests: 68 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -41,8 +41,8 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 * 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits with canonical symbol matching.
 * ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
 * 🧠 **Durable Engineering Memory:** Stores human/team architectural decisions with full rationale (**WHY**) in `.engram/memory.yaml` with memory poisoning protection.
-* 🔌 **Native MCP Support:** 9 standard tools plugging directly into **Cursor, Claude Desktop, and Windsurf**.
-* 🌳 **Polyglot Tree-Sitter AST & Go Support:** Native parsers for **Rust, Go, TypeScript, JavaScript, Python, and C#**. Features `go.mod` local module resolution, receiver pointer normalization (`*OrderService.ExportCSV` == `OrderService.ExportCSV`), and test conventions (`*_test.go`). Dogfoods on its own repository!
+* 🌳 **Go Dependency Intelligence & Structural Interfaces (v0.6.0):** Full `go.mod` directive parsing (`module`, `require`, `replace`, `exclude`, `toolchain`), explicit origin classification (`LOCAL`, `VENDORED`, `REPLACED_LOCAL`, `REPLACED_EXTERNAL`, `EXTERNAL`, `UNRESOLVED`), two-stage structural interface satisfaction (method candidate lookup + full parameter/result signature verification), and cross-file graph context grounding.
+* 🌲 **Polyglot Tree-Sitter AST & Multi-Language Support:** Native AST extractors for **Rust, Go, TypeScript, JavaScript, Python, and C#**. Features receiver pointer normalization (`*OrderService.ExportCSV` == `OrderService.ExportCSV`) and test conventions (`*_test.go`). Dogfoods on its own repository!
 
 ---
 
@@ -416,17 +416,16 @@ Engram includes a comprehensive automated test suite covering Tree-sitter parser
 cargo test
 ```
 
-All **62 tests** run and pass:
+All **68 tests** run and pass:
 ```text
-running 15 tests (Unit Tests)
-test go_parser::tests::test_parse_go_mod_module_declaration ... ok
-test go_parser::tests::test_local_import_resolution_with_go_mod ... ok
-test go_parser::tests::test_receiver_normalization_and_symbol_matching ... ok
-test tests::test_evidence_decay_and_precedence ... ok
+running 17 tests (Unit Tests)
+test go_parser::tests::test_parse_full_go_mod_directives ... ok
+test go_parser::tests::test_dependency_origin_classification ... ok
+test go_parser::tests::test_two_stage_interface_matching ... ok
 test tests::test_language_detection ... ok
+test tests::test_evidence_decay_and_precedence ... ok
 test tests::test_analysis_key_composition ... ok
 test tests::test_matches_pattern ... ok
-test go_parser::tests::test_extract_go_ast_complete ... ok
 test tests::test_tokenization_and_estimation ... ok
 test tests::test_tree_sitter_typescript_extraction ... ok
 test tests::test_tree_sitter_csharp_extraction ... ok
@@ -458,6 +457,16 @@ test test_hook_installation_and_idempotency ... ok
 test test_ci_pr_base_comparison ... ok
 test test_human_reconciliation_v1_to_v2 ... ok
 test test_contract_modified_in_pr_requires_ratification ... ok
+
+running 8 tests (Go Dependency Intelligence & Structural Interfaces)
+test test_full_go_mod_parsing_and_resolution ... ok
+test test_vendored_dependency_precedence ... ok
+test test_replaced_local_and_external_resolution ... ok
+test test_unresolved_dependency_evidence_integrity ... ok
+test test_external_not_confused_with_local_subpath ... ok
+test test_two_stage_interface_satisfaction_match ... ok
+test test_two_stage_interface_satisfaction_signature_mismatch ... ok
+test test_interface_implementation_graph_grounding ... ok
 
 running 8 tests (Go Language Extraction & Acceptance Gate)
 test test_go_mod_module_resolution ... ok

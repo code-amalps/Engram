@@ -42,12 +42,13 @@ impl<'a> GraphTraversal<'a> {
 
             // Outgoing edges: curr -> target
             if direction == Direction::Outgoing || direction == Direction::Both {
+                let prefix = format!("{}::%", curr);
                 let mut stmt = self.conn.prepare(
                     "SELECT source_id, target, kind, evidence, confidence, path, line
                      FROM relationships
-                     WHERE source_id = ?1 AND invalidated_at_revision IS NULL"
+                     WHERE (source_id = ?1 OR source_id LIKE ?2) AND invalidated_at_revision IS NULL"
                 )?;
-                let rows = stmt.query_map([&curr], |r| {
+                let rows = stmt.query_map([&curr, &prefix], |r| {
                     Ok(GraphEdge {
                         source: r.get(0)?,
                         target: r.get(1)?,
@@ -72,12 +73,13 @@ impl<'a> GraphTraversal<'a> {
 
             // Incoming edges: source -> curr (reverse query)
             if direction == Direction::Incoming || direction == Direction::Both {
+                let prefix = format!("{}::%", curr);
                 let mut stmt = self.conn.prepare(
                     "SELECT source_id, target, kind, evidence, confidence, path, line
                      FROM relationships
-                     WHERE target = ?1 AND invalidated_at_revision IS NULL"
+                     WHERE (target = ?1 OR target LIKE ?2) AND invalidated_at_revision IS NULL"
                 )?;
-                let rows = stmt.query_map([&curr], |r| {
+                let rows = stmt.query_map([&curr, &prefix], |r| {
                     Ok(GraphEdge {
                         source: r.get(0)?,
                         target: r.get(1)?,
@@ -107,9 +109,9 @@ impl<'a> GraphTraversal<'a> {
                 let key = (edge.source.clone(), edge.target.clone(), edge.kind.clone());
                 if seen_edges.insert(key) {
                     let next_node = if is_outgoing {
-                        edge.target.clone()
+                        edge.target.split("::").next().unwrap_or(&edge.target).to_string()
                     } else {
-                        edge.source.clone()
+                        edge.source.split("::").next().unwrap_or(&edge.source).to_string()
                     };
                     if !visited_nodes.contains(&next_node) {
                         visited_nodes.insert(next_node.clone());

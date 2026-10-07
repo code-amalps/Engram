@@ -121,23 +121,24 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         // Expand 1-hop and 2-hop neighbors (IMPORTS, TESTS, IMPLEMENTS)
         if let Ok(neighbors) = traversal.neighbors(&seed_path, &["IMPORTS", "TESTS", "IMPLEMENTS"], Direction::Both, 2) {
             for edge in neighbors {
-                let neighbor_path = if edge.source == seed_path {
+                let neighbor_path = if edge.source == seed_path || edge.source.starts_with(&format!("{seed_path}::")) {
                     edge.target.clone()
                 } else {
                     edge.source.clone()
                 };
+                let neighbor_file = neighbor_path.split("::").next().unwrap_or(&neighbor_path);
 
                 // Only consider workspace files
-                if doc_map.contains_key(&neighbor_path) {
+                if doc_map.contains_key(neighbor_file) {
                     let boost = (seed_score * 0.4).max(2.5);
-                    let score_entry = composite_scores.entry(neighbor_path.clone()).or_insert(0.0);
+                    let score_entry = composite_scores.entry(neighbor_file.to_string()).or_insert(0.0);
                     *score_entry += boost;
 
                     let prov = format!(
                         "Graph {} edge via {} (confidence: {:.2})",
                         edge.kind, seed_path, edge.confidence
                     );
-                    let list = provenance_map.entry(neighbor_path).or_default();
+                    let list = provenance_map.entry(neighbor_file.to_string()).or_default();
                     if !list.contains(&prov) {
                         list.push(prov);
                     }

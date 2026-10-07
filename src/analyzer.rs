@@ -262,13 +262,13 @@ pub fn parse_file(
     let source = String::from_utf8_lossy(bytes);
 
     if lang == "go" {
-        let go_mod = crate::go_parser::load_root_go_mod(root);
+        let go_mod = crate::go_parser::load_root_go_mod_doc(root);
         let ast = crate::go_parser::extract_go_ast(&source)?;
         let (symbols, rels) = crate::go_parser::convert_go_ast_to_engram_with_root(
             root,
             rel,
             &ast,
-            go_mod.as_deref(),
+            go_mod.as_ref(),
         );
         let display = redact(&source);
         let record = FileRecord {
@@ -677,6 +677,48 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
             )?;
         }
     }
+
+    // Cross-file Go structural interface matching
+    let mut go_file_asts = Vec::new();
+    for (abs, rel) in &files {
+        if rel.ends_with(".go") {
+            if let Ok(content) = fs::read_to_string(abs) {
+                if let Ok(ast) = crate::go_parser::extract_go_ast(&content) {
+                    go_file_asts.push((rel.clone(), ast));
+                }
+            }
+        }
+    }
+    if !go_file_asts.is_empty() {
+        let go_refs: Vec<(&str, &crate::go_parser::GoFileAst)> = go_file_asts
+            .iter()
+            .map(|(p, a)| (p.as_str(), a))
+            .collect();
+        let cross_iface_rels = crate::go_parser::infer_cross_file_go_interfaces(&go_refs);
+        for r in cross_iface_rels {
+            let path = r.source.split("::").next().unwrap_or(&r.source);
+            let relationship_id = format!(
+                "rel_{}",
+                &hash(format!("{}\0{}\0{}\0{}", path, r.kind, r.target, r.line).as_bytes())[..24]
+            );
+            tx.execute(
+                "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision) 
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![r.source, r.target, r.kind, r.evidence, r.confidence, path, r.line as i64, rev]
+            )?;
+            tx.execute(
+                "INSERT INTO observations(observation_id, target_id, revision_id, property_name, value_json, observed_at) 
+                 VALUES(?1,?2,?3,'STATIC_RELATIONSHIP',?4,?5)",
+                params![Uuid::new_v4().to_string(), relationship_id, rev, json!({"type":&r.kind,"target":&r.target,"path":path,"line":r.line}).to_string(), now()]
+            )?;
+            tx.execute(
+                "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, decay_half_life_commits, verification_status, details_json) 
+                 VALUES(?1,?2,'RELATIONSHIP','EXTRACTED',?3,'TREE_SITTER',?4,?5,?6,NULL,'UNCONTESTED',?7)",
+                params![Uuid::new_v4().to_string(), relationship_id, r.confidence, path, r.line as i64, now(), json!({"parser":"tree-sitter","edge_type":&r.kind}).to_string()]
+            )?;
+        }
+    }
+
     let existing: Vec<String> = {
         let mut stmt = tx.prepare("SELECT path FROM files")?;
         let rows = stmt.query_map([], |r| r.get(0))?;

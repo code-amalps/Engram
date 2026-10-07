@@ -14,7 +14,7 @@ use crate::compiler::context;
 use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
 use crate::memory::record_decision;
 
-const BENCHMARK_VERSION: &str = "0.4.0";
+const BENCHMARK_VERSION: &str = "0.5.0";
 const DATASET_VERSION: &str = "2026.10-corp-1";
 const ENGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -129,7 +129,7 @@ pub struct BenchmarkSuiteResult {
     pub task_results: Vec<TaskBenchmarkResult>,
 }
 
-/// Generate the deterministic benchmark task suite across TypeScript, Python, C#, and Rust.
+/// Generate the deterministic benchmark task suite across TypeScript, Python, C#, Rust, and Go.
 pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
     vec![
         // Task 1: TypeScript / Web
@@ -440,6 +440,224 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 (
                     "scripts/bench_runner.rs".into(),
                     "fn main() {}\n".into(),
+                ),
+            ],
+        },
+
+        // Task 5: Go / Add Method & Receiver Normalization
+        BenchmarkTask {
+            id: "TASK-GO-01".into(),
+            name: "Go OrderService CSV Export".into(),
+            language: "go".into(),
+            task_description: "Add ExportCSV method to OrderService in internal/orders/service.go".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "internal/orders/service.go".into(),
+                    "internal/orders/service_test.go".into(),
+                ],
+                symbols: vec!["OrderService".into(), "ExportCSV".into()],
+                modules: vec!["orders".into()],
+                tests: vec!["internal/orders/service_test.go".into()],
+                dependencies: vec!["internal/orders/types.go".into()],
+            },
+            expected_modules: vec!["orders".into()],
+            expected_files: vec![
+                "internal/orders/service.go".into(),
+                "internal/orders/service_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["legacy/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "internal/orders/service.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "internal/orders/types.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "internal/auth/auth.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "legacy/db.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: Some(BenchmarkMemoryScenario {
+                task1_goal: "Add CSV export to OrderService".into(),
+                decision_title: "Go Streaming CSV Exporter".into(),
+                decision_statement: "OrderService.ExportCSV accepts io.Writer to avoid memory buffering".into(),
+                decision_reason: "Memory consumption on high-volume order exports".into(),
+                decision_modules: vec!["orders".into()],
+                task2_goal: "Implement XML exporter for OrderService".into(),
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "internal/orders/service.go".into(),
+                    "package orders\n\nimport \"io\"\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV(w io.Writer) error {\n    return nil\n}\n".into(),
+                ),
+                (
+                    "internal/orders/service_test.go".into(),
+                    "package orders\n\nimport \"testing\"\n\nfunc TestOrderServiceExportCSV(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "internal/orders/types.go".into(),
+                    "package orders\n\ntype Order struct { ID string }\n".into(),
+                ),
+                (
+                    "internal/auth/auth.go".into(),
+                    "package auth\n\ntype Authenticator struct {}\n".into(),
+                ),
+                (
+                    "legacy/db.go".into(),
+                    "package legacy\n\ntype DbConn struct {}\n".into(),
+                ),
+            ],
+        },
+
+        // Task 6: Go / Interface Implementation & Dispatch
+        BenchmarkTask {
+            id: "TASK-GO-02".into(),
+            name: "Go Interface Implementation & Dispatch".into(),
+            language: "go".into(),
+            task_description: "Implement Exporter interface for OrderExporter in pkg/export/exporter.go".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "pkg/export/exporter.go".into(),
+                    "pkg/export/exporter_test.go".into(),
+                ],
+                symbols: vec!["Exporter".into(), "OrderExporter".into()],
+                modules: vec!["export".into()],
+                tests: vec!["pkg/export/exporter_test.go".into()],
+                dependencies: vec!["pkg/export/format.go".into()],
+            },
+            expected_modules: vec!["export".into()],
+            expected_files: vec![
+                "pkg/export/exporter.go".into(),
+                "pkg/export/exporter_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "pkg/export/exporter.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "pkg/export/format.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "cmd/server/main.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/keys.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "pkg/export/exporter.go".into(),
+                    "package export\n\ntype Exporter interface {\n    Export() error\n}\n\ntype OrderExporter struct {}\n\nfunc (e *OrderExporter) Export() error { return nil }\n".into(),
+                ),
+                (
+                    "pkg/export/exporter_test.go".into(),
+                    "package export\n\nimport \"testing\"\n\nfunc TestOrderExporter(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "pkg/export/format.go".into(),
+                    "package export\n\ntype Format int\n".into(),
+                ),
+                (
+                    "cmd/server/main.go".into(),
+                    "package main\n\nfunc main() {}\n".into(),
+                ),
+                (
+                    "internal/secret/keys.go".into(),
+                    "package secret\n\nvar Key = \"secret\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 7: Go / Module Import Chain Grounding
+        BenchmarkTask {
+            id: "TASK-GO-03".into(),
+            name: "Go Module Import Chain Grounding".into(),
+            language: "go".into(),
+            task_description: "Trace payment transaction processor in internal/payment/processor.go importing currency".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "internal/payment/processor.go".into(),
+                    "internal/payment/processor_test.go".into(),
+                ],
+                symbols: vec!["PaymentProcessor".into(), "Process".into()],
+                modules: vec!["payment".into()],
+                tests: vec!["internal/payment/processor_test.go".into()],
+                dependencies: vec!["pkg/currency/rate.go".into()],
+            },
+            expected_modules: vec!["payment".into()],
+            expected_files: vec![
+                "internal/payment/processor.go".into(),
+                "internal/payment/processor_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["vendor/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "internal/payment/processor.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "internal/payment/gateway.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "internal/metrics/stats.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "vendor/legacy.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "internal/payment/processor.go".into(),
+                    "package payment\n\nimport \"github.com/acme/shop/pkg/currency\"\n\ntype PaymentProcessor struct {}\n\nfunc (p *PaymentProcessor) Process(curr currency.Currency) error { return nil }\n".into(),
+                ),
+                (
+                    "internal/payment/processor_test.go".into(),
+                    "package payment\n\nimport \"testing\"\n\nfunc TestPaymentProcessor(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "internal/payment/gateway.go".into(),
+                    "package payment\n\ntype Gateway struct {}\n".into(),
+                ),
+                (
+                    "pkg/currency/rate.go".into(),
+                    "package currency\n\ntype Currency string\n".into(),
+                ),
+                (
+                    "internal/metrics/stats.go".into(),
+                    "package metrics\n\ntype Stats struct {}\n".into(),
+                ),
+                (
+                    "vendor/legacy.go".into(),
+                    "package vendor\n\nfunc Bypass() {}\n".into(),
                 ),
             ],
         },
@@ -811,7 +1029,7 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
         &res.metadata.git_revision[..res.metadata.git_revision.len().min(12)]
     ));
     out.push_str(&format!("Dataset Fingerprint: {}\n", res.metadata.dataset_hash));
-    out.push_str(&format!("Tasks Evaluated: {} across TypeScript, Python, C#, Rust\n\n", res.total_tasks));
+    out.push_str(&format!("Tasks Evaluated: {} across TypeScript, Python, C#, Rust, Go\n\n", res.total_tasks));
 
     out.push_str("1. DISCOVERY EFFICIENCY (MEASURED VS. ESTIMATED BASELINE)\n");
     out.push_str(&format!(

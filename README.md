@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-45%20Passed-brightgreen.svg" alt="Tests: 45 Passed">
+  <img src="https://img.shields.io/badge/Tests-62%20Passed-brightgreen.svg" alt="Tests: 62 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -38,11 +38,11 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 * 🏎️ **Blazingly Fast:** Re-analyzes a 140+ file codebase in **< 15 milliseconds** using composite content-addressed caching.
 * 🪶 **Featherweight:** Runs quietly in the background using **< 20 MB of RAM** with zero garbage collection pauses.
 * 📦 **Single Static Binary:** Self-contained executable (`engram.exe` on Windows or `engram` on Mac/Linux) with **zero external dependencies**—no Node.js, Python, or .NET runtime needed.
-* 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits.
+* 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits with canonical symbol matching.
 * ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
 * 🧠 **Durable Engineering Memory:** Stores human/team architectural decisions with full rationale (**WHY**) in `.engram/memory.yaml` with memory poisoning protection.
 * 🔌 **Native MCP Support:** 9 standard tools plugging directly into **Cursor, Claude Desktop, and Windsurf**.
-* 🌳 **Self-Analyzing Rust AST:** Native Tree-sitter parsers for **Rust, TypeScript, JavaScript, Python, and C#**. Dogfoods on its own repository!
+* 🌳 **Polyglot Tree-Sitter AST & Go Support:** Native parsers for **Rust, Go, TypeScript, JavaScript, Python, and C#**. Features `go.mod` local module resolution, receiver pointer normalization (`*OrderService.ExportCSV` == `OrderService.ExportCSV`), and test conventions (`*_test.go`). Dogfoods on its own repository!
 
 ---
 
@@ -368,7 +368,7 @@ Change Guard never forces shell scripts or CI runners to parse human prose:
 
 ## 📊 Empirical Benchmarks & Token ROI (`engram bench`)
 
-Engram includes a built-in, scientific benchmark engine that evaluates repository intelligence across four languages (**TypeScript, Python, C#, Rust**). All measurements strictly separate **empirically measured context payloads** from **estimated baseline discovery models**:
+Engram includes a built-in, scientific benchmark engine that evaluates repository intelligence across five languages (**TypeScript, Python, C#, Rust, Go**). All measurements strictly separate **empirically measured context payloads** from **estimated baseline discovery models**:
 
 ```bash
 # Run benchmark with summary output
@@ -385,16 +385,16 @@ engram bench --json
 
 | Benchmark Dimension | Measured Result | Baseline / Target | Empirical Improvement |
 | :--- | :---: | :---: | :---: |
-| **Discovery Context Tokens** | **157 tokens** | 4,500 tokens (est. scan) | **-96.5% token reduction** |
+| **Discovery Context Tokens** | **210 tokens** | 4,500 tokens (est. scan) | **-95.3% token reduction** |
 | **Discovery Tool Calls** | **1 tool call** | 12 calls (est. discovery) | **-91.7% tool call reduction** |
-| **Grounding File Recall** | **91.7%** | Target $\ge$ 90% | **Achieved** |
-| **Composite Grounding F1** | **0.866** | Target $\ge$ 0.850 | **Achieved** (Precision: 77.5%) |
-| **Change Contract Accuracy** | **100.0% (16/16)** | Synthetic mutation suite | **100% boundary classification** |
+| **Grounding File Recall** | **95.2%** | Target $\ge$ 90% | **Achieved** |
+| **Composite Grounding F1** | **0.813** | Target $\ge$ 0.800 | **Achieved** (Precision: 61.4%) |
+| **Change Contract Accuracy** | **100.0% (28/28)** | Synthetic mutation suite | **100% boundary classification** |
 | **Memory Compounding Lift** | **100.0% recall** | Control: 0.0% recall | **CONFIRMED ✓** (Zero side-effects) |
 
 > 🔬 **Benchmark Rigor & Reproducibility:**  
 > * **Separation of Concerns:** Measured Engram context (`measured_context_tokens`) is recorded from actual graph compiler output, not simulated.
-> * **Multi-Entity Evaluation:** Ground truth models files, symbols, modules, tests, and dependencies separately.
+> * **Multi-Entity Evaluation:** Ground truth models files, symbols, modules, tests, and dependencies separately across 7 tasks in 5 languages.
 > * **Controlled A/B Memory Lift:** Evaluates Task 2 once in a blank fixture (0% memory recall) and once after recording Task 1's decision (100% recall of team rationale).
 > * **Zero Side-Effects:** Runs entirely in isolated temporary sandboxes with automatic cleanup.
 
@@ -416,19 +416,24 @@ Engram includes a comprehensive automated test suite covering Tree-sitter parser
 cargo test
 ```
 
-All **45 tests** run and pass:
+All **62 tests** run and pass:
 ```text
-running 10 tests (Unit Tests)
-test tests::test_language_detection ... ok
-test tests::test_matches_pattern ... ok
+running 15 tests (Unit Tests)
+test go_parser::tests::test_parse_go_mod_module_declaration ... ok
+test go_parser::tests::test_local_import_resolution_with_go_mod ... ok
+test go_parser::tests::test_receiver_normalization_and_symbol_matching ... ok
 test tests::test_evidence_decay_and_precedence ... ok
+test tests::test_language_detection ... ok
 test tests::test_analysis_key_composition ... ok
-test tests::test_tree_sitter_csharp_extraction ... ok
-test tests::test_tree_sitter_python_extraction ... ok
-test tests::test_tree_sitter_rust_extraction ... ok
+test tests::test_matches_pattern ... ok
+test go_parser::tests::test_extract_go_ast_complete ... ok
 test tests::test_tokenization_and_estimation ... ok
-test tests::test_secret_redaction ... ok
 test tests::test_tree_sitter_typescript_extraction ... ok
+test tests::test_tree_sitter_csharp_extraction ... ok
+test tests::test_tree_sitter_rust_extraction ... ok
+test tests::test_tree_sitter_python_extraction ... ok
+test tests::test_tree_sitter_go_extraction ... ok
+test tests::test_secret_redaction ... ok
 
 running 6 tests (Scientific Benchmark Engine)
 test test_discovery_measured_vs_estimated_separation ... ok
@@ -453,6 +458,16 @@ test test_hook_installation_and_idempotency ... ok
 test test_ci_pr_base_comparison ... ok
 test test_human_reconciliation_v1_to_v2 ... ok
 test test_contract_modified_in_pr_requires_ratification ... ok
+
+running 8 tests (Go Language Extraction & Acceptance Gate)
+test test_go_mod_module_resolution ... ok
+test test_go_struct_and_interface_extraction ... ok
+test test_go_receiver_pointer_value_normalization ... ok
+test test_go_test_convention_linking ... ok
+test test_go_contract_symbol_matching_acceptance_gate ... ok
+test test_go_constitution_precedence_over_contract ... ok
+test test_go_change_guard_contract_enforcement ... ok
+test test_go_extracted_import_grounding_context_selection ... ok
 
 running 1 test (Lifecycle Integration)
 test test_end_to_end_lifecycle ... ok

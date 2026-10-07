@@ -60,8 +60,9 @@ fn test_synthetic_mutation_accuracy() {
         );
     }
 
-    assert_eq!(total_mutations, 16); // 4 tasks * 4 mutations each
-    assert_eq!(correct_mutations, 16);
+    let expected_mutations = tasks.len() * 4;
+    assert_eq!(total_mutations, expected_mutations); // 7 tasks * 4 mutations each = 28
+    assert_eq!(correct_mutations, expected_mutations);
 }
 
 #[test]

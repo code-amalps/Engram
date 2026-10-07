@@ -449,6 +449,48 @@ pub fn ratify_contract(
     Ok(contract)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SymbolMatchResult {
+    Match,
+    NoMatch,
+}
+
+/// Matches an expected contract symbol against an actual symbol identifier.
+/// Normalizes receiver pointer notations (e.g. `*OrderService.ExportCSV` and `OrderService.ExportCSV` match identically).
+pub fn matches_contract_symbol(expected_symbol: &str, actual_symbol: &str) -> bool {
+    crate::go_parser::matches_go_contract_symbol(expected_symbol, actual_symbol)
+}
+
+/// Evaluate an actual symbol against a contract's expected symbols boundary.
+pub fn validate_symbol_against_contract(
+    contract: &ChangeContract,
+    actual_symbol: &str,
+) -> SymbolMatchResult {
+    for expected in &contract.boundary.expected_symbols {
+        if matches_contract_symbol(expected, actual_symbol) {
+            return SymbolMatchResult::Match;
+        }
+    }
+    SymbolMatchResult::NoMatch
+}
+
+/// Create a new Change Contract with explicit expected symbols.
+pub fn create_contract_with_symbols(
+    root: &Path,
+    task_goal: &str,
+    expected_modules: Option<Vec<String>>,
+    expected_files: Option<Vec<String>>,
+    expected_symbols: Option<Vec<String>>,
+    forbidden_boundaries: Option<Vec<String>>,
+) -> Result<ChangeContract> {
+    let mut contract = create_contract(root, task_goal, expected_modules, expected_files, forbidden_boundaries)?;
+    if let Some(syms) = expected_symbols {
+        contract.boundary.expected_symbols = syms;
+        save_contract(root, &contract)?;
+    }
+    Ok(contract)
+}
+
 /// Validate actual changed files against Change Contract elastic boundaries
 /// with absolute precedence of the Project Constitution.
 pub fn validate_contract_diff_with_constitution(

@@ -4,6 +4,7 @@ pub mod compiler;
 pub mod constitution;
 pub mod contract;
 pub mod git_history;
+pub mod go_parser;
 pub mod graph;
 pub mod guard;
 pub mod manifest;
@@ -600,6 +601,7 @@ mod tests {
         assert_eq!(language(Path::new("script.js")), Some("javascript"));
         assert_eq!(language(Path::new("module.py")), Some("python"));
         assert_eq!(language(Path::new("Program.cs")), Some("csharp"));
+        assert_eq!(language(Path::new("main.go")), Some("go"));
         assert_eq!(language(Path::new("unknown.xyz")), None);
     }
 
@@ -647,5 +649,16 @@ mod tests {
         assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
         assert!(symbols.iter().any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
         assert!(symbols.iter().any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
+    }
+
+    #[test]
+    fn test_tree_sitter_go_extraction() {
+        let code = b"package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV() error { return nil }\n\ntype Exporter interface {\n    Export() error\n}\n";
+        let (record, symbols, _) = parse_file(Path::new("."), "order.go", code, "rev1").unwrap();
+        assert_eq!(record.language, "go");
+        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
+        assert!(symbols.iter().any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD"));
+        assert!(symbols.iter().any(|s| s.name == "Exporter" && s.kind == "INTERFACE"));
+        assert!(symbols.iter().any(|s| s.name == "orders" && s.kind == "MODULE"));
     }
 }

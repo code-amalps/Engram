@@ -79,6 +79,7 @@ pub fn language(path: &Path) -> Option<&'static str> {
         "py" => Some("python"),
         "cs" => Some("csharp"),
         "rs" => Some("rust"),
+        "go" => Some("go"),
         _ => None,
     }
 }
@@ -89,6 +90,7 @@ pub fn lang_for(name: &str) -> Language {
         "javascript" => tree_sitter_javascript::LANGUAGE.into(),
         "python" => tree_sitter_python::LANGUAGE.into(),
         "rust" => tree_sitter_rust::LANGUAGE.into(),
+        "go" => tree_sitter_go::LANGUAGE.into(),
         _ => tree_sitter_c_sharp::LANGUAGE.into(),
     }
 }
@@ -258,6 +260,26 @@ pub fn parse_file(
     let path = Path::new(rel);
     let lang = language(path).ok_or_else(|| anyhow!("unsupported language"))?;
     let source = String::from_utf8_lossy(bytes);
+
+    if lang == "go" {
+        let go_mod = crate::go_parser::load_root_go_mod(root);
+        let ast = crate::go_parser::extract_go_ast(&source)?;
+        let (symbols, rels) = crate::go_parser::convert_go_ast_to_engram_with_root(
+            root,
+            rel,
+            &ast,
+            go_mod.as_deref(),
+        );
+        let display = redact(&source);
+        let record = FileRecord {
+            path: rel.into(),
+            hash: hash(bytes),
+            language: lang.into(),
+            excerpt: display.chars().take(20000).collect(),
+        };
+        return Ok((record, symbols, rels));
+    }
+
     let mut parser = TsParser::new();
     parser.set_language(&lang_for(lang))?;
     let tree = parser

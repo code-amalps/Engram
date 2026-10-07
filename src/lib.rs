@@ -6,6 +6,7 @@ pub mod compiler;
 pub mod constitution;
 pub mod contract;
 pub mod git_history;
+pub mod go_parser;
 pub mod graph;
 pub mod guard;
 pub mod manifest;

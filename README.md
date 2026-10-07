@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-76%20Passed-brightgreen.svg" alt="Tests: 76 Passed">
+  <img src="https://img.shields.io/badge/Tests-84%20Passed-brightgreen.svg" alt="Tests: 84 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -38,10 +38,11 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 * 🏎️ **Blazingly Fast:** Re-analyzes a 140+ file codebase in **< 15 milliseconds** using composite content-addressed caching.
 * 🪶 **Featherweight:** Runs quietly in the background using **< 20 MB of RAM** with zero garbage collection pauses.
 * 📦 **Single Static Binary:** Self-contained executable (`engram.exe` on Windows or `engram` on Mac/Linux) with **zero external dependencies**—no Node.js, Python, or .NET runtime needed.
-* 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits with canonical symbol matching.
-* ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
+* 🧠 **Engineering Memory Intelligence (v0.8.0):** Scoped memory hierarchy (`Global` < `Repository` < `Module` < `Package` < `Symbol`), orthogonal team ownership (`team: Option<String>`), immutable supersession chains (`ADR-014` $\to$ `ADR-029`), automatic scope shadowing resolution, direct contradiction protection requiring human resolution, and human promotion gate permanently preventing memory poisoning.
 * 💥 **Change Impact Intelligence & Multi-Hop Observability (v0.7.0):** Multi-hop impact cone engine (`engram inspect <symbol>`), 7 deterministic relationship categories (`DIRECT`, `IMPLEMENTATION`, `CALLER`, `TEST`, `IMPORT_DEPENDENT`, `CONFIGURATION`, `HISTORICAL`), causal provenance tracking, and the architectural invariant: *"Impact predicts relevance. Contract authorizes change."*
 * 🌳 **Go Dependency Intelligence & Structural Interfaces (v0.6.0):** Full `go.mod` directive parsing (`module`, `require`, `replace`, `exclude`, `toolchain`), explicit origin classification (`LOCAL`, `VENDORED`, `REPLACED_LOCAL`, `REPLACED_EXTERNAL`, `EXTERNAL`, `UNRESOLVED`), two-stage structural interface satisfaction (method candidate lookup + full parameter/result signature verification), and cross-file graph context grounding.
+* 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits with canonical symbol matching.
+* ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
 * 🌲 **Polyglot Tree-Sitter AST & Multi-Language Support:** Native AST extractors for **Rust, Go, TypeScript, JavaScript, Python, and C#**. Features receiver pointer normalization (`*OrderService.ExportCSV` == `OrderService.ExportCSV`) and test conventions (`*_test.go`). Dogfoods on its own repository!
 
 ---

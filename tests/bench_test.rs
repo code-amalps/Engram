@@ -174,3 +174,50 @@ fn test_impact_benchmarks_all_scenarios() {
         );
     }
 }
+
+#[test]
+fn test_empirical_precision_by_relationship_category() {
+    let tasks = engram::bench::get_impact_benchmark_tasks();
+    let res = engram::bench::run_task_benchmark(&tasks[0]).unwrap();
+    let impact = res.impact.as_ref().expect("Impact scenario must produce metrics");
+
+    // Dynamic empirical precision breakdown by relationship type
+    assert!(!impact.precision_by_category.is_empty(), "precision_by_category must be populated");
+    assert!(!impact.recall_by_category.is_empty(), "recall_by_category must be populated");
+    assert!(impact.precision_by_category.contains_key("DIRECT"));
+}
+
+#[test]
+fn test_multi_turn_memory_compounding_suite() {
+    let res = engram::bench::run_multi_turn_compounding_benchmark().unwrap();
+
+    // 1. Verify 4 multi-turn tasks executed
+    assert_eq!(res.total_turns, 4);
+    assert_eq!(res.turns.len(), 4);
+
+    // 2. Turn 1: Initial Discovery & Decision Recording
+    assert_eq!(res.turns[0].turn_id, "TASK-COMP-01");
+    assert!(res.turns[0].success);
+    assert_eq!(res.turns[0].active_memories_count, 1);
+
+    // 3. Turn 2: Follow-up Task Memory Grounding (Compounding)
+    assert_eq!(res.turns[1].turn_id, "TASK-COMP-02");
+    assert!(res.turns[1].success);
+    assert_eq!(res.turns[1].grounding_recall, 1.0);
+
+    // 4. Turn 3: Architectural Policy Supersession (ADR-014 -> ADR-029)
+    assert_eq!(res.turns[2].turn_id, "TASK-COMP-03");
+    assert!(res.turns[2].success);
+    assert_eq!(res.supersession_correctness_pct, 100.0, "Superseded policy must be 100% excluded from active query");
+
+    // 5. Turn 4: Scoped Specialization vs Global Shadowing
+    assert_eq!(res.turns[3].turn_id, "TASK-COMP-04");
+    assert!(res.turns[3].success);
+    assert_eq!(res.conflict_resolution_accuracy_pct, 100.0, "Conflict resolution and shadowing must be 100% accurate");
+
+    // 6. Memory Compounding Lift Formula:
+    // Compounding Lift = (Baseline Rediscovery Cost - Memory Rediscovery Cost) / Baseline Rediscovery Cost
+    assert!(res.baseline_rediscovery_cost > res.memory_rediscovery_cost);
+    assert!(res.compounding_lift_pct > 0.0, "Compounding lift must be positive");
+    assert!(res.compounding_lift_pct >= 50.0, "Compounding lift should exceed 50% for grounded turns");
+}

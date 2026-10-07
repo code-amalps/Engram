@@ -3,6 +3,7 @@
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use uuid::Uuid;
 use crate::model::EvidenceTier;
 use crate::storage::{cache_dir, root_path};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MemoryLifecycleState {
     Provisional,
@@ -22,16 +23,127 @@ pub enum MemoryLifecycleState {
     Superseded,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryScope {
-    pub modules: Vec<String>,
-    pub files: Vec<String>,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScopeLevel {
+    Global,       // Applies across entire repository/project
+    Repository,   // Monorepo sub-repository / workspace root
+    Module,       // Specific module or architectural layer (e.g. orders, payment)
+    Package,      // Exact package path (e.g. internal/orders/export)
+    Symbol,       // Exact symbol (e.g. OrderService.ExportCSV)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn default_scope_level() -> ScopeLevel {
+    ScopeLevel::Module
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryScope {
+    #[serde(default = "default_scope_level")]
+    pub level: ScopeLevel,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub team: Option<String>,
+    #[serde(default)]
+    pub modules: Vec<String>,
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub symbols: Vec<String>,
+}
+
+impl Default for MemoryScope {
+    fn default() -> Self {
+        Self {
+            level: ScopeLevel::Global,
+            target: None,
+            team: None,
+            modules: Vec::new(),
+            files: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+}
+
+impl MemoryScope {
+    pub fn global() -> Self {
+        Self {
+            level: ScopeLevel::Global,
+            target: None,
+            team: None,
+            modules: Vec::new(),
+            files: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+
+    pub fn repository(target: &str) -> Self {
+        Self {
+            level: ScopeLevel::Repository,
+            target: Some(target.to_string()),
+            team: None,
+            modules: Vec::new(),
+            files: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+
+    pub fn module(name: &str) -> Self {
+        Self {
+            level: ScopeLevel::Module,
+            target: Some(name.to_string()),
+            team: None,
+            modules: vec![name.to_string()],
+            files: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+
+    pub fn package(path: &str) -> Self {
+        Self {
+            level: ScopeLevel::Package,
+            target: Some(path.to_string()),
+            team: None,
+            modules: Vec::new(),
+            files: vec![path.to_string()],
+            symbols: Vec::new(),
+        }
+    }
+
+    pub fn symbol(sym: &str) -> Self {
+        Self {
+            level: ScopeLevel::Symbol,
+            target: Some(sym.to_string()),
+            team: None,
+            modules: Vec::new(),
+            files: Vec::new(),
+            symbols: vec![sym.to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemorySource {
     pub source_type: String, // "human_decision", "pr_review", "adr"
     pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryProvenance {
+    pub source_type: String, // "human_decision", "pr_review", "adr", "promoted_candidate", "supersession"
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub source_commit: Option<String>,
+    #[serde(default)]
+    pub source_contract: Option<String>,
+    #[serde(default)]
+    pub source_decision: Option<String>,
+    #[serde(default)]
+    pub ratified_by: Option<String>,
+    #[serde(default)]
+    pub ratified_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,12 +152,23 @@ pub struct DurableMemory {
     pub title: String,
     pub statement: String,
     pub reason: String,
-    pub source: MemorySource,
+    #[serde(default)]
+    pub source: Option<MemorySource>,
+    #[serde(default)]
+    pub provenance: Option<MemoryProvenance>,
+    #[serde(default)]
     pub accepted_by: String,
+    #[serde(default = "Utc::now")]
     pub accepted_at: DateTime<Utc>,
     pub scope: MemoryScope,
     pub evidence_tier: EvidenceTier,
     pub lifecycle_state: MemoryLifecycleState,
+    #[serde(default)]
+    pub supersedes: Option<String>,
+    #[serde(default)]
+    pub superseded_by: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +188,24 @@ pub struct MemoryCandidate {
     pub scope: MemoryScope,
     pub created_at: DateTime<Utc>,
     pub lifecycle_state: MemoryLifecycleState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConflictType {
+    DirectContradiction,   // Same scope, contradictory rules without supersedes link
+    ScopeShadowing,        // Specialized scoped exception shadowing broader rule
+    UnresolvedPrecedence,  // Divergent rules without clear ordering
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConflict {
+    pub memory_a_id: String,
+    pub memory_b_id: String,
+    pub conflict_type: ConflictType,
+    pub explanation: String,
+    pub resolution: String,
+    pub requires_human_resolution: bool,
 }
 
 fn engram_dir(root: &Path) -> PathBuf {
@@ -117,7 +258,60 @@ pub fn save_durable_memories(root: &Path, doc: &DurableMemoryDocument) -> Result
     Ok(())
 }
 
-/// Record an explicit human / architectural decision directly into durable memory.
+/// Record a scoped architectural decision directly into durable memory.
+pub fn record_scoped_decision(
+    root: &Path,
+    id: Option<&str>,
+    title: &str,
+    statement: &str,
+    reason: &str,
+    scope: MemoryScope,
+    source_ref: Option<String>,
+    accepted_by: &str,
+) -> Result<DurableMemory> {
+    let root = root_path(root)?;
+    let mut doc = load_durable_memories(&root)?;
+
+    let mem_id = id
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("mem_{}", Uuid::new_v4().simple()));
+
+    let provenance = MemoryProvenance {
+        source_type: "human_decision".to_string(),
+        source_id: id.map(|s| s.to_string()),
+        source_commit: None,
+        source_contract: None,
+        source_decision: id.map(|s| s.to_string()),
+        ratified_by: Some(accepted_by.to_string()),
+        ratified_at: Some(Utc::now()),
+    };
+
+    let memory = DurableMemory {
+        id: mem_id,
+        title: title.to_string(),
+        statement: statement.to_string(),
+        reason: reason.to_string(),
+        source: Some(MemorySource {
+            source_type: "human_decision".to_string(),
+            reference: source_ref,
+        }),
+        provenance: Some(provenance),
+        accepted_by: accepted_by.to_string(),
+        accepted_at: Utc::now(),
+        scope,
+        evidence_tier: EvidenceTier::Explicit,
+        lifecycle_state: MemoryLifecycleState::Durable,
+        supersedes: None,
+        superseded_by: None,
+        tags: Vec::new(),
+    };
+
+    doc.memories.push(memory.clone());
+    save_durable_memories(&root, &doc)?;
+    Ok(memory)
+}
+
+/// Record an explicit human / architectural decision directly into durable memory (legacy helper).
 pub fn record_decision(
     root: &Path,
     title: &str,
@@ -128,28 +322,84 @@ pub fn record_decision(
     source_ref: Option<String>,
     accepted_by: &str,
 ) -> Result<DurableMemory> {
+    let target = modules.first().cloned();
+    let level = if !modules.is_empty() {
+        ScopeLevel::Module
+    } else if !files.is_empty() {
+        ScopeLevel::Package
+    } else {
+        ScopeLevel::Global
+    };
+    let scope = MemoryScope {
+        level,
+        target,
+        team: None,
+        modules,
+        files,
+        symbols: Vec::new(),
+    };
+    record_scoped_decision(root, None, title, statement, reason, scope, source_ref, accepted_by)
+}
+
+/// Supersede an existing durable memory with a new architectural policy.
+/// The superseded memory record remains preserved (immutable statement) with lifecycle state SUPERSEDED.
+pub fn supersede_memory(
+    root: &Path,
+    old_id: &str,
+    new_title: &str,
+    new_statement: &str,
+    new_reason: &str,
+    new_scope: MemoryScope,
+    accepted_by: &str,
+) -> Result<DurableMemory> {
     let root = root_path(root)?;
     let mut doc = load_durable_memories(&root)?;
 
-    let memory = DurableMemory {
-        id: format!("mem_{}", Uuid::new_v4().simple()),
-        title: title.to_string(),
-        statement: statement.to_string(),
-        reason: reason.to_string(),
-        source: MemorySource {
-            source_type: "human_decision".to_string(),
-            reference: source_ref,
-        },
-        accepted_by: accepted_by.to_string(),
-        accepted_at: Utc::now(),
-        scope: MemoryScope { modules, files },
-        evidence_tier: EvidenceTier::Explicit,
-        lifecycle_state: MemoryLifecycleState::Durable,
+    let old_idx = doc
+        .memories
+        .iter()
+        .position(|m| m.id == old_id)
+        .ok_or_else(|| anyhow!("Memory to supersede '{}' not found", old_id))?;
+
+    let new_id = format!("mem_{}", Uuid::new_v4().simple());
+
+    // Mark previous record as Superseded (statement remains immutable!)
+    doc.memories[old_idx].lifecycle_state = MemoryLifecycleState::Superseded;
+    doc.memories[old_idx].superseded_by = Some(new_id.clone());
+
+    let provenance = MemoryProvenance {
+        source_type: "supersession".to_string(),
+        source_id: Some(new_id.clone()),
+        source_commit: None,
+        source_contract: None,
+        source_decision: Some(new_id.clone()),
+        ratified_by: Some(accepted_by.to_string()),
+        ratified_at: Some(Utc::now()),
     };
 
-    doc.memories.push(memory.clone());
+    let new_memory = DurableMemory {
+        id: new_id,
+        title: new_title.to_string(),
+        statement: new_statement.to_string(),
+        reason: new_reason.to_string(),
+        source: Some(MemorySource {
+            source_type: "supersession".to_string(),
+            reference: Some(format!("supersedes:{}", old_id)),
+        }),
+        provenance: Some(provenance),
+        accepted_by: accepted_by.to_string(),
+        accepted_at: Utc::now(),
+        scope: new_scope,
+        evidence_tier: EvidenceTier::Explicit,
+        lifecycle_state: MemoryLifecycleState::Durable,
+        supersedes: Some(old_id.to_string()),
+        superseded_by: None,
+        tags: Vec::new(),
+    };
+
+    doc.memories.push(new_memory.clone());
     save_durable_memories(&root, &doc)?;
-    Ok(memory)
+    Ok(new_memory)
 }
 
 /// Record a candidate memory derived from an agent task (isolated from durable memory).
@@ -165,6 +415,15 @@ pub fn record_task_candidate(
 ) -> Result<MemoryCandidate> {
     let root = root_path(root)?;
     let candidate_id = format!("cand_{}", Uuid::new_v4().simple());
+    let target = modules.first().cloned();
+    let level = if !modules.is_empty() {
+        ScopeLevel::Module
+    } else if !files.is_empty() {
+        ScopeLevel::Package
+    } else {
+        ScopeLevel::Global
+    };
+
     let candidate = MemoryCandidate {
         candidate_id: candidate_id.clone(),
         task_id: task_id.to_string(),
@@ -172,7 +431,14 @@ pub fn record_task_candidate(
         statement: statement.to_string(),
         provisional_reason: reason.to_string(),
         proposed_by: proposed_by.to_string(),
-        scope: MemoryScope { modules, files },
+        scope: MemoryScope {
+            level,
+            target,
+            team: None,
+            modules,
+            files,
+            symbols: Vec::new(),
+        },
         created_at: Utc::now(),
         lifecycle_state: MemoryLifecycleState::Candidate,
     };
@@ -235,15 +501,27 @@ pub fn promote_candidate(
         title: candidate.title.clone(),
         statement: candidate.statement.clone(),
         reason,
-        source: MemorySource {
+        source: Some(MemorySource {
             source_type: "promoted_task".to_string(),
             reference: Some(format!("task:{}", candidate.task_id)),
-        },
+        }),
+        provenance: Some(MemoryProvenance {
+            source_type: "promoted_task".to_string(),
+            source_id: Some(format!("task:{}", candidate.task_id)),
+            source_commit: None,
+            source_contract: None,
+            source_decision: None,
+            ratified_by: Some(accepted_by.to_string()),
+            ratified_at: Some(Utc::now()),
+        }),
         accepted_by: accepted_by.to_string(),
         accepted_at: Utc::now(),
         scope: candidate.scope.clone(),
         evidence_tier: EvidenceTier::Verified,
         lifecycle_state: MemoryLifecycleState::Durable,
+        supersedes: None,
+        superseded_by: None,
+        tags: Vec::new(),
     };
 
     doc.memories.push(durable.clone());
@@ -287,55 +565,352 @@ pub fn reject_candidate(
     Ok(())
 }
 
-/// Query relevant durable memories for a task or set of files.
-pub fn query_relevant_memories(
+fn is_stop_word(w: &str) -> bool {
+    matches!(
+        w,
+        "this"
+            | "that"
+            | "with"
+            | "from"
+            | "have"
+            | "been"
+            | "using"
+            | "uses"
+            | "order"
+            | "service"
+            | "services"
+            | "instead"
+            | "avoid"
+            | "before"
+            | "after"
+            | "when"
+            | "what"
+            | "where"
+    )
+}
+
+fn detect_statement_conflict(a: &DurableMemory, b: &DurableMemory) -> Option<bool> {
+    let s_a = a.statement.to_ascii_lowercase();
+    let s_b = b.statement.to_ascii_lowercase();
+
+    // Check shared known architectural topics/terms
+    let keywords = [
+        "repository pattern",
+        "connection pool",
+        "token validation",
+        "csv export",
+        "raw sql",
+        "direct connection",
+        "streaming",
+        "buffering",
+        "security token",
+        "database access",
+    ];
+
+    let mut topic_overlap = false;
+    for kw in &keywords {
+        if s_a.contains(kw) && s_b.contains(kw) {
+            topic_overlap = true;
+            break;
+        }
+    }
+
+    if !topic_overlap {
+        if let (Some(ta), Some(tb)) = (&a.scope.target, &b.scope.target) {
+            if ta.eq_ignore_ascii_case(tb) {
+                topic_overlap = true;
+            }
+        }
+    }
+
+    if !topic_overlap {
+        let words_a: HashSet<_> = s_a
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+            .filter(|w| w.len() > 3 && !is_stop_word(w))
+            .collect();
+        let words_b: HashSet<_> = s_b
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+            .filter(|w| w.len() > 3 && !is_stop_word(w))
+            .collect();
+        let common = words_a.intersection(&words_b).count();
+        if common >= 2 {
+            topic_overlap = true;
+        }
+    }
+
+    if !topic_overlap {
+        return None;
+    }
+
+    // Direct opposition/negation checks
+    let has_negation_a = s_a.contains("must not")
+        || s_a.contains("forbidden")
+        || s_a.contains("prohibit")
+        || s_a.contains("never")
+        || s_a.contains("bypass")
+        || s_a.contains("disable");
+    let has_negation_b = s_b.contains("must not")
+        || s_b.contains("forbidden")
+        || s_b.contains("prohibit")
+        || s_b.contains("never")
+        || s_b.contains("bypass")
+        || s_b.contains("disable");
+
+    let has_affirm_a = s_a.contains("must ")
+        || s_a.contains("always")
+        || s_a.contains("require")
+        || s_a.contains("enforce")
+        || s_a.contains("enable");
+    let has_affirm_b = s_b.contains("must ")
+        || s_b.contains("always")
+        || s_b.contains("require")
+        || s_b.contains("enforce")
+        || s_b.contains("enable");
+
+    if (has_negation_a && has_affirm_b) || (has_negation_b && has_affirm_a) {
+        return Some(true);
+    }
+
+    if (s_a.contains("must use") && s_b.contains("must not use"))
+        || (s_b.contains("must use") && s_a.contains("must not use"))
+    {
+        return Some(true);
+    }
+
+    if s_a.contains("bypass") || s_b.contains("bypass") {
+        return Some(false);
+    }
+
+    None
+}
+
+/// Detect conflicts, contradictions, and scope shadowing across active durable memories.
+pub fn detect_memory_conflicts(memories: &[DurableMemory]) -> Vec<MemoryConflict> {
+    let mut conflicts = Vec::new();
+
+    // Only compare active memories that have not already resolved via supersession
+    let active: Vec<_> = memories
+        .iter()
+        .filter(|m| m.lifecycle_state == MemoryLifecycleState::Durable)
+        .collect();
+
+    for i in 0..active.len() {
+        for j in (i + 1)..active.len() {
+            let a = active[i];
+            let b = active[j];
+
+            // If explicitly linked by supersedes, not in conflict
+            if a.supersedes.as_deref() == Some(&b.id)
+                || b.supersedes.as_deref() == Some(&a.id)
+                || a.superseded_by.as_deref() == Some(&b.id)
+                || b.superseded_by.as_deref() == Some(&a.id)
+            {
+                continue;
+            }
+
+            if detect_statement_conflict(a, b).is_some() {
+                if a.scope.level == b.scope.level && a.scope.target == b.scope.target {
+                    // Exact scope match contradiction -> DirectContradiction (Requires human resolution)
+                    conflicts.push(MemoryConflict {
+                        memory_a_id: a.id.clone(),
+                        memory_b_id: b.id.clone(),
+                        conflict_type: ConflictType::DirectContradiction,
+                        explanation: format!(
+                            "Direct contradiction between '{}' ({}) and '{}' ({}) at identical scope {:?} ({:?}) without supersedes link",
+                            a.title, a.id, b.title, b.id, a.scope.level, a.scope.target
+                        ),
+                        resolution: "Requires developer ratification or explicit supersession link before compile".to_string(),
+                        requires_human_resolution: true,
+                    });
+                } else if a.scope.level != b.scope.level {
+                    // Hierarchical scope -> ScopeShadowing (Handled automatically)
+                    let (broader, specific) = if a.scope.level < b.scope.level {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+
+                    conflicts.push(MemoryConflict {
+                        memory_a_id: broader.id.clone(),
+                        memory_b_id: specific.id.clone(),
+                        conflict_type: ConflictType::ScopeShadowing,
+                        explanation: format!(
+                            "Specialized rule '{}' ({:?}) shadows broader rule '{}' ({:?}) for target '{:?}'",
+                            specific.title, specific.scope.level, broader.title, broader.scope.level, specific.scope.target
+                        ),
+                        resolution: format!(
+                            "Specialized rule {} shadows broader rule {} within target scope; broader rule remains active elsewhere.",
+                            specific.id, broader.id
+                        ),
+                        requires_human_resolution: false,
+                    });
+                }
+            }
+        }
+    }
+
+    conflicts
+}
+
+/// Query relevant durable memories for a task, target files, and target symbols.
+/// Handles supersession exclusion and hierarchical scope shadowing resolution.
+pub fn query_scoped_memories(
     root: &Path,
     task: &str,
     files: &[String],
+    symbols: &[String],
+    include_superseded: bool,
 ) -> Result<Vec<DurableMemory>> {
     let root = root_path(root)?;
     let doc = load_durable_memories(&root)?;
     let task_lower = task.to_ascii_lowercase();
 
-    let mut relevant = Vec::new();
+    let mut candidates = Vec::new();
+
     for mem in doc.memories {
-        if mem.lifecycle_state != MemoryLifecycleState::Durable {
+        if !include_superseded && mem.lifecycle_state == MemoryLifecycleState::Superseded {
+            continue;
+        }
+        if mem.lifecycle_state != MemoryLifecycleState::Durable
+            && mem.lifecycle_state != MemoryLifecycleState::Superseded
+        {
             continue;
         }
 
         let mut matches = false;
 
-        // Check text match in title or statement
-        if task_lower.contains(&mem.title.to_ascii_lowercase())
-            || mem.statement.to_ascii_lowercase().contains(&task_lower)
-        {
-            matches = true;
-        }
-
-        // Check module scope
-        for m in &mem.scope.modules {
-            let m_lower = m.to_ascii_lowercase();
-            if task_lower.contains(&m_lower)
-                || files.iter().any(|f| f.to_ascii_lowercase().contains(&m_lower))
-            {
+        match mem.scope.level {
+            ScopeLevel::Global => {
                 matches = true;
-                break;
+            }
+            ScopeLevel::Repository => {
+                if let Some(target) = &mem.scope.target {
+                    let target_l = target.to_ascii_lowercase();
+                    if task_lower.contains(&target_l)
+                        || files.iter().any(|f| f.to_ascii_lowercase().contains(&target_l))
+                    {
+                        matches = true;
+                    }
+                } else {
+                    matches = true;
+                }
+            }
+            ScopeLevel::Module => {
+                let mut mod_names = mem.scope.modules.clone();
+                if let Some(t) = &mem.scope.target {
+                    if !mod_names.contains(t) {
+                        mod_names.push(t.clone());
+                    }
+                }
+                for m in &mod_names {
+                    let m_l = m.to_ascii_lowercase();
+                    if task_lower.contains(&m_l)
+                        || files.iter().any(|f| {
+                            let fl = f.to_ascii_lowercase();
+                            fl.contains(&format!("/{m_l}/"))
+                                || fl.contains(&format!("\\{m_l}\\"))
+                                || fl.starts_with(&format!("{m_l}/"))
+                                || fl.contains(&m_l)
+                        })
+                        || symbols.iter().any(|s| s.to_ascii_lowercase().contains(&m_l))
+                    {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            ScopeLevel::Package => {
+                for p in &mem.scope.files {
+                    let pl = p.to_ascii_lowercase();
+                    if files.iter().any(|f| f.to_ascii_lowercase().contains(&pl))
+                        || task_lower.contains(&pl)
+                    {
+                        matches = true;
+                        break;
+                    }
+                }
+                if let Some(t) = &mem.scope.target {
+                    let tl = t.to_ascii_lowercase();
+                    if files.iter().any(|f| f.to_ascii_lowercase().contains(&tl))
+                        || task_lower.contains(&tl)
+                    {
+                        matches = true;
+                    }
+                }
+            }
+            ScopeLevel::Symbol => {
+                for s in &mem.scope.symbols {
+                    let sl = s.to_ascii_lowercase();
+                    if symbols.iter().any(|sym| sym.to_ascii_lowercase().contains(&sl))
+                        || task_lower.contains(&sl)
+                        || files.iter().any(|f| f.to_ascii_lowercase().contains(&sl))
+                    {
+                        matches = true;
+                        break;
+                    }
+                }
+                if let Some(t) = &mem.scope.target {
+                    let tl = t.to_ascii_lowercase();
+                    if symbols.iter().any(|sym| sym.to_ascii_lowercase().contains(&tl))
+                        || task_lower.contains(&tl)
+                        || files.iter().any(|f| f.to_ascii_lowercase().contains(&tl))
+                    {
+                        matches = true;
+                    }
+                }
             }
         }
 
-        // Check file scope
-        for f in &mem.scope.files {
-            let f_lower = f.to_ascii_lowercase();
-            if files.iter().any(|file| file.to_ascii_lowercase().contains(&f_lower)) {
+        // Textual fallback match on title / statement
+        if !matches {
+            if task_lower.contains(&mem.title.to_ascii_lowercase())
+                || mem.statement.to_ascii_lowercase().contains(&task_lower)
+            {
                 matches = true;
-                break;
             }
         }
 
         if matches {
-            relevant.push(mem);
+            candidates.push(mem);
         }
     }
 
-    Ok(relevant)
+    // Apply Scope Shadowing resolution
+    let conflicts = detect_memory_conflicts(&candidates);
+    let mut shadowed_ids = HashSet::new();
+
+    for conflict in conflicts {
+        if conflict.conflict_type == ConflictType::ScopeShadowing {
+            let mem_a = candidates.iter().find(|m| m.id == conflict.memory_a_id);
+            let mem_b = candidates.iter().find(|m| m.id == conflict.memory_b_id);
+            if let (Some(a), Some(b)) = (mem_a, mem_b) {
+                if a.scope.level < b.scope.level {
+                    shadowed_ids.insert(a.id.clone());
+                } else if b.scope.level < a.scope.level {
+                    shadowed_ids.insert(b.id.clone());
+                }
+            }
+        }
+    }
+
+    candidates.retain(|m| !shadowed_ids.contains(&m.id));
+
+    // Sort order: Symbol > Package > Module > Repository > Global, then most recent first
+    candidates.sort_by(|a, b| {
+        b.scope.level.cmp(&a.scope.level)
+            .then_with(|| b.accepted_at.cmp(&a.accepted_at))
+    });
+
+    Ok(candidates)
+}
+
+/// Query relevant durable memories for a task or set of files (legacy helper).
+pub fn query_relevant_memories(
+    root: &Path,
+    task: &str,
+    files: &[String],
+) -> Result<Vec<DurableMemory>> {
+    query_scoped_memories(root, task, files, &[], false)
 }

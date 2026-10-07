@@ -12,7 +12,6 @@ use crate::constitution::{format_constraints, load_constitution};
 use crate::git_history::get_cochanges_for_file;
 use crate::graph::GraphTraversal;
 use crate::manifest::{detect_ecosystem, format_agent_guard};
-use crate::memory::query_relevant_memories;
 use crate::model::Direction;
 use crate::storage::{db, revision, root_path};
 
@@ -191,6 +190,8 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         + eco_guard.as_deref().map(estimate_tokens).unwrap_or(0);
     used += overhead_tokens;
 
+    let mut all_selected_symbols = Vec::new();
+
     for (path, score) in candidates {
         let (lang, body) = match doc_map.get(&path) {
             Some(d) => d,
@@ -214,6 +215,7 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
                 ))
             })? {
                 let (name, kind, line, sig) = row?;
+                all_selected_symbols.push(name.clone());
                 syms.push(format!("{kind} {name} (L{line}): {sig}"));
             }
         }
@@ -280,13 +282,20 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
     };
 
     let touched_paths: Vec<String> = selected.iter().map(|f| f.path.clone()).collect();
-    let memories = query_relevant_memories(&root, task, &touched_paths).unwrap_or_default();
+    let memories = crate::memory::query_scoped_memories(&root, task, &touched_paths, &all_selected_symbols, false).unwrap_or_default();
     let relevant_memories: Vec<String> = memories
         .into_iter()
         .map(|m| {
+            let scope_tag = if !m.scope.modules.is_empty() {
+                m.scope.modules.join(", ")
+            } else if let Some(ref t) = m.scope.target {
+                t.clone()
+            } else {
+                format!("{:?}", m.scope.level)
+            };
             format!(
                 "[{}] {}: {} (Reason: {})",
-                m.scope.modules.join(", "),
+                scope_tag,
                 m.title,
                 m.statement,
                 m.reason

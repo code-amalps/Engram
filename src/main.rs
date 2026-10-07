@@ -473,7 +473,8 @@ fn run() -> Result<()> {
                 contract::evaluate_impact_against_contract(c, &cone)
             });
             let affected_paths = cone.all_affected_paths();
-            let memories = memory::query_relevant_memories(root, &target, &affected_paths).unwrap_or_default();
+            let audit_memories = memory::query_scoped_memories(root, &target, &affected_paths, &[target.clone()], true).unwrap_or_default();
+            let memory_conflicts = memory::detect_memory_conflicts(&audit_memories);
 
             if force_json {
                 print_json(json!({
@@ -482,7 +483,8 @@ fn run() -> Result<()> {
                     "impact_cone": cone,
                     "active_contract": active_contract,
                     "authorization": authorization,
-                    "memories": memories
+                    "memories": audit_memories,
+                    "memory_conflicts": memory_conflicts,
                 }))?;
             } else {
                 print!("{}", impact::format_impact_explanation(&cone));
@@ -520,10 +522,48 @@ fn run() -> Result<()> {
                     println!("  No active Change Contract found.");
                 }
 
-                if !memories.is_empty() {
-                    println!("\n🧠 DURABLE MEMORY");
-                    for (i, m) in memories.iter().enumerate() {
-                        println!("  {}. {} (Decision: {})", i + 1, m.title, m.statement);
+                if !audit_memories.is_empty() {
+                    println!("\n🧠 MEMORY");
+                    for (idx, m) in audit_memories.iter().enumerate() {
+                        let is_last = idx == audit_memories.len() - 1;
+                        let branch = if is_last { "└──" } else { "├──" };
+                        let pipe = if is_last { "    " } else { "│   " };
+                        let target_desc = m.scope.target.as_deref().unwrap_or(match m.scope.level {
+                            memory::ScopeLevel::Global => "Global",
+                            memory::ScopeLevel::Repository => "Repo",
+                            _ => "Project",
+                        });
+                        println!("  {} {} ({})", branch, m.id, target_desc);
+                        println!("  {}  Scope:     {:?}", pipe, m.scope.level);
+                        match m.lifecycle_state {
+                            memory::MemoryLifecycleState::Superseded => {
+                                let superseding = m.superseded_by.as_deref().unwrap_or("newer policy");
+                                println!("  {}  Status:    SUPERSEDED (by {})", pipe, superseding);
+                            }
+                            memory::MemoryLifecycleState::Durable => {
+                                if let Some(ref old) = m.supersedes {
+                                    println!("  {}  Status:    DURABLE (supersedes {})", pipe, old);
+                                } else {
+                                    println!("  {}  Status:    DURABLE", pipe);
+                                }
+                            }
+                            _ => {
+                                println!("  {}  Status:    {:?}", pipe, m.lifecycle_state);
+                            }
+                        }
+                        println!("  {}  Statement: {}", pipe, m.statement);
+                        println!("  {}  Reason:    {}", pipe, m.reason);
+                        if !is_last {
+                            println!("  │");
+                        }
+                    }
+                }
+
+                if !memory_conflicts.is_empty() {
+                    println!("\n⚠️ MEMORY CONFLICTS / SHADOWING");
+                    for c in &memory_conflicts {
+                        println!("  • [{:?}] {}", c.conflict_type, c.explanation);
+                        println!("    Resolution: {}", c.resolution);
                     }
                 }
             }

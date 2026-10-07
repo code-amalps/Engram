@@ -89,6 +89,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 crate::contract::evaluate_impact_against_contract(c, &cone)
             });
             let explanation = crate::impact::format_impact_explanation(&cone);
+            let affected_paths = cone.all_affected_paths();
+            let audit_memories = crate::memory::query_scoped_memories(&root, target, &affected_paths, &[target.to_string()], true).unwrap_or_default();
+            let memory_conflicts = crate::memory::detect_memory_conflicts(&audit_memories);
 
             json_result(json!({
                 "target": cone.target_symbol,
@@ -96,7 +99,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 "impact_cone": cone,
                 "active_contract": active_contract,
                 "authorization": authorization,
-                "explanation": explanation
+                "explanation": explanation,
+                "memories": audit_memories,
+                "memory_conflicts": memory_conflicts,
             }))
         }
         "engram_get_cochanges" => {

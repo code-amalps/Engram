@@ -9,6 +9,7 @@ pub mod git_history;
 pub mod go_parser;
 pub mod graph;
 pub mod guard;
+pub mod impact;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;

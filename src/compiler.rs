@@ -118,6 +118,35 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
     seeds.sort_by(|a, b| b.1.total_cmp(&a.1));
 
     for (seed_path, seed_score) in seeds.into_iter().take(5) {
+        // Impact Cone Expansion: Categorized ranking (Direct > Test > Implementation > Caller > ImportDependent > Historical)
+        if let Ok(cone) = crate::impact::compute_impact_cone(&conn, &root, &seed_path, 2) {
+            for entity in cone.all_entities() {
+                if doc_map.contains_key(&entity.path) {
+                    let cat_weight = match entity.category {
+                        crate::impact::ImpactCategory::Direct => 12.0,
+                        crate::impact::ImpactCategory::Test => 9.0,
+                        crate::impact::ImpactCategory::Implementation => 8.0,
+                        crate::impact::ImpactCategory::Caller => 6.0,
+                        crate::impact::ImpactCategory::ImportDependent => 3.5,
+                        crate::impact::ImpactCategory::Configuration => 3.0,
+                        crate::impact::ImpactCategory::Historical => 2.5,
+                    };
+                    let boost = (seed_score * 0.5).max(cat_weight);
+                    let score_entry = composite_scores.entry(entity.path.clone()).or_insert(0.0);
+                    *score_entry += boost;
+
+                    let prov = format!(
+                        "Impact {} (hop {}) via {} (reason: {})",
+                        entity.category.as_str(), entity.hop_distance, seed_path, entity.reason
+                    );
+                    let list = provenance_map.entry(entity.path.clone()).or_default();
+                    if !list.contains(&prov) {
+                        list.push(prov);
+                    }
+                }
+            }
+        }
+
         // Expand 1-hop and 2-hop neighbors (IMPORTS, TESTS, IMPLEMENTS)
         if let Ok(neighbors) = traversal.neighbors(&seed_path, &["IMPORTS", "TESTS", "IMPLEMENTS"], Direction::Both, 2) {
             for edge in neighbors {

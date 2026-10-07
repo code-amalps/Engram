@@ -7,6 +7,7 @@ pub mod git_history;
 pub mod go_parser;
 pub mod graph;
 pub mod guard;
+pub mod impact;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
@@ -91,6 +92,12 @@ enum CommandLine {
     /// Calculate change impact or query reverse dependencies for a symbol
     Impact {
         target: String,
+    },
+    /// Deeply inspect symbol change impact, causal provenance, active contract status, and memories
+    Inspect {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
     },
     /// Validate working-tree changes against architectural rules
     Validate {
@@ -455,6 +462,70 @@ fn run() -> Result<()> {
                 print_json(res)?;
             } else {
                 printer::print_impact(&res);
+            }
+        }
+        Some(CommandLine::Inspect { target, depth }) => {
+            analyzer::ensure_fresh(root)?;
+            let conn = storage::db(root)?;
+            let cone = impact::compute_impact_cone(&conn, root, &target, depth)?;
+            let active_contract = contract::get_active_contract(root).ok().flatten();
+            let authorization = active_contract.as_ref().map(|c| {
+                contract::evaluate_impact_against_contract(c, &cone)
+            });
+            let affected_paths = cone.all_affected_paths();
+            let memories = memory::query_relevant_memories(root, &target, &affected_paths).unwrap_or_default();
+
+            if force_json {
+                print_json(json!({
+                    "target": cone.target_symbol,
+                    "target_file": cone.target_file,
+                    "impact_cone": cone,
+                    "active_contract": active_contract,
+                    "authorization": authorization,
+                    "memories": memories
+                }))?;
+            } else {
+                print!("{}", impact::format_impact_explanation(&cone));
+                if let Some(ref c) = active_contract {
+                    println!("\n📜 CONTRACT STATUS");
+                    println!("  Active Contract: {} (v{}, Status: {:?})", c.contract_id, c.version, c.status);
+                    if let Some(ref auth) = authorization {
+                        if !auth.authorized_targets.is_empty() {
+                            println!("  Authorized Targets (Expected):");
+                            for t in &auth.authorized_targets {
+                                println!("    ✓ {}", t);
+                            }
+                        }
+                        if !auth.authorized_expansions.is_empty() {
+                            println!("  Authorized Expansions (Allowed Modules):");
+                            for e in &auth.authorized_expansions {
+                                println!("    ✓ {}", e);
+                            }
+                        }
+                        if !auth.unauthorized_relevant.is_empty() {
+                            println!("  ⚠️ UNAUTHORIZED RELEVANT (Predicted in cone, but outside contract):");
+                            for u in &auth.unauthorized_relevant {
+                                println!("    • {}", u);
+                            }
+                        }
+                        if !auth.forbidden_impacts.is_empty() {
+                            println!("  🚫 FORBIDDEN BOUNDARY VIOLATIONS:");
+                            for f in &auth.forbidden_impacts {
+                                println!("    ❌ {}", f);
+                            }
+                        }
+                    }
+                } else {
+                    println!("\n📜 CONTRACT STATUS");
+                    println!("  No active Change Contract found.");
+                }
+
+                if !memories.is_empty() {
+                    println!("\n🧠 DURABLE MEMORY");
+                    for (i, m) in memories.iter().enumerate() {
+                        println!("  {}. {} (Decision: {})", i + 1, m.title, m.statement);
+                    }
+                }
             }
         }
         Some(CommandLine::Validate { task_id }) => {

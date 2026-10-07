@@ -150,3 +150,27 @@ fn test_benchmark_zero_side_effects() {
         "engram bench caused side effects on the project workspace!"
     );
 }
+
+#[test]
+fn test_impact_benchmarks_all_scenarios() {
+    let tasks = engram::bench::get_impact_benchmark_tasks();
+    assert_eq!(tasks.len(), 6);
+
+    for task in &tasks {
+        let res = engram::bench::run_task_benchmark(task).unwrap();
+        let impact = res.impact.as_ref().expect("Impact scenario must produce metrics");
+
+        assert_eq!(impact.recall, 1.0, "Impact recall must be 100% for {}", task.id);
+        assert!(impact.precision >= 0.5, "Impact precision must be >= 0.5 for {}", task.id);
+        assert_eq!(
+            impact.provenance_accuracy_pct, 100.0,
+            "Provenance accuracy must be 100% for {}",
+            task.id
+        );
+        assert_eq!(
+            res.contract.classification_accuracy_pct, 100.0,
+            "Contract accuracy must be 100% for {}",
+            task.id
+        );
+    }
+}

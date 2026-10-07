@@ -14,7 +14,7 @@ use crate::compiler::context;
 use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
 use crate::memory::record_decision;
 
-const BENCHMARK_VERSION: &str = "0.6.0";
+const BENCHMARK_VERSION: &str = "0.7.0";
 const DATASET_VERSION: &str = "2026.10-corp-1";
 const ENGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -44,6 +44,32 @@ pub struct BenchmarkMemoryScenario {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroundTruthImpactEntity {
+    pub path: String,
+    pub symbol: Option<String>,
+    pub category: crate::impact::ImpactCategory,
+    pub expected_provenance_contains: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkImpactScenario {
+    pub target: String,
+    pub depth: usize,
+    pub ground_truth_entities: Vec<GroundTruthImpactEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImpactMetrics {
+    pub recall: f64,
+    pub precision: f64,
+    pub f1: f64,
+    pub provenance_accuracy_pct: f64,
+    pub total_ground_truth: usize,
+    pub total_returned: usize,
+    pub total_correct_provenance: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkTask {
     pub id: String,
     pub name: String,
@@ -55,6 +81,7 @@ pub struct BenchmarkTask {
     pub forbidden_boundaries: Vec<String>,
     pub synthetic_mutations: Vec<SyntheticMutation>,
     pub memory_scenario: Option<BenchmarkMemoryScenario>,
+    pub impact_scenario: Option<BenchmarkImpactScenario>,
     pub mock_files: Vec<(String, String)>,
 }
 
@@ -116,6 +143,7 @@ pub struct TaskBenchmarkResult {
     pub grounding: GroundingMetrics,
     pub contract: ContractMetrics,
     pub memory: Option<MemoryLiftMetrics>,
+    pub impact: Option<ImpactMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +154,7 @@ pub struct BenchmarkSuiteResult {
     pub aggregate_grounding: GroundingMetrics,
     pub aggregate_contract: ContractMetrics,
     pub aggregate_memory: MemoryLiftMetrics,
+    pub aggregate_impact: Option<ImpactMetrics>,
     pub task_results: Vec<TaskBenchmarkResult>,
 }
 
@@ -182,6 +211,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 decision_modules: vec!["orders".into()],
                 task2_goal: "Add JSON export to OrderService".into(),
             }),
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "src/orders/order.service.ts".into(),
@@ -260,6 +290,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 decision_modules: vec!["orders".into()],
                 task2_goal: "Add compliance metrics to OrderProcessor".into(),
             }),
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "src/orders/processor.py".into(),
@@ -338,6 +369,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 decision_modules: vec!["Cart".into()],
                 task2_goal: "Add discount voucher validation to CartService".into(),
             }),
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "src/Cart/CartService.cs".into(),
@@ -416,6 +448,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 decision_modules: vec!["memory".into()],
                 task2_goal: "Add memory superseding workflow".into(),
             }),
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "src/memory.rs".into(),
@@ -492,6 +525,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 decision_modules: vec!["orders".into()],
                 task2_goal: "Implement XML exporter for OrderService".into(),
             }),
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "go.mod".into(),
@@ -561,6 +595,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 },
             ],
             memory_scenario: None,
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "go.mod".into(),
@@ -630,6 +665,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 },
             ],
             memory_scenario: None,
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "go.mod".into(),
@@ -703,6 +739,7 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 },
             ],
             memory_scenario: None,
+            impact_scenario: None,
             mock_files: vec![
                 (
                     "go.mod".into(),
@@ -735,6 +772,550 @@ pub fn get_benchmark_tasks() -> Vec<BenchmarkTask> {
                 (
                     "legacy/vault.go".into(),
                     "package legacy\n\ntype LegacyVault struct {}\n".into(),
+                ),
+            ],
+        },
+    ]
+}
+
+/// Generate the 6 deterministic Change Impact Intelligence benchmark tasks (TASK-IMPACT-01 to TASK-IMPACT-06).
+pub fn get_impact_benchmark_tasks() -> Vec<BenchmarkTask> {
+    vec![
+        // Task 1: Direct Method Change
+        BenchmarkTask {
+            id: "TASK-IMPACT-01".into(),
+            name: "Direct Method Change Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for OrderService.ExportCSV".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "internal/orders/service.go".into(),
+                    "internal/orders/service_test.go".into(),
+                ],
+                symbols: vec!["OrderService".into(), "ExportCSV".into()],
+                modules: vec!["orders".into()],
+                tests: vec!["internal/orders/service_test.go".into()],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["orders".into()],
+            expected_files: vec![
+                "internal/orders/service.go".into(),
+                "internal/orders/service_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "internal/orders/service.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "internal/orders/types.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "external/billing.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/key.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "OrderService.ExportCSV".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "internal/orders/service.go".into(),
+                        symbol: Some("OrderService".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "OrderService".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "internal/orders/service_test.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::Test,
+                        expected_provenance_contains: "test file".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "internal/orders/service.go".into(),
+                    "package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV(path string) error { return nil }\n".into(),
+                ),
+                (
+                    "internal/orders/service_test.go".into(),
+                    "package orders\n\nimport \"testing\"\n\nfunc TestOrderServiceExportCSV(t *testing.T) {\n\ts := &OrderService{}\n\t_ = s.ExportCSV(\"test.csv\")\n}\n".into(),
+                ),
+                (
+                    "internal/orders/types.go".into(),
+                    "package orders\n\ntype Order struct { ID string }\n".into(),
+                ),
+                (
+                    "external/billing.go".into(),
+                    "package billing\n\nfunc Bill() {}\n".into(),
+                ),
+                (
+                    "internal/secret/key.go".into(),
+                    "package secret\n\nconst Key = \"xyz\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 2: Interface Modification
+        BenchmarkTask {
+            id: "TASK-IMPACT-02".into(),
+            name: "Interface Modification Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for Exporter interface modification".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "pkg/export/exporter.go".into(),
+                    "pkg/export/csv.go".into(),
+                    "pkg/export/csv_test.go".into(),
+                ],
+                symbols: vec!["Exporter".into(), "CsvExporter".into()],
+                modules: vec!["export".into()],
+                tests: vec!["pkg/export/csv_test.go".into()],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["export".into()],
+            expected_files: vec![
+                "pkg/export/exporter.go".into(),
+                "pkg/export/csv.go".into(),
+                "pkg/export/csv_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "pkg/export/exporter.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "pkg/export/types.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "cmd/server/main.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/auth.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "Exporter".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "pkg/export/exporter.go".into(),
+                        symbol: Some("Exporter".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "Exporter".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "pkg/export/csv.go".into(),
+                        symbol: Some("CsvExporter".into()),
+                        category: crate::impact::ImpactCategory::Implementation,
+                        expected_provenance_contains: "Implemented by struct".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "pkg/export/csv_test.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::Test,
+                        expected_provenance_contains: "test file".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "pkg/export/exporter.go".into(),
+                    "package export\n\ntype Exporter interface {\n\tExport(data string) error\n}\n".into(),
+                ),
+                (
+                    "pkg/export/csv.go".into(),
+                    "package export\n\ntype CsvExporter struct {}\n\nfunc (c *CsvExporter) Export(data string) error { return nil }\n".into(),
+                ),
+                (
+                    "pkg/export/csv_test.go".into(),
+                    "package export\n\nimport \"testing\"\n\nfunc TestCsvExporter(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "pkg/export/types.go".into(),
+                    "package export\n\ntype ExportConfig struct {}\n".into(),
+                ),
+                (
+                    "cmd/server/main.go".into(),
+                    "package main\n\nfunc Run() {}\n".into(),
+                ),
+                (
+                    "internal/secret/auth.go".into(),
+                    "package secret\n\nvar Secret = \"s\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 3: Shared Package Export
+        BenchmarkTask {
+            id: "TASK-IMPACT-03".into(),
+            name: "Shared Package Export Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for shared Currency type".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "pkg/types/currency.go".into(),
+                    "internal/pricing/calculator.go".into(),
+                ],
+                symbols: vec!["Currency".into()],
+                modules: vec!["types".into()],
+                tests: vec![],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["types".into()],
+            expected_files: vec!["pkg/types/currency.go".into()],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "pkg/types/currency.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "pkg/types/config.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "legacy/db.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/keys.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "Currency".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "pkg/types/currency.go".into(),
+                        symbol: Some("Currency".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "Currency".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "internal/pricing/calculator.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::ImportDependent,
+                        expected_provenance_contains: "Imported by dependent package".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "pkg/types/currency.go".into(),
+                    "package types\n\ntype Currency string\n".into(),
+                ),
+                (
+                    "internal/pricing/calculator.go".into(),
+                    "package pricing\n\nimport \"github.com/acme/shop/pkg/types\"\n\ntype Calculator struct {\n\tC types.Currency\n}\n".into(),
+                ),
+                (
+                    "pkg/types/config.go".into(),
+                    "package types\n\ntype Config struct {}\n".into(),
+                ),
+                (
+                    "legacy/db.go".into(),
+                    "package legacy\n\nfunc Connect() {}\n".into(),
+                ),
+                (
+                    "internal/secret/keys.go".into(),
+                    "package secret\n\nconst Key = \"abc\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 4: Function Call Chain
+        BenchmarkTask {
+            id: "TASK-IMPACT-04".into(),
+            name: "Function Call Chain Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for CalculateTax function".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "pkg/tax/tax.go".into(),
+                    "pkg/tax/tax_test.go".into(),
+                    "internal/checkout/checkout.go".into(),
+                ],
+                symbols: vec!["CalculateTax".into()],
+                modules: vec!["tax".into()],
+                tests: vec!["pkg/tax/tax_test.go".into()],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["tax".into()],
+            expected_files: vec![
+                "pkg/tax/tax.go".into(),
+                "pkg/tax/tax_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "pkg/tax/tax.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "pkg/tax/rate.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "external/telemetry.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/cert.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "CalculateTax".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "pkg/tax/tax.go".into(),
+                        symbol: Some("CalculateTax".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "CalculateTax".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "pkg/tax/tax_test.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::Test,
+                        expected_provenance_contains: "test file".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "internal/checkout/checkout.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::ImportDependent,
+                        expected_provenance_contains: "Imported by dependent package".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "pkg/tax/tax.go".into(),
+                    "package tax\n\nfunc CalculateTax(amount float64) float64 {\n\treturn amount * 0.2\n}\n".into(),
+                ),
+                (
+                    "pkg/tax/tax_test.go".into(),
+                    "package tax\n\nimport \"testing\"\n\nfunc TestCalculateTax(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "internal/checkout/checkout.go".into(),
+                    "package checkout\n\nimport \"github.com/acme/shop/pkg/tax\"\n\nfunc ProcessOrder() {\n\t_ = tax.CalculateTax(100.0)\n}\n".into(),
+                ),
+                (
+                    "pkg/tax/rate.go".into(),
+                    "package tax\n\nconst StandardRate = 0.2\n".into(),
+                ),
+                (
+                    "external/telemetry.go".into(),
+                    "package telemetry\n\nfunc Log() {}\n".into(),
+                ),
+                (
+                    "internal/secret/cert.go".into(),
+                    "package secret\n\nconst Cert = \"cert\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 5: Test Convention Linking
+        BenchmarkTask {
+            id: "TASK-IMPACT-05".into(),
+            name: "Test Convention Linking Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for CartService test linking".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "internal/cart/cart.go".into(),
+                    "internal/cart/cart_test.go".into(),
+                ],
+                symbols: vec!["CartService".into()],
+                modules: vec!["cart".into()],
+                tests: vec!["internal/cart/cart_test.go".into()],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["cart".into()],
+            expected_files: vec![
+                "internal/cart/cart.go".into(),
+                "internal/cart/cart_test.go".into(),
+            ],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "internal/cart/cart.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "internal/cart/item.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "internal/admin/tool.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/token.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "CartService".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "internal/cart/cart.go".into(),
+                        symbol: Some("CartService".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "CartService".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "internal/cart/cart_test.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::Test,
+                        expected_provenance_contains: "test file".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "internal/cart/cart.go".into(),
+                    "package cart\n\ntype CartService struct {}\n".into(),
+                ),
+                (
+                    "internal/cart/cart_test.go".into(),
+                    "package cart\n\nimport \"testing\"\n\nfunc TestCartService(t *testing.T) {}\n".into(),
+                ),
+                (
+                    "internal/cart/item.go".into(),
+                    "package cart\n\ntype Item struct { ID string }\n".into(),
+                ),
+                (
+                    "internal/admin/tool.go".into(),
+                    "package admin\n\nfunc Reset() {}\n".into(),
+                ),
+                (
+                    "internal/secret/token.go".into(),
+                    "package secret\n\nconst Token = \"tok\"\n".into(),
+                ),
+            ],
+        },
+
+        // Task 6: Historical Co-Change
+        BenchmarkTask {
+            id: "TASK-IMPACT-06".into(),
+            name: "Historical Co-Change Impact".into(),
+            language: "go".into(),
+            task_description: "Analyze change impact for PaymentGateway with historical co-change".into(),
+            ground_truth: GroundTruth {
+                files: vec![
+                    "pkg/payment/gateway.go".into(),
+                    "pkg/payment/config.go".into(),
+                ],
+                symbols: vec!["PaymentGateway".into()],
+                modules: vec!["payment".into()],
+                tests: vec![],
+                dependencies: vec![],
+            },
+            expected_modules: vec!["payment".into()],
+            expected_files: vec!["pkg/payment/gateway.go".into()],
+            forbidden_boundaries: vec!["internal/secret/**".into()],
+            synthetic_mutations: vec![
+                SyntheticMutation {
+                    path: "pkg/payment/gateway.go".into(),
+                    expected_category: FileValidationCategory::Expected,
+                },
+                SyntheticMutation {
+                    path: "pkg/payment/types.go".into(),
+                    expected_category: FileValidationCategory::ExpectedExpansion,
+                },
+                SyntheticMutation {
+                    path: "internal/sms/notifier.go".into(),
+                    expected_category: FileValidationCategory::Unexpected,
+                },
+                SyntheticMutation {
+                    path: "internal/secret/vault.go".into(),
+                    expected_category: FileValidationCategory::BoundaryViolation,
+                },
+            ],
+            memory_scenario: None,
+            impact_scenario: Some(BenchmarkImpactScenario {
+                target: "PaymentGateway".into(),
+                depth: 2,
+                ground_truth_entities: vec![
+                    GroundTruthImpactEntity {
+                        path: "pkg/payment/gateway.go".into(),
+                        symbol: Some("PaymentGateway".into()),
+                        category: crate::impact::ImpactCategory::Direct,
+                        expected_provenance_contains: "PaymentGateway".into(),
+                    },
+                    GroundTruthImpactEntity {
+                        path: "pkg/payment/config.go".into(),
+                        symbol: None,
+                        category: crate::impact::ImpactCategory::Historical,
+                        expected_provenance_contains: "Historically co-changes in".into(),
+                    },
+                ],
+            }),
+            mock_files: vec![
+                (
+                    "go.mod".into(),
+                    "module github.com/acme/shop\n\ngo 1.22\n".into(),
+                ),
+                (
+                    "pkg/payment/gateway.go".into(),
+                    "package payment\n\ntype PaymentGateway struct {}\n".into(),
+                ),
+                (
+                    "pkg/payment/config.go".into(),
+                    "package payment\n\ntype PaymentConfig struct {}\n".into(),
+                ),
+                (
+                    "pkg/payment/types.go".into(),
+                    "package payment\n\ntype PaymentStatus string\n".into(),
+                ),
+                (
+                    "internal/sms/notifier.go".into(),
+                    "package sms\n\nfunc Notify() {}\n".into(),
+                ),
+                (
+                    "internal/secret/vault.go".into(),
+                    "package secret\n\nconst Vault = \"vault\"\n".into(),
                 ),
             ],
         },
@@ -975,6 +1556,78 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
         None
     };
 
+    // --- 5. IMPACT INTELLIGENCE EVALUATION ---
+    let impact_metrics = if let Some(ref scenario) = task.impact_scenario {
+        if task.id == "TASK-IMPACT-06" {
+            let conn = crate::storage::db(&fixture_root)?;
+            crate::git_history::init_cochange_table(&conn)?;
+            conn.execute(
+                "INSERT INTO cochange_edges (source_file, target_file, support, sample_size, cond_prob, rev_prob, lift, window_size, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    "pkg/payment/gateway.go",
+                    "pkg/payment/config.go",
+                    8,
+                    10,
+                    0.80,
+                    0.70,
+                    2.5,
+                    50,
+                    "2026-10-07T00:00:00Z"
+                ],
+            )?;
+        }
+
+        let conn = crate::storage::db(&fixture_root)?;
+        let cone = crate::impact::compute_impact_cone(&conn, &fixture_root, &scenario.target, scenario.depth)?;
+
+        let all_entities = cone.all_entities();
+        let total_returned = all_entities.len();
+        let total_gt = scenario.ground_truth_entities.len();
+
+        let mut hits = 0;
+        let mut correct_provenance = 0;
+
+        for gt in &scenario.ground_truth_entities {
+            if let Some(returned) = all_entities.iter().find(|e| e.path == gt.path) {
+                hits += 1;
+                let category_matches = returned.category == gt.category;
+                let provenance_matches = returned.relationships.iter().any(|r| {
+                    r.provenance.contains(&gt.expected_provenance_contains)
+                }) || returned.reason.contains(&gt.expected_provenance_contains);
+
+                if category_matches && provenance_matches {
+                    correct_provenance += 1;
+                }
+            }
+        }
+
+        let recall = if total_gt > 0 { hits as f64 / total_gt as f64 } else { 1.0 };
+        let precision = if total_returned > 0 { hits as f64 / total_returned as f64 } else { 1.0 };
+        let f1 = if precision + recall > 0.0 {
+            2.0 * (precision * recall) / (precision + recall)
+        } else {
+            0.0
+        };
+        let provenance_accuracy_pct = if hits > 0 {
+            (correct_provenance as f64 / hits as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Some(ImpactMetrics {
+            recall,
+            precision,
+            f1,
+            provenance_accuracy_pct,
+            total_ground_truth: total_gt,
+            total_returned,
+            total_correct_provenance: correct_provenance,
+        })
+    } else {
+        None
+    };
+
     // Clean up temporary sandbox fixture
     let _ = fs::remove_dir_all(&fixture_root);
 
@@ -986,6 +1639,7 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
         grounding,
         contract: contract_metrics,
         memory: memory_metrics,
+        impact: impact_metrics,
     })
 }
 
@@ -1075,6 +1729,31 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
         memory_lift_confirmed: memory_results.iter().all(|m| m.memory_lift_confirmed),
     };
 
+    // Aggregate Impact
+    let impact_results: Vec<&ImpactMetrics> = task_results.iter().filter_map(|t| t.impact.as_ref()).collect();
+    let aggregate_impact = if !impact_results.is_empty() {
+        let n = impact_results.len() as f64;
+        let avg_recall = impact_results.iter().map(|i| i.recall).sum::<f64>() / n;
+        let avg_precision = impact_results.iter().map(|i| i.precision).sum::<f64>() / n;
+        let avg_f1 = impact_results.iter().map(|i| i.f1).sum::<f64>() / n;
+        let avg_prov = impact_results.iter().map(|i| i.provenance_accuracy_pct).sum::<f64>() / n;
+        let sum_gt = impact_results.iter().map(|i| i.total_ground_truth).sum();
+        let sum_ret = impact_results.iter().map(|i| i.total_returned).sum();
+        let sum_corr = impact_results.iter().map(|i| i.total_correct_provenance).sum();
+
+        Some(ImpactMetrics {
+            recall: (avg_recall * 1000.0).round() / 1000.0,
+            precision: (avg_precision * 1000.0).round() / 1000.0,
+            f1: (avg_f1 * 1000.0).round() / 1000.0,
+            provenance_accuracy_pct: (avg_prov * 10.0).round() / 10.0,
+            total_ground_truth: sum_gt,
+            total_returned: sum_ret,
+            total_correct_provenance: sum_corr,
+        })
+    } else {
+        None
+    };
+
     Ok(BenchmarkSuiteResult {
         metadata: ReproducibilityMetadata {
             benchmark_version: BENCHMARK_VERSION.into(),
@@ -1089,6 +1768,7 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
         aggregate_grounding,
         aggregate_contract,
         aggregate_memory,
+        aggregate_impact,
         task_results,
     })
 }
@@ -1174,6 +1854,24 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
     out.push_str(&format!(
         "   Empirical Memory Lift:      CONFIRMED ✓ (100% recall of prior team rationale in related task)\n"
     ));
+
+    if let Some(ref imp) = res.aggregate_impact {
+        out.push_str("\n5. CHANGE IMPACT INTELLIGENCE (MULTI-HOP BLAST RADIUS & PROVENANCE)\n");
+        out.push_str(&format!(
+            "   Impact Recall:              {:.1}%\n",
+            imp.recall * 100.0
+        ));
+        out.push_str(&format!(
+            "   Impact Precision:           {:.1}%  |  Impact F1: {:.3}\n",
+            imp.precision * 100.0,
+            imp.f1
+        ));
+        out.push_str(&format!(
+            "   Provenance Explanation:     {:.1}% (Verified causal evidence chains)\n",
+            imp.provenance_accuracy_pct
+        ));
+        out.push_str("   Relationship Categories:    DIRECT, IMPLEMENTATION, CALLER, TEST, IMPORT_DEPENDENT, HISTORICAL\n");
+    }
 
     if verbose {
         out.push_str("\n────────────────────────────────────────────────────────────────────────\n");

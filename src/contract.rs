@@ -491,6 +491,137 @@ pub fn create_contract_with_symbols(
     Ok(contract)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImpactAuthorizationEvaluation {
+    pub authorized_targets: Vec<String>,
+    pub authorized_expansions: Vec<String>,
+    pub unauthorized_relevant: Vec<String>,
+    pub forbidden_impacts: Vec<String>,
+}
+
+/// Evaluates an ImpactCone against a ChangeContract's authorization boundaries.
+/// Enforces Invariant 1: Impact predicts relevance; Contract authorizes change.
+pub fn evaluate_impact_against_contract(
+    contract: &ChangeContract,
+    impact: &crate::impact::ImpactCone,
+) -> ImpactAuthorizationEvaluation {
+    let mut authorized_targets = Vec::new();
+    let mut authorized_expansions = Vec::new();
+    let mut unauthorized_relevant = Vec::new();
+    let mut forbidden_impacts = Vec::new();
+
+    let normalized_expected: HashSet<String> = contract
+        .boundary
+        .expected_files
+        .iter()
+        .map(|f| normalize_rel_path(f))
+        .collect();
+
+    for entity in impact.all_entities() {
+        let norm_path = normalize_rel_path(&entity.path);
+
+        // 1. Forbidden check
+        if contract
+            .boundary
+            .forbidden_boundaries
+            .iter()
+            .any(|pat| matches_boundary(&norm_path, pat))
+        {
+            if !forbidden_impacts.contains(&entity.path) {
+                forbidden_impacts.push(entity.path.clone());
+            }
+            continue;
+        }
+
+        // 2. Explicit target check
+        if normalized_expected.contains(&norm_path) {
+            if !authorized_targets.contains(&entity.path) {
+                authorized_targets.push(entity.path.clone());
+            }
+            continue;
+        }
+
+        // 3. Module authorization check (Allowed Expansion candidate)
+        let file_module = extract_module(&norm_path);
+        let is_module_expected = contract
+            .boundary
+            .expected_modules
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&file_module) || norm_path.contains(m));
+
+        if is_module_expected {
+            if !authorized_expansions.contains(&entity.path) {
+                authorized_expansions.push(entity.path.clone());
+            }
+        } else {
+            // Predicted relevant, but NOT authorized by contract!
+            if !unauthorized_relevant.contains(&entity.path) {
+                unauthorized_relevant.push(entity.path.clone());
+            }
+        }
+    }
+
+    ImpactAuthorizationEvaluation {
+        authorized_targets,
+        authorized_expansions,
+        unauthorized_relevant,
+        forbidden_impacts,
+    }
+}
+
+/// Create a Change Contract seeded with an ImpactCone, enforcing authorization boundaries.
+pub fn create_contract_with_impact(
+    root: &Path,
+    task_goal: &str,
+    impact: &crate::impact::ImpactCone,
+    allowed_modules: Option<Vec<String>>,
+    forbidden_boundaries: Option<Vec<String>>,
+) -> Result<ChangeContract> {
+    let mut expected_files = Vec::new();
+    let mut expected_symbols = Vec::new();
+    let mut expected_tests = Vec::new();
+    let mut derived_modules = HashSet::new();
+
+    if let Some(ref m) = allowed_modules {
+        for mod_name in m {
+            derived_modules.insert(mod_name.clone());
+        }
+    }
+
+    // Direct entities are expected
+    for d in &impact.direct_entities {
+        if !expected_files.contains(&d.path) {
+            expected_files.push(d.path.clone());
+        }
+        if let Some(ref sym) = d.symbol_name {
+            if !expected_symbols.contains(sym) {
+                expected_symbols.push(sym.clone());
+            }
+        }
+        derived_modules.insert(extract_module(&d.path));
+    }
+
+    // Test entities are expected
+    for t in &impact.test_entities {
+        if !expected_files.contains(&t.path) {
+            expected_files.push(t.path.clone());
+        }
+        if !expected_tests.contains(&t.path) {
+            expected_tests.push(t.path.clone());
+        }
+        derived_modules.insert(extract_module(&t.path));
+    }
+
+    create_contract_with_symbols(
+        root,
+        task_goal,
+        Some(derived_modules.into_iter().collect()),
+        Some(expected_files),
+        Some(expected_symbols),
+        forbidden_boundaries,
+    )
+}
+
 /// Validate actual changed files against Change Contract elastic boundaries
 /// with absolute precedence of the Project Constitution.
 pub fn validate_contract_diff_with_constitution(

@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-69%20Passed-brightgreen.svg" alt="Tests: 69 Passed">
+  <img src="https://img.shields.io/badge/Tests-76%20Passed-brightgreen.svg" alt="Tests: 76 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -40,7 +40,7 @@ Imagine hiring a super-smart robot assistant to fix a toy in your bedroom:
 * 📦 **Single Static Binary:** Self-contained executable (`engram.exe` on Windows or `engram` on Mac/Linux) with **zero external dependencies**—no Node.js, Python, or .NET runtime needed.
 * 📜 **Elastic Change Contracts:** Pre-edit boundaries (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`) anchored to Git commits with canonical symbol matching.
 * ⚡ **Git Co-Change Mining:** Discovers files that statistically co-change in commits with noise filtering and conditional probability signals.
-* 🧠 **Durable Engineering Memory:** Stores human/team architectural decisions with full rationale (**WHY**) in `.engram/memory.yaml` with memory poisoning protection.
+* 💥 **Change Impact Intelligence & Multi-Hop Observability (v0.7.0):** Multi-hop impact cone engine (`engram inspect <symbol>`), 7 deterministic relationship categories (`DIRECT`, `IMPLEMENTATION`, `CALLER`, `TEST`, `IMPORT_DEPENDENT`, `CONFIGURATION`, `HISTORICAL`), causal provenance tracking, and the architectural invariant: *"Impact predicts relevance. Contract authorizes change."*
 * 🌳 **Go Dependency Intelligence & Structural Interfaces (v0.6.0):** Full `go.mod` directive parsing (`module`, `require`, `replace`, `exclude`, `toolchain`), explicit origin classification (`LOCAL`, `VENDORED`, `REPLACED_LOCAL`, `REPLACED_EXTERNAL`, `EXTERNAL`, `UNRESOLVED`), two-stage structural interface satisfaction (method candidate lookup + full parameter/result signature verification), and cross-file graph context grounding.
 * 🌲 **Polyglot Tree-Sitter AST & Multi-Language Support:** Native AST extractors for **Rust, Go, TypeScript, JavaScript, Python, and C#**. Features receiver pointer normalization (`*OrderService.ExportCSV` == `OrderService.ExportCSV`) and test conventions (`*_test.go`). Dogfoods on its own repository!
 
@@ -293,6 +293,7 @@ rules:
 | `engram memory list` | Lists durable engineering memories (`memory.yaml`) | `engram memory list` |
 | `engram memory record` | Records architectural decisions with rationale (**WHY**) | `engram memory record "Title" "Stmt" "Reason"` |
 | `engram memory promote <id>` | Promotes accepted candidates to durable memory | `engram memory promote cand_123` |
+| `engram inspect <symbol>` | Deeply inspects blast radius, causal provenance, active contract & memory | `engram inspect OrderService.ExportCSV` |
 | `engram impact <id_or_file>` | Compares live diff or queries reverse dependencies | `engram impact OrderService` |
 | `engram validate <task_id>` | Advisory checks for scope expansion & rules | `engram validate task_abc123` |
 | `engram bench` | Runs scientific benchmark suite (`--verbose`, `--json`) | `engram bench --verbose` |
@@ -416,9 +417,10 @@ Engram includes a comprehensive automated test suite covering Tree-sitter parser
 cargo test
 ```
 
-All **69 tests** run and pass:
+All **76 tests** run and pass:
 ```text
-running 17 tests (Unit Tests)
+running 19 tests (Unit Tests)
+test impact::tests::test_impact_category_ordering_precedence ... ok
 test go_parser::tests::test_parse_full_go_mod_directives ... ok
 test go_parser::tests::test_dependency_origin_classification ... ok
 test go_parser::tests::test_two_stage_interface_matching ... ok
@@ -434,13 +436,20 @@ test tests::test_tree_sitter_python_extraction ... ok
 test tests::test_tree_sitter_go_extraction ... ok
 test tests::test_secret_redaction ... ok
 
-running 6 tests (Scientific Benchmark Engine)
+running 7 tests (Scientific Benchmark Engine)
 test test_discovery_measured_vs_estimated_separation ... ok
+test test_impact_benchmarks_all_scenarios ... ok
 test test_synthetic_mutation_accuracy ... ok
 test test_memory_compounding_ab_control ... ok
 test test_grounding_multi_entity_recall_precision ... ok
 test test_benchmark_zero_side_effects ... ok
 test test_benchmark_determinism ... ok
+
+running 4 tests (Change Impact Intelligence & Invariants)
+test test_impact_cone_categories_and_hops ... ok
+test test_impact_provenance_accuracy ... ok
+test test_contract_impact_expansion_authorization ... ok
+test test_context_compiler_impact_ranking ... ok
 
 running 14 tests (Change Guard & Enforcement Invariants)
 test test_check_no_active_contract ... ok

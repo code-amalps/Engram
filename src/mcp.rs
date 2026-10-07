@@ -74,6 +74,31 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 .unwrap_or("");
             json_result(impact(&root, target)?)
         }
+        "engram_inspect_symbol" => {
+            let target = args["target"]
+                .as_str()
+                .or_else(|| args["symbol"].as_str())
+                .unwrap_or("");
+            let depth = args["depth"].as_u64().unwrap_or(2) as usize;
+
+            crate::analyzer::ensure_fresh(&root)?;
+            let conn = db(&root)?;
+            let cone = crate::impact::compute_impact_cone(&conn, &root, target, depth)?;
+            let active_contract = crate::contract::get_active_contract(&root).ok().flatten();
+            let authorization = active_contract.as_ref().map(|c| {
+                crate::contract::evaluate_impact_against_contract(c, &cone)
+            });
+            let explanation = crate::impact::format_impact_explanation(&cone);
+
+            json_result(json!({
+                "target": cone.target_symbol,
+                "target_file": cone.target_file,
+                "impact_cone": cone,
+                "active_contract": active_contract,
+                "authorization": authorization,
+                "explanation": explanation
+            }))
+        }
         "engram_get_cochanges" => {
             let file_path = args["file_path"].as_str().unwrap_or("");
             let min_prob = args["min_probability"].as_f64().unwrap_or(0.25);
@@ -280,6 +305,18 @@ pub fn mcp(root: &Path) -> Result<()> {
                         "inputSchema": {
                             "type": "object",
                             "properties": {}
+                        }
+                    },
+                    {
+                        "name": "engram_inspect_symbol",
+                        "description": "Deeply inspect symbol change impact, multi-hop blast radius, causal provenance, and Change Contract authorization.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target": { "type": "string", "description": "Symbol name or file path to inspect (e.g. OrderService.ExportCSV)" },
+                                "depth": { "type": "integer", "description": "Maximum traversal hops (default 2)" }
+                            },
+                            "required": ["target"]
                         }
                     }
                 ]

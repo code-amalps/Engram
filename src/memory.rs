@@ -21,6 +21,7 @@ pub enum MemoryLifecycleState {
     Rejected,
     Durable,
     Superseded,
+    Dormant,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

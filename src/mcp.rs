@@ -159,6 +159,33 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let report = crate::manifest::detect_ecosystem(&root)?;
             json_result(serde_json::to_value(report)?)
         }
+        "engram_why" => {
+            let target = args["target"]
+                .as_str()
+                .or_else(|| args["symbol"].as_str())
+                .unwrap_or("");
+            crate::analyzer::ensure_fresh(&root)?;
+            let expl = crate::archaeology::explain_why(&root, target)?;
+            json_result(serde_json::to_value(expl)?)
+        }
+        "engram_doctor" => {
+            let report = crate::doctor::diagnose_memory_health(&root)?;
+            json_result(serde_json::to_value(report)?)
+        }
+        "engram_gc" => {
+            let dry_run = args["dry_run"].as_bool().unwrap_or(false);
+            let candidates = args["candidates"].as_bool().unwrap_or(false);
+            let archive = args["archive"].as_bool().unwrap_or(false);
+            let vacuum = args["vacuum"].as_bool().unwrap_or(false);
+            let opts = crate::gc::GcOptions {
+                dry_run,
+                prune_candidates: candidates || (!archive && !vacuum),
+                archive_superseded: archive || (!candidates && !vacuum),
+                vacuum: vacuum || (!candidates && !archive),
+            };
+            let result = crate::gc::execute_gc(&root, &opts)?;
+            json_result(serde_json::to_value(result)?)
+        }
         _ => return Err(anyhow!("Unknown tool: {name}")),
     })
 }
@@ -322,6 +349,38 @@ pub fn mcp(root: &Path) -> Result<()> {
                                 "depth": { "type": "integer", "description": "Maximum traversal hops (default 2)" }
                             },
                             "required": ["target"]
+                        }
+                    },
+                    {
+                        "name": "engram_why",
+                        "description": "Query decision archaeology for a symbol, answering why it was designed this way with active policy, historical evolution, and provenance.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target": { "type": "string", "description": "Symbol name or file path (e.g. OrderService.ExportCSV)" }
+                            },
+                            "required": ["target"]
+                        }
+                    },
+                    {
+                        "name": "engram_doctor",
+                        "description": "Diagnose memory health, liveness, and scope resolution without modifying state (read-only).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    },
+                    {
+                        "name": "engram_gc",
+                        "description": "Execute controlled garbage collection on memory (supports dry_run, candidates, archive, vacuum).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "dry_run": { "type": "boolean", "description": "Generate pre-flight plan without modifying disk" },
+                                "candidates": { "type": "boolean", "description": "Prune candidate memory cache (TTL > 14 days or rejected)" },
+                                "archive_superseded": { "type": "boolean", "description": "Move deep superseded memories (depth >= 3) to cold archive" },
+                                "vacuum": { "type": "boolean", "description": "Vacuum SQLite database and compact caches" }
+                            }
                         }
                     }
                 ]

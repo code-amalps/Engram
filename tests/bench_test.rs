@@ -221,3 +221,27 @@ fn test_multi_turn_memory_compounding_suite() {
     assert!(res.compounding_lift_pct > 0.0, "Compounding lift must be positive");
     assert!(res.compounding_lift_pct >= 50.0, "Compounding lift should exceed 50% for grounded turns");
 }
+
+#[test]
+fn test_decision_intelligence_synthetic_benchmark() {
+    let di = engram::bench::run_decision_intelligence_benchmark().unwrap();
+
+    assert_eq!(di.total_synthetic_cases, 5);
+    assert_eq!(
+        di.orphan_detection_accuracy_pct, 100.0,
+        "Orphan detection accuracy must be 100% on defined deterministic synthetic corpus"
+    );
+    assert_eq!(
+        di.dormant_transition_accuracy_pct, 100.0,
+        "Dormant state transition accuracy must be 100% on defined deterministic synthetic corpus"
+    );
+    assert_eq!(
+        di.archival_candidate_accuracy_pct, 100.0,
+        "Archival candidate identification must be 100% on defined deterministic synthetic corpus"
+    );
+    assert_eq!(
+        di.decision_archaeology_accuracy_pct, 100.0,
+        "Decision archaeology accuracy must be 100% on defined deterministic synthetic corpus"
+    );
+    assert!(di.qualified_claim.contains("100% precision on the defined deterministic synthetic orphan/liveness benchmark corpus"));
+}

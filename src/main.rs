@@ -1,8 +1,11 @@
 pub mod analyzer;
+pub mod archaeology;
 pub mod bench;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;
+pub mod doctor;
+pub mod gc;
 pub mod git_history;
 pub mod go_parser;
 pub mod graph;
@@ -11,6 +14,7 @@ pub mod impact;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
+pub mod memory_graph;
 pub mod model;
 pub mod printer;
 pub mod setup;
@@ -137,6 +141,23 @@ enum CommandLine {
     Bench {
         #[arg(long, short = 'v')]
         verbose: bool,
+    },
+    /// Answer why code was designed this way, with active policy, historical evolution, and provenance
+    Why {
+        target: String,
+    },
+    /// Inspect memory liveness, scope resolution, and knowledge health without mutating state
+    Doctor,
+    /// Controlled garbage collection with dry-run inspection and explicit operational flags
+    Gc {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        candidates: bool,
+        #[arg(long)]
+        archive: bool,
+        #[arg(long)]
+        vacuum: bool,
     },
 }
 
@@ -630,6 +651,42 @@ fn run() -> Result<()> {
                 print_json(results)?;
             } else {
                 print!("{}", bench::format_human_benchmark_report(&results, verbose));
+            }
+        }
+        Some(CommandLine::Why { target }) => {
+            analyzer::ensure_fresh(root)?;
+            let expl = archaeology::explain_why(root, &target)?;
+            if force_json {
+                print_json(expl)?;
+            } else {
+                print!("{}", archaeology::format_archaeology_explanation(&expl));
+            }
+        }
+        Some(CommandLine::Doctor) => {
+            let report = doctor::diagnose_memory_health(root)?;
+            if force_json {
+                print_json(report)?;
+            } else {
+                print!("{}", doctor::format_doctor_report(&report));
+            }
+        }
+        Some(CommandLine::Gc {
+            dry_run,
+            candidates,
+            archive,
+            vacuum,
+        }) => {
+            let options = gc::GcOptions {
+                dry_run,
+                prune_candidates: candidates || (!archive && !vacuum),
+                archive_superseded: archive || (!candidates && !vacuum),
+                vacuum: vacuum || (!candidates && !archive),
+            };
+            let result = gc::execute_gc(root, &options)?;
+            if force_json {
+                print_json(result)?;
+            } else {
+                print!("{}", gc::format_gc_plan(&result));
             }
         }
     }

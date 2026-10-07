@@ -315,11 +315,11 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
     }
 }
 
-/// Extract module from a file path (e.g. "src/orders/export/csv.rs" -> "orders" or "src/orders")
+/// Extract module from a file path (e.g. "src/orders/export/csv.rs" -> "orders" or "internal/orders/service.go" -> "orders")
 pub fn extract_module(path: &str) -> String {
     let norm = normalize_rel_path(path);
     let parts: Vec<&str> = norm.split('/').collect();
-    if parts.len() >= 2 && (parts[0] == "src" || parts[0] == "lib" || parts[0] == "packages") {
+    if parts.len() >= 2 && (parts[0] == "src" || parts[0] == "lib" || parts[0] == "packages" || parts[0] == "internal" || parts[0] == "pkg") {
         parts[1].to_string()
     } else if !parts.is_empty() {
         parts[0].to_string()
@@ -713,7 +713,7 @@ pub fn validate_contract_diff_with_constitution(
             .boundary
             .expected_modules
             .iter()
-            .any(|m| m.eq_ignore_ascii_case(&file_module) || norm_file.contains(m));
+            .any(|m| m.eq_ignore_ascii_case(&file_module) || norm_file.starts_with(&format!("{m}/")) || norm_file.contains(&format!("/{m}/")));
 
         if is_module_expected {
             expansion_count += 1;

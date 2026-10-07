@@ -20,7 +20,7 @@ use crate::memory::{
     record_scoped_decision, supersede_memory, ConflictType, MemoryLifecycleState, MemoryScope,
 };
 
-const BENCHMARK_VERSION: &str = "0.9.0";
+const BENCHMARK_VERSION: &str = "1.0.0";
 const DATASET_VERSION: &str = "2026.10-corp-1";
 const ENGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 

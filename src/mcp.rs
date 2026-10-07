@@ -186,6 +186,34 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let result = crate::gc::execute_gc(&root, &opts)?;
             json_result(serde_json::to_value(result)?)
         }
+        "engram_preflight" => {
+            let task = args["task"].as_str().unwrap_or("");
+            let budget = args["token_budget"].as_u64().unwrap_or(1200) as usize;
+            let forbidden: Option<Vec<String>> = args["forbidden"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            let opts = crate::flywheel::PreflightOptions {
+                task: task.to_string(),
+                token_budget: budget,
+                forbidden_boundaries: forbidden,
+            };
+            let res = crate::flywheel::preflight_task(&root, &opts)?;
+            json_result(serde_json::to_value(res)?)
+        }
+        "engram_postflight" => {
+            let contract_id = args["contract_id"].as_str().map(str::to_string);
+            let strict = args["strict"].as_bool().unwrap_or(false);
+            let staged = args["staged"].as_bool().unwrap_or(false);
+            let opts = crate::flywheel::PostflightOptions {
+                contract_id,
+                strict,
+                staged,
+                base_commit: None,
+                ci_mode: false,
+            };
+            let res = crate::flywheel::postflight_check(&root, &opts)?;
+            json_result(serde_json::to_value(res)?)
+        }
         _ => return Err(anyhow!("Unknown tool: {name}")),
     })
 }
@@ -380,6 +408,31 @@ pub fn mcp(root: &Path) -> Result<()> {
                                 "candidates": { "type": "boolean", "description": "Prune candidate memory cache (TTL > 14 days or rejected)" },
                                 "archive_superseded": { "type": "boolean", "description": "Move deep superseded memories (depth >= 3) to cold archive" },
                                 "vacuum": { "type": "boolean", "description": "Vacuum SQLite database and compact caches" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "engram_preflight",
+                        "description": "Orchestrated Pre-Flight Handshake: compile context, predict blast radius, discover governing architectural decisions, and lock Change Contract before code edits.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "task": { "type": "string", "description": "The coding task goal/intent" },
+                                "token_budget": { "type": "integer", "description": "Context token budget limit (default 1200)" },
+                                "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" }
+                            },
+                            "required": ["task"]
+                        }
+                    },
+                    {
+                        "name": "engram_postflight",
+                        "description": "Orchestrated Post-Flight Guard Check: evaluate mutation against Change Contract boundaries and constitution rules, enforce zero-poisoning gate, synthesize reviewable candidate memory.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against" },
+                                "strict": { "type": "boolean", "description": "Fail with exit code 1 if unexpected files are changed" },
+                                "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" }
                             }
                         }
                     }

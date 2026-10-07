@@ -7,6 +7,7 @@ pub mod compiler;
 pub mod constitution;
 pub mod contract;
 pub mod doctor;
+pub mod flywheel;
 pub mod gc;
 pub mod git_history;
 pub mod go_parser;

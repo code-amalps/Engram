@@ -5,6 +5,7 @@ pub mod compiler;
 pub mod constitution;
 pub mod contract;
 pub mod doctor;
+pub mod flywheel;
 pub mod gc;
 pub mod git_history;
 pub mod go_parser;
@@ -158,6 +159,27 @@ enum CommandLine {
         archive: bool,
         #[arg(long)]
         vacuum: bool,
+    },
+    /// Orchestrated Pre-Flight Handshake: compile context, predict blast radius, discover decisions, lock contract
+    Preflight {
+        task: String,
+        #[arg(long, default_value_t = 1200)]
+        token_budget: usize,
+        #[arg(long)]
+        forbidden: Option<Vec<String>>,
+    },
+    /// Orchestrated Post-Flight Guard: evaluate mutation against contract and constitution, generate candidates
+    Postflight {
+        #[arg(long)]
+        contract_id: Option<String>,
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        staged: bool,
+        #[arg(long)]
+        base: Option<String>,
+        #[arg(long)]
+        ci: bool,
     },
 }
 
@@ -687,6 +709,37 @@ fn run() -> Result<()> {
                 print_json(result)?;
             } else {
                 print!("{}", gc::format_gc_plan(&result));
+            }
+        }
+        Some(CommandLine::Preflight { task, token_budget, forbidden }) => {
+            let opts = flywheel::PreflightOptions {
+                task,
+                token_budget,
+                forbidden_boundaries: forbidden,
+            };
+            let res = flywheel::preflight_task(root, &opts)?;
+            if force_json {
+                print_json(res)?;
+            } else {
+                print!("{}", flywheel::format_preflight_report(&res));
+            }
+        }
+        Some(CommandLine::Postflight { contract_id, strict, staged, base, ci }) => {
+            let opts = flywheel::PostflightOptions {
+                contract_id,
+                strict,
+                staged,
+                base_commit: base,
+                ci_mode: ci,
+            };
+            let res = flywheel::postflight_check(root, &opts)?;
+            if force_json {
+                print_json(&res)?;
+            } else {
+                print!("{}", flywheel::format_postflight_report(&res, ci));
+            }
+            if res.exit_code != 0 {
+                std::process::exit(res.exit_code);
             }
         }
     }

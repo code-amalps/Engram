@@ -9,11 +9,15 @@ use std::path::{Path, PathBuf};
 
 use engram::analyzer::analyze;
 use engram::compiler::context;
+use engram::contract::{create_contract, reconcile_contract, validate_contract_diff};
 use engram::go_parser::{
     check_struct_implements_interface, extract_go_ast, parse_full_go_mod,
     resolve_go_dependency_origin, GoMethod, GoModDocument, GoReplace, GoRequire, PackageOrigin,
 };
 use engram::graph::GraphTraversal;
+use engram::memory::{
+    promote_candidate, query_relevant_memories, record_decision, record_task_candidate,
+};
 use engram::model::Direction;
 use engram::storage::db;
 
@@ -396,6 +400,178 @@ func (s *OrderService) Export() error {
         iface_file.provenance.iter().any(|p| p.contains("IMPLEMENTS")),
         "Expected IMPLEMENTS graph edge provenance on exporter.go!"
     );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// 9. North-Star E2E Flywheel: Complete end-to-end Go lifecycle test
+/// Task -> Analyze -> Go Dependency Grounding -> Context Compilation ->
+/// Change Contract -> Simulated Agent Edits -> Change Guard Violation ->
+/// Human Reconciliation -> Re-Validation -> Memory Promotion -> Next Task Memory Retrieval
+#[test]
+fn test_go_north_star_e2e_flywheel() {
+    let root = temp_repo_dir("go_north_star_e2e");
+
+    // 1. Initial workspace setup
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/shop\n\ngo 1.22\n",
+    )
+    .unwrap();
+
+    let export_dir = root.join("pkg/export");
+    fs::create_dir_all(&export_dir).unwrap();
+    fs::write(
+        export_dir.join("exporter.go"),
+        r#"package export
+
+type Exporter interface {
+    ExportCSV(path string) error
+}
+"#,
+    )
+    .unwrap();
+
+    let orders_dir = root.join("internal/orders");
+    fs::create_dir_all(&orders_dir).unwrap();
+    fs::write(
+        orders_dir.join("service.go"),
+        r#"package orders
+
+import "github.com/acme/shop/pkg/export"
+
+type OrderService struct {}
+
+func (s *OrderService) ExportCSV(path string) error {
+    return nil
+}
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        orders_dir.join("service_test.go"),
+        r#"package orders
+
+import "testing"
+
+func TestOrderServiceExportCSV(t *testing.T) {}
+"#,
+    )
+    .unwrap();
+
+    let secret_dir = root.join("internal/secret");
+    fs::create_dir_all(&secret_dir).unwrap();
+    fs::write(
+        secret_dir.join("keys.go"),
+        r#"package secret
+
+var SecretKey = "classified"
+"#,
+    )
+    .unwrap();
+
+    // Step 1: Pre-existing architectural rule in Durable Memory
+    record_decision(
+        &root,
+        "Go Streaming Exporter Policy",
+        "Order export serializers must implement Exporter interface without memory buffering",
+        "Prevents heap exhaustion on multi-gigabyte order batches",
+        vec!["orders".to_string()],
+        vec!["pkg/export/**".to_string()],
+        Some("ADR-GO-001".to_string()),
+        "Amal P S",
+    )
+    .unwrap();
+
+    // Step 2: Analyze workspace -> Builds SQLite WAL repository graph
+    let summary = analyze(&root).unwrap();
+    assert_eq!(summary.indexed_files, 4);
+
+    // Step 3: Context Compilation -> Grounding pulls service, exporter (via IMPLEMENTS), and test (via TESTS convention)
+    let ctx = context(&root, "Add CSV export to OrderService", 1200).unwrap();
+    assert!(ctx.files.iter().any(|f| f.path == "internal/orders/service.go"));
+    assert!(ctx.files.iter().any(|f| f.path == "pkg/export/exporter.go"));
+    assert!(ctx.files.iter().any(|f| f.path == "internal/orders/service_test.go"));
+    // Forbidden/unrelated files are excluded
+    assert!(!ctx.files.iter().any(|f| f.path == "internal/secret/keys.go"));
+
+    // Step 4: Create Change Contract v1 (Protected boundary: internal/secret/**)
+    let contract = create_contract(
+        &root,
+        "Add CSV export to OrderService",
+        Some(vec!["orders".to_string(), "export".to_string()]),
+        Some(vec![
+            "internal/orders/service.go".to_string(),
+            "internal/orders/service_test.go".to_string(),
+        ]),
+        Some(vec!["internal/secret/**".to_string()]),
+    )
+    .unwrap();
+
+    // Step 5: Simulated Agent Edits:
+    // - internal/orders/service.go (Expected)
+    // - pkg/export/exporter.go (Expected Expansion via IMPLEMENTS)
+    // - internal/orders/service_test.go (Expected)
+    // - internal/secret/keys.go (BOUNDARY VIOLATION!)
+    let agent_edits = vec![
+        "internal/orders/service.go".to_string(),
+        "pkg/export/exporter.go".to_string(),
+        "internal/orders/service_test.go".to_string(),
+        "internal/secret/keys.go".to_string(),
+    ];
+
+    // Step 6: Change Guard Diff Validation -> Fails due to boundary violation
+    let val1 = validate_contract_diff(&contract, &agent_edits);
+    assert!(!val1.is_valid, "Contract check must fail on boundary violation!");
+    assert_eq!(val1.summary.expected_count, 2);
+    assert_eq!(val1.summary.expansion_count, 1);
+    assert_eq!(val1.summary.violation_count, 1);
+
+    // Step 7: Human Reconciliation -> Developer reviews and ratifies audit key touch
+    let contract_v2 = reconcile_contract(
+        &root,
+        &contract.contract_id,
+        "Developer approved: Export signing requires HMAC secret key touch",
+        "Amal P S",
+        vec!["internal/secret/keys.go".to_string()],
+        vec!["secret".to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(contract_v2.version, 2);
+
+    // Step 8: Re-validation against Contract v2 -> Green!
+    let val2 = validate_contract_diff(&contract_v2, &agent_edits);
+    assert!(val2.is_valid);
+    assert_eq!(val2.summary.violation_count, 0);
+
+    // Step 9: Promote Task Candidate to Durable Memory
+    let cand = record_task_candidate(
+        &root,
+        &contract_v2.task_id,
+        "Order Export Signing Keys",
+        "Order CSV exports sign output using internal/secret/keys HMAC key.",
+        "Verified during v0.6 North-Star release validation",
+        vec!["orders".to_string(), "secret".to_string()],
+        vec![],
+        "Amal P S",
+    )
+    .unwrap();
+
+    promote_candidate(&root, &cand.candidate_id, "Amal P S", None).unwrap();
+
+    // Step 10: Next Task Query -> Compounding memory retrieval
+    let next_memories = query_relevant_memories(
+        &root,
+        "Export orders to XML with digital signature",
+        &["internal/orders/service.go".to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(next_memories.len(), 2);
+    assert!(next_memories.iter().any(|m| m.title == "Go Streaming Exporter Policy"));
+    assert!(next_memories.iter().any(|m| m.title == "Order Export Signing Keys"));
 
     fs::remove_dir_all(&root).unwrap();
 }

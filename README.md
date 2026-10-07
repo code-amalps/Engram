@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Ready"></a>
-  <img src="https://img.shields.io/badge/Tests-68%20Passed-brightgreen.svg" alt="Tests: 68 Passed">
+  <img src="https://img.shields.io/badge/Tests-69%20Passed-brightgreen.svg" alt="Tests: 69 Passed">
 </p>
 
 > 💡 **The Story Behind the Name:**  
@@ -416,7 +416,7 @@ Engram includes a comprehensive automated test suite covering Tree-sitter parser
 cargo test
 ```
 
-All **68 tests** run and pass:
+All **69 tests** run and pass:
 ```text
 running 17 tests (Unit Tests)
 test go_parser::tests::test_parse_full_go_mod_directives ... ok
@@ -458,7 +458,7 @@ test test_ci_pr_base_comparison ... ok
 test test_human_reconciliation_v1_to_v2 ... ok
 test test_contract_modified_in_pr_requires_ratification ... ok
 
-running 8 tests (Go Dependency Intelligence & Structural Interfaces)
+running 9 tests (Go Dependency Intelligence & Structural Interfaces)
 test test_full_go_mod_parsing_and_resolution ... ok
 test test_vendored_dependency_precedence ... ok
 test test_replaced_local_and_external_resolution ... ok
@@ -467,6 +467,7 @@ test test_external_not_confused_with_local_subpath ... ok
 test test_two_stage_interface_satisfaction_match ... ok
 test test_two_stage_interface_satisfaction_signature_mismatch ... ok
 test test_interface_implementation_graph_grounding ... ok
+test test_go_north_star_e2e_flywheel ... ok
 
 running 8 tests (Go Language Extraction & Acceptance Gate)
 test test_go_mod_module_resolution ... ok

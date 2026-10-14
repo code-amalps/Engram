@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" width="100%" height="100%" style="background:#0d1117;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#388bfd" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#1f6feb" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="grad-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bc8cff" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#8957e5" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3fb950" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#238636" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="grad-amber" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d29922" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#9e6a03" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <!-- Markers -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#bc8cff"/>
+    </marker>
+
+    <!-- Filter for subtle glow -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Title & Subtitle -->
+  <text x="500" y="42" text-anchor="middle" fill="#f0f6fc" font-size="20" font-weight="700" letter-spacing="0.5">How Engram Integrates Into Your Project &amp; AI Agents</text>
+  <text x="500" y="65" text-anchor="middle" fill="#8b949e" font-size="13">Zero-cloud, 100% local engineering memory &amp; change boundaries over Model Context Protocol (MCP)</text>
+
+  <!-- COLUMN 1: Developer & Your Project (Left) -->
+  <g transform="translate(40, 95)">
+    <rect width="270" height="340" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <rect width="270" height="42" rx="12" fill="url(#grad-blue)" stroke="#388bfd" stroke-width="1.5"/>
+    <rect width="270" height="2" y="40" fill="#30363d"/>
+    <text x="135" y="26" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="600">📁 1. Your Existing Project</text>
+
+    <!-- Content Items -->
+    <g transform="translate(16, 58)">
+      <text x="0" y="16" fill="#c9d1d9" font-size="12" font-weight="600">Run in project root:</text>
+      <rect x="0" y="24" width="238" height="32" rx="6" fill="#0d1117" stroke="#30363d"/>
+      <text x="12" y="45" fill="#79c0ff" font-family="monospace" font-size="12">engram init &amp;&amp; engram .</text>
+
+      <text x="0" y="82" fill="#8b949e" font-size="11" font-weight="600">CREATES REPO ARTIFACTS:</text>
+
+      <!-- Artifact 1 -->
+      <rect x="0" y="92" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="112" fill="#f0f6fc" font-size="12" font-weight="600">.engram/constitution.yaml</text>
+      <text x="12" y="130" fill="#8b949e" font-size="11">Your team's architectural rules &amp; limits</text>
+
+      <!-- Artifact 2 -->
+      <rect x="0" y="152" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="172" fill="#f0f6fc" font-size="12" font-weight="600">.engram/index.db (SQLite WAL)</text>
+      <text x="12" y="190" fill="#8b949e" font-size="11">Polyglot AST symbol graph (auto-cached)</text>
+
+      <!-- Git Integration -->
+      <rect x="0" y="212" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="232" fill="#3fb950" font-size="12" font-weight="600">Git Hook &amp; CI Guard</text>
+      <text x="12" y="250" fill="#8b949e" font-size="11">Blocks unauthorized diffs at commit / PR</text>
+    </g>
+  </g>
+
+  <!-- COLUMN 2: The AI Coding Agent (Center) -->
+  <g transform="translate(365, 95)">
+    <rect width="270" height="340" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <rect width="270" height="42" rx="12" fill="url(#grad-purple)" stroke="#bc8cff" stroke-width="1.5"/>
+    <rect width="270" height="2" y="40" fill="#30363d"/>
+    <text x="135" y="26" text-anchor="middle" fill="#d2a8ff" font-size="14" font-weight="600">🤖 2. The AI Coding Agent</text>
+
+    <!-- Content Items -->
+    <g transform="translate(16, 58)">
+      <text x="0" y="16" fill="#c9d1d9" font-size="12" font-weight="600">1-Click Auto Configuration:</text>
+      <rect x="0" y="24" width="238" height="32" rx="6" fill="#0d1117" stroke="#30363d"/>
+      <text x="12" y="45" fill="#d2a8ff" font-family="monospace" font-size="12">engram setup cursor|claude</text>
+
+      <text x="0" y="82" fill="#8b949e" font-size="11" font-weight="600">AGENT CALLS MCP TOOLS AUTOMATICALLY:</text>
+
+      <!-- Tool 1 -->
+      <rect x="0" y="92" width="238" height="46" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="10" y="111" fill="#79c0ff" font-family="monospace" font-size="11">engram_analyze_task</text>
+      <text x="10" y="128" fill="#8b949e" font-size="10">Preflight analysis + context compilation</text>
+
+      <!-- Tool 2 -->
+      <rect x="0" y="146" width="238" height="46" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="10" y="165" fill="#e3b341" font-family="monospace" font-size="11">engram_create_change_contract</text>
+      <text x="10" y="182" fill="#8b949e" font-size="10">Declares allowed files &amp; forbidden zones</text>
+
+      <!-- Tool 3 -->
+      <rect x="0" y="200" width="238" height="46" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="10" y="219" fill="#3fb950" font-family="monospace" font-size="11">engram_validate_change</text>
+      <text x="10" y="236" fill="#8b949e" font-size="10">Validates working diff before completion</text>
+
+      <!-- Tool 4 -->
+      <rect x="0" y="254" width="238" height="26" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="10" y="271" fill="#ff7b72" font-family="monospace" font-size="10">engram_recover (on boundary breach)</text>
+    </g>
+  </g>
+
+  <!-- COLUMN 3: Engram Intelligence Engine (Right) -->
+  <g transform="translate(690, 95)">
+    <rect width="270" height="340" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <rect width="270" height="42" rx="12" fill="url(#grad-green)" stroke="#3fb950" stroke-width="1.5"/>
+    <rect width="270" height="2" y="40" fill="#30363d"/>
+    <text x="135" y="26" text-anchor="middle" fill="#56d364" font-size="14" font-weight="600">⚡ 3. Engram Engine (MCP)</text>
+
+    <!-- Content Items -->
+    <g transform="translate(16, 58)">
+      <text x="0" y="16" fill="#c9d1d9" font-size="12" font-weight="600">Local Rust Background Process:</text>
+      <rect x="0" y="24" width="238" height="32" rx="6" fill="#0d1117" stroke="#30363d"/>
+      <text x="12" y="45" fill="#7ee787" font-family="monospace" font-size="12">stdio: JSON-RPC 2.0</text>
+
+      <text x="0" y="82" fill="#8b949e" font-size="11" font-weight="600">WHAT IT ENFORCES &amp; DELIVERS:</text>
+
+      <!-- Feature 1 -->
+      <rect x="0" y="92" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="112" fill="#f0f6fc" font-size="12" font-weight="600">Token-Budgeted AST Context</text>
+      <text x="12" y="130" fill="#8b949e" font-size="11">Exact symbol slices, no unneeded whole files</text>
+
+      <!-- Feature 2 -->
+      <rect x="0" y="152" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="172" fill="#f0f6fc" font-size="12" font-weight="600">Elastic Change Guard</text>
+      <text x="12" y="190" fill="#8b949e" font-size="11">Real-time diff validation vs Git baseline</text>
+
+      <!-- Feature 3 -->
+      <rect x="0" y="212" width="238" height="52" rx="6" fill="#0d1117" stroke="#21262d"/>
+      <text x="12" y="232" fill="#f0f6fc" font-size="12" font-weight="600">Durable Engineering Memory</text>
+      <text x="12" y="250" fill="#8b949e" font-size="11">Architectural decisions survive across sessions</text>
+    </g>
+  </g>
+
+  <!-- CONNECTING ARROWS & LABELS BETWEEN COLUMNS -->
+  <!-- Col 1 to Col 2 -->
+  <path d="M 310 185 L 360 185" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="335" y="177" text-anchor="middle" fill="#8b949e" font-size="9" font-weight="600">IDE</text>
+
+  <!-- Col 2 to Col 3 (Request) -->
+  <path d="M 635 200 L 685 200" fill="none" stroke="#bc8cff" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <text x="660" y="192" text-anchor="middle" fill="#d2a8ff" font-size="9" font-weight="600">MCP RPC</text>
+
+  <!-- Col 3 to Col 2 (Response) -->
+  <path d="M 685 240 L 638 240" fill="none" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="660" y="255" text-anchor="middle" fill="#56d364" font-size="9" font-weight="600">Context</text>
+
+  <!-- BOTTOM BAR: The 5-Step Closed Loop Flow -->
+  <g transform="translate(40, 455)">
+    <rect width="920" height="95" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+
+    <text x="20" y="28" fill="#f0f6fc" font-size="13" font-weight="700">THE CLOSED-LOOP AGENT LIFECYCLE:</text>
+
+    <!-- Step 1 -->
+    <g transform="translate(20, 42)">
+      <rect width="162" height="42" rx="6" fill="#0d1117" stroke="#388bfd" stroke-width="1"/>
+      <text x="10" y="18" fill="#58a6ff" font-size="11" font-weight="600">1. Preflight</text>
+      <text x="10" y="32" fill="#8b949e" font-size="9.5">Prompt &amp; AST Slicing</text>
+    </g>
+    <path d="M 185 63 L 200 63" fill="none" stroke="#388bfd" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- Step 2 -->
+    <g transform="translate(205, 42)">
+      <rect width="162" height="42" rx="6" fill="#0d1117" stroke="#bc8cff" stroke-width="1"/>
+      <text x="10" y="18" fill="#d2a8ff" font-size="11" font-weight="600">2. Contract Lock</text>
+      <text x="10" y="32" fill="#8b949e" font-size="9.5">Declare Boundary Scope</text>
+    </g>
+    <path d="M 370 63 L 385 63" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+    <!-- Step 3 -->
+    <g transform="translate(390, 42)">
+      <rect width="162" height="42" rx="6" fill="#0d1117" stroke="#e3b341" stroke-width="1"/>
+      <text x="10" y="18" fill="#e3b341" font-size="11" font-weight="600">3. Agent Edits Code</text>
+      <text x="10" y="32" fill="#8b949e" font-size="9.5">Within Authorized Zone</text>
+    </g>
+    <path d="M 555 63 L 570 63" fill="none" stroke="#e3b341" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- Step 4 -->
+    <g transform="translate(575, 42)">
+      <rect width="162" height="42" rx="6" fill="#0d1117" stroke="#ff7b72" stroke-width="1"/>
+      <text x="10" y="18" fill="#ff7b72" font-size="11" font-weight="600">4. Postflight Guard</text>
+      <text x="10" y="32" fill="#8b949e" font-size="9.5">Diff Check &amp; Recovery</text>
+    </g>
+    <path d="M 740 63 L 755 63" fill="none" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+    <!-- Step 5 -->
+    <g transform="translate(760, 42)">
+      <rect width="140" height="42" rx="6" fill="#0d1117" stroke="#3fb950" stroke-width="1"/>
+      <text x="10" y="18" fill="#3fb950" font-size="11" font-weight="600">5. Commit &amp; CI</text>
+      <text x="10" y="32" fill="#8b949e" font-size="9.5">Durable Memory Saved</text>
+    </g>
+  </g>
+</svg>

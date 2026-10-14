@@ -19,6 +19,10 @@
 
 Engram is a standalone, local CLI tool and Model Context Protocol (MCP) server written in **Rust**. It acts as a repository intelligence engine and change boundary system for AI coding assistants such as **Cursor, Claude Desktop, and Windsurf**.
 
+<p align="center">
+  <img src="assets/engram-integration.svg" alt="How Engram Integrates Into Your Project & AI Agents" width="100%" />
+</p>
+
 Instead of letting an AI agent burn thousands of tokens blindly searching your repository—or accidentally modifying unrelated files—Engram provides:
 1. **Precise, AST-grounded context** tailored to the prompt and token budget.
 2. **Change-impact visibility** into downstream callers, interface implementations, and tests.
@@ -52,6 +56,10 @@ Engram divides repository intelligence into six distinct, cooperating capabiliti
 ---
 
 ## 4. A Real End-to-End Example
+
+<p align="center">
+  <img src="assets/engram-agent-ide-walkthrough.svg" alt="Engram AI Agent Walkthrough in Cursor IDE" width="100%" />
+</p>
 
 Here is a reproducible workflow showing how Engram guides an AI coding agent:
 
@@ -179,20 +187,24 @@ Engram features native Tree-sitter parsers embedded into the binary:
 
 ### Supported AI Clients (MCP)
 
-Engram runs a background JSON-RPC 2.0 MCP server over `stdio` (`engram mcp`):
+Engram runs a background JSON-RPC 2.0 MCP server over `stdio` (`engram mcp`), exposing AST intelligence, contracts, and guard tools to any MCP-compliant coding assistant:
 
-- **Cursor:** Automated 1-click configuration via `engram setup cursor`.
-- **Claude Desktop:** Automated 1-click configuration via `engram setup claude`.
-- **Windsurf:** Automated 1-click configuration via `engram setup windsurf`.
-- **Any MCP Client:** Connect by invoking `engram mcp` over `stdio`.
+- **Cursor:** Automated 1-click configuration via `engram setup cursor` (configures `.cursor/mcp.json`).
+- **Claude Desktop / Claude Code:** Automated 1-click configuration via `engram setup claude` (configures `claude_desktop_config.json`).
+- **Windsurf:** Automated 1-click configuration via `engram setup windsurf` (configures `.codeium/windsurf/mcp_config.json`).
+- **Cline / Roo Code / VS Code:** Add `{"command": "engram", "args": ["mcp"]}` to your MCP settings.
 
 *`engram setup` safely preserves existing third-party MCP servers and never overwrites unrelated configurations.*
 
 ---
 
-## 7. Quickstart
+## 7. Developer & Agent Integration Quickstart
 
-### Installation
+<p align="center">
+  <img src="assets/engram-agent-demo.gif" alt="Engram Developer & Agent Integration Demo" width="100%" />
+</p>
+
+### Step 1: Install Engram Binary
 
 No compiler, Node.js, or Python runtime required. Downloads the self-contained binary, verifies SHA256 integrity, and adds Engram to your `PATH`:
 
@@ -206,34 +218,119 @@ iwr -useb https://raw.githubusercontent.com/code-amalps/Engram/main/install.ps1 
 curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
 ```
 
-**Or Build from Source (Requires Rust 1.85+):**
+*(Or build from source with `cargo build --release`)*
+
+---
+
+### Step 2: Integrate Engram Into Your Project
+
+Navigate to your existing repository root and initialize Engram:
+
 ```bash
-git clone https://github.com/code-amalps/Engram.git
-cd Engram
-cargo build --release
-# Binary will be at target/release/engram (or engram.exe on Windows)
+cd /path/to/your/project
+engram init
+engram .
+```
+
+This creates the local `.engram/` intelligence layer inside your project:
+
+```text
+your-project/
+├── src/                          # Your existing source files
+├── package.json (or Cargo.toml)  # Your project dependencies
+├── .gitignore                    # Automatically updated to ignore index.db & cache
+└── .engram/                      # Engram repository configuration
+    ├── constitution.yaml         # Team architectural rules & forbidden boundaries
+    ├── memory.yaml               # Durable engineering decisions & rationale
+    ├── index.db                  # Embedded SQLite WAL symbol graph (gitignored)
+    └── events/                   # Append-only cryptographic audit logs (gitignored)
+```
+
+Configure team architectural rules in `.engram/constitution.yaml` (e.g., forbidding modifications to security vaults or database clients from the frontend).
+
+---
+
+### Step 3: Connect Your AI Coding Agent
+
+Run the 1-click setup command for your editor:
+
+```bash
+# For Cursor
+engram setup cursor
+
+# For Claude Desktop / Claude Code
+engram setup claude
+
+# For Windsurf
+engram setup windsurf
 ```
 
 ---
 
-### 5-Minute Safe Evaluation (Try on Any Repository)
+### Step 4: Instruct the Agent (Project Rules)
 
-```bash
-# 1. Navigate to your repository
-cd /path/to/your/project
+To ensure your AI agent proactively uses Engram's boundary flywheel instead of guessing, add this snippet to your project's agent instructions file (e.g. `.cursorrules`, `.windsurfrules`, or `CLAUDE.md`):
 
-# 2. Initialize configuration (creates .engram/ folder)
-engram init
-
-# 3. Analyze repository
-engram .
-
-# 4. Compile context for a task
-engram context "fix authentication token validation" --token-budget 1000
-
-# 5. Connect to your editor (e.g. Cursor)
-engram setup cursor
+```markdown
+# AI Coding Protocol with Engram
+Before modifying code in this repository:
+1. **Discover Context:** Invoke `engram_analyze_task` or `engram_get_context` to retrieve AST-grounded symbols and blast radius.
+2. **Lock Contract:** Declare your intended scope using `engram_create_change_contract` with `expected_files` and `forbidden` paths.
+3. **Implement Changes:** Modify only files declared in your contract.
+4. **Validate Diff:** Call `engram_validate_change` before concluding your task. If a boundary violation occurs, call `engram_recover` and follow the repair plan.
 ```
+
+---
+
+### Step 5: How the Agent Works With Engram (Closed-Loop Lifecycle)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant Agent as AI Coding Agent (Cursor / Claude / Windsurf)
+    participant Engram as Engram Engine (MCP Server)
+    participant Repo as Your Project Repository
+    participant Git as Git Pre-Commit / CI Guard
+
+    Dev->>Agent: "Add refund capability to BillingService"
+    Agent->>Engram: engram_analyze_task("Add refund capability...")
+    Engram-->>Agent: Exact AST symbols, blast radius, & active contract ctr_829104
+    Agent->>Engram: engram_create_change_contract(expected_files=["src/billing.rs"], forbidden=["secrets/**"])
+    Engram-->>Agent: Contract locked to Git baseline commit
+    Agent->>Repo: Edits src/billing.rs
+    Agent->>Engram: engram_validate_change(contract_id="ctr_829104")
+    alt Within Authorized Boundaries
+        Engram-->>Agent: ✅ PASS: Clean diff, zero boundary violations
+        Agent-->>Dev: "Task complete. Changes validated against contract."
+        Dev->>Git: git commit -m "feat: add refund capability"
+        Git->>Engram: engram contract check (pre-commit hook)
+        Git-->>Dev: Verified & committed
+    else Boundary Breach Detected
+        Engram-->>Agent: ❌ RECOVERY_REQUIRED (Violations detected)
+        Agent->>Engram: engram_recover(contract_id="ctr_829104")
+        Engram-->>Agent: Machine-readable recovery plan (revert unauthorized files)
+        Agent->>Repo: Reverts unauthorized mutation
+        Agent->>Engram: engram_validate_change(contract_id="ctr_829104")
+        Engram-->>Agent: ✅ PASS
+    end
+```
+
+### The MCP Tools Provided to the Agent:
+
+| MCP Tool | Purpose |
+|---|---|
+| `engram_analyze_task` | Compiles minimal AST context & initiates preflight for the prompt. |
+| `engram_get_context` | Returns exact symbol slices fitted under the token budget. |
+| `engram_create_change_contract` | Sets `expected_files` and `forbidden` paths anchored to Git baseline. |
+| `engram_validate_change` | Compares working-tree diff against active contract. |
+| `engram_get_impact` | Traces 7-category blast radius (callers, implementations, tests). |
+| `engram_inspect_symbol` | Deep inspection of specific symbols with downstream dependencies. |
+| `engram_get_memory` | Retrieves persistent team architectural decisions. |
+| `engram_record_decision` | Submits new architectural rationale for human promotion. |
+| `engram_recover` | Provides bounded recovery plans (max 2 retries) on boundary breach. |
+
+*For complete configuration options and troubleshooting, see [`docs/agent-integration.md`](docs/agent-integration.md).*
 
 ---
 

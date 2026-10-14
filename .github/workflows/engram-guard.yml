@@ -26,6 +26,18 @@ jobs:
           ref: ${{ github.base_ref || github.ref_name }}
           path: .trusted-action
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Trusted Engram Binary
+        shell: bash
+        run: |
+          cargo build --release --manifest-path .trusted-action/Cargo.toml
+          mkdir -p "$HOME/.local/bin"
+          cp .trusted-action/target/release/engram "$HOME/.local/bin/engram"
+          chmod +x "$HOME/.local/bin/engram"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Run Engram Change Guard
         uses: ./.trusted-action
         with:

@@ -126,9 +126,13 @@ engram setup vscode --apply
 engram setup cursor --apply
 engram setup claude --apply
 engram setup windsurf --apply
+
+# 4. Clean Reversibility / Disconnect (Zero Lock-in)
+engram setup --remove          # Preview removing Engram (dry-run)
+engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks
 ```
 
-*Note: `engram setup` safely merges with existing MCP servers in your editor config without overwriting them, and uses managed blocks (`<!-- BEGIN ENGRAM MANAGED BLOCK -->`) to preserve 100% of existing team instruction files.*
+*Note: `engram setup` safely merges with existing MCP servers without overwriting third-party servers, uses managed delimiter blocks (`<!-- BEGIN ENGRAM MANAGED BLOCK -->`) to preserve 100% of existing team instruction files, and cleanly reverses via `--remove` with 0 data loss.*
 
 ### For Non-MCP Editors (Visual Studio, Xcode, Web LLMs)
 

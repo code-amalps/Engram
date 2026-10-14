@@ -190,6 +190,7 @@ fn test_mcp_config_safe_merge_preserves_third_party_servers() {
         apply: true,
         force: false,
         status: false,
+        remove: false,
     };
     let report = setup::orchestrate_setup(&dir, opts).unwrap();
     assert_eq!(report.mode, "APPLIED");
@@ -232,6 +233,7 @@ fn test_mcp_config_detects_conflict_when_server_diverges() {
         apply: false,
         force: false,
         status: false,
+        remove: false,
     };
     let report = setup::orchestrate_setup(&dir, opts).unwrap();
     assert_eq!(report.conflicts_detected, 1);
@@ -247,6 +249,7 @@ fn test_mcp_config_detects_conflict_when_server_diverges() {
         apply: true,
         force: false,
         status: false,
+        remove: false,
     };
     let apply_res = setup::orchestrate_setup(&dir, apply_opts);
     assert!(apply_res.is_err());
@@ -270,6 +273,7 @@ fn test_setup_dry_run_leaves_files_untouched() {
         apply: false,
         force: false,
         status: false,
+        remove: false,
     };
     let report = setup::orchestrate_setup(&dir, opts).unwrap();
     assert_eq!(report.mode, "DRY_RUN");
@@ -315,4 +319,113 @@ fn test_prompt_generation_completeness_and_bounds() {
     assert!(prompt_out.content.contains("## Change Boundaries & Constraints"));
     assert!(prompt_out.content.contains("## Context Completeness"));
     assert_eq!(prompt_out.completeness_status, "SUFFICIENT_GROUNDING");
+}
+
+#[test]
+fn test_instructions_strip_managed_block_preserves_custom_content() {
+    let dir = temp_test_dir();
+    let file_path = dir.join(".github").join("copilot-instructions.md");
+    fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+
+    let initial = "# Custom Project Guidelines\n- Always run npm test before opening PR\n\n<!-- BEGIN ENGRAM MANAGED BLOCK -->\n## Engram Architecture Context\n1. Check boundaries.\n<!-- END ENGRAM MANAGED BLOCK -->\n\n- Write unit tests for new features.\n";
+    fs::write(&file_path, initial).unwrap();
+
+    // Strip block
+    let report = instructions::strip_managed_block(&file_path, false).unwrap();
+    assert_eq!(report.action, instructions::ManagedBlockAction::RemovedPreserved);
+
+    let content_after = fs::read_to_string(&file_path).unwrap();
+    // Engram block must be removed
+    assert!(!content_after.contains(instructions::START_MARKER));
+    assert!(!content_after.contains(instructions::END_MARKER));
+    // User content MUST be preserved!
+    assert!(content_after.contains("# Custom Project Guidelines"));
+    assert!(content_after.contains("Always run npm test"));
+    assert!(content_after.contains("Write unit tests for new features"));
+}
+
+#[test]
+fn test_instructions_strip_managed_block_deletes_empty_file() {
+    let dir = temp_test_dir();
+    let file_path = dir.join(".cursorrules");
+
+    // File only contains the managed block
+    let initial = "<!-- BEGIN ENGRAM MANAGED BLOCK -->\n## Engram Architecture Context\n<!-- END ENGRAM MANAGED BLOCK -->\n";
+    fs::write(&file_path, initial).unwrap();
+
+    let report = instructions::strip_managed_block(&file_path, false).unwrap();
+    assert_eq!(report.action, instructions::ManagedBlockAction::DeletedEmptyFile);
+    // File must be deleted since it had no user content
+    assert!(!file_path.exists());
+}
+
+#[test]
+fn test_setup_remove_preserves_unrelated_mcp_servers() {
+    let dir = temp_test_dir();
+    let mcp_path = dir.join(".vscode").join("mcp.json");
+    fs::create_dir_all(mcp_path.parent().unwrap()).unwrap();
+
+    let initial = r#"{
+  "mcpServers": {
+    "weather": { "command": "weather-cli", "args": [] },
+    "engram": { "command": "engram.exe", "args": ["mcp"] }
+  }
+}"#;
+    fs::write(&mcp_path, initial).unwrap();
+
+    let removed = setup::remove_mcp_config(&mcp_path).unwrap();
+    assert!(removed);
+
+    let updated: serde_json::Value = serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
+    let servers = updated["mcpServers"].as_object().unwrap();
+    assert!(!servers.contains_key("engram"));
+    assert!(servers.contains_key("weather"));
+}
+
+#[test]
+fn test_setup_remove_dry_run_vs_apply() {
+    let dir = temp_test_dir();
+    let mcp_path = dir.join(".vscode").join("mcp.json");
+    let instruction_path = dir.join(".github").join("copilot-instructions.md");
+    fs::create_dir_all(mcp_path.parent().unwrap()).unwrap();
+    fs::create_dir_all(instruction_path.parent().unwrap()).unwrap();
+
+    fs::write(&mcp_path, r#"{"mcpServers":{"engram":{"command":"engram","args":["mcp"]}}}"#).unwrap();
+    fs::write(&instruction_path, "<!-- BEGIN ENGRAM MANAGED BLOCK -->\nEngram\n<!-- END ENGRAM MANAGED BLOCK -->\n").unwrap();
+
+    // 1. Dry run removal
+    let dry_opts = SetupOptions {
+        client: Some("vscode".to_string()),
+        check: false,
+        dry_run: true,
+        apply: false,
+        force: false,
+        status: false,
+        remove: true,
+    };
+    let dry_report = setup::orchestrate_setup(&dir, dry_opts).unwrap();
+    assert_eq!(dry_report.mode, "DRY_RUN (REMOVAL)");
+    assert_eq!(dry_report.changes_applied, 0);
+    // Files must still exist untouched
+    assert!(mcp_path.exists());
+    assert!(instruction_path.exists());
+
+    // 2. Apply removal
+    let apply_opts = SetupOptions {
+        client: Some("vscode".to_string()),
+        check: false,
+        dry_run: false,
+        apply: true,
+        force: false,
+        status: false,
+        remove: true,
+    };
+    let apply_report = setup::orchestrate_setup(&dir, apply_opts).unwrap();
+    assert_eq!(apply_report.mode, "REMOVED");
+    assert_eq!(apply_report.changes_applied, 2);
+
+    let mcp_after: serde_json::Value = serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
+    assert!(!mcp_after["mcpServers"].as_object().unwrap().contains_key("engram"));
+    // Instruction file had only engram block, so it was cleanly deleted
+    assert!(!instruction_path.exists());
 }

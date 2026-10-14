@@ -24,6 +24,9 @@ pub enum ManagedBlockAction {
     UpdatedInPlace,
     AppendedPreserved,
     Unchanged,
+    RemovedPreserved,
+    DeletedEmptyFile,
+    NotFound,
 }
 
 #[derive(Debug, Clone)]
@@ -222,4 +225,94 @@ pub fn sync_managed_block(
             total_lines,
         })
     }
+}
+
+/// Strips the Engram managed block from an instruction file.
+///
+/// Behavior:
+/// - If file does not exist or has no managed block: returns NotFound without error.
+/// - If file only contained the managed block: removes the file (DeletedEmptyFile) if !dry_run.
+/// - If file contains other user content: strips only the managed block, preserving all user lines (RemovedPreserved).
+/// - If block is malformed or duplicated: returns Err to prevent data loss.
+pub fn strip_managed_block(path: &Path, dry_run: bool) -> Result<ManagedBlockReport> {
+    if !path.exists() {
+        return Ok(ManagedBlockReport {
+            file: path.to_path_buf(),
+            action: ManagedBlockAction::NotFound,
+            preserved_lines: 0,
+            total_lines: 0,
+        });
+    }
+
+    let raw = fs::read_to_string(path)?;
+    let start_count = raw.matches(START_MARKER).count();
+    let end_count = raw.matches(END_MARKER).count();
+
+    if start_count == 0 && end_count == 0 {
+        let total_lines = raw.lines().count();
+        return Ok(ManagedBlockReport {
+            file: path.to_path_buf(),
+            action: ManagedBlockAction::NotFound,
+            preserved_lines: total_lines,
+            total_lines,
+        });
+    }
+
+    if start_count != end_count || start_count > 1 {
+        return Err(anyhow!(
+            "Cannot safely remove Engram managed block in {}: block is malformed or duplicated. Manual inspection required.",
+            path.display()
+        ));
+    }
+
+    let start_pos = raw.find(START_MARKER).unwrap();
+    let end_marker_pos = raw.find(END_MARKER).unwrap();
+    let end_pos = end_marker_pos + END_MARKER.len();
+
+    let before = &raw[..start_pos];
+    let after = &raw[end_pos..];
+
+    // Check if remaining user content is essentially empty
+    let before_trimmed = before.trim();
+    let after_trimmed = after.trim();
+
+    if before_trimmed.is_empty() && after_trimmed.is_empty() {
+        if !dry_run {
+            let _ = fs::remove_file(path);
+        }
+        return Ok(ManagedBlockReport {
+            file: path.to_path_buf(),
+            action: ManagedBlockAction::DeletedEmptyFile,
+            preserved_lines: 0,
+            total_lines: 0,
+        });
+    }
+
+    let line_ending = detect_line_ending(&raw);
+    let mut cleaned = String::with_capacity(before.len() + after.len());
+    if !before_trimmed.is_empty() {
+        cleaned.push_str(before.trim_end());
+    }
+    if !after_trimmed.is_empty() {
+        if !cleaned.is_empty() {
+            cleaned.push_str(line_ending);
+            cleaned.push_str(line_ending);
+        }
+        cleaned.push_str(after.trim_start());
+    }
+    if !cleaned.is_empty() && !cleaned.ends_with('\n') {
+        cleaned.push_str(line_ending);
+    }
+
+    let total_lines = cleaned.lines().count();
+    if !dry_run {
+        write_atomic_preserves(path, &cleaned)?;
+    }
+
+    Ok(ManagedBlockReport {
+        file: path.to_path_buf(),
+        action: ManagedBlockAction::RemovedPreserved,
+        preserved_lines: total_lines,
+        total_lines,
+    })
 }

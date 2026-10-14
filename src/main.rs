@@ -150,6 +150,8 @@ enum CommandLine {
         force: bool,
         #[arg(long)]
         status: bool,
+        #[arg(long, alias = "disable")]
+        remove: bool,
     },
     /// Generate structured prompt context with AST symbols, boundaries, and completeness tracking
     Prompt {
@@ -749,6 +751,7 @@ fn run() -> Result<()> {
             apply,
             force,
             status,
+            remove,
         }) => {
             if list {
                 if force_json {
@@ -771,6 +774,8 @@ fn run() -> Result<()> {
                     println!("  engram setup --check           # Verify health of configured integrations");
                     println!("  engram setup --apply           # Apply proposed changes safely");
                     println!("  engram setup <target> --apply  # Configure specific editor");
+                    println!("  engram setup --remove          # Dry-run preview of removing Engram from editors");
+                    println!("  engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks");
                 }
             } else {
                 let is_dry_run = dry_run || (!apply && !check && !status);
@@ -781,6 +786,7 @@ fn run() -> Result<()> {
                     apply,
                     force,
                     status,
+                    remove,
                 };
                 let report = setup::orchestrate_setup(root, opts)?;
                 if force_json || status {
@@ -789,13 +795,18 @@ fn run() -> Result<()> {
                     println!("🧠 Engram Integration Setup ({})", report.mode);
                     println!("──────────────────────────────────────────────────────────");
                     if report.integrations.is_empty() {
-                        println!("  No matching or detected editor configurations found.");
-                        println!("  Run `engram setup --list` to view all supported targets.");
+                        if remove {
+                            println!("  No active Engram editor configurations found to remove.");
+                        } else {
+                            println!("  No matching or detected editor configurations found.");
+                            println!("  Run `engram setup --list` to view all supported targets.");
+                        }
                     }
                     for item in &report.integrations {
                         let icon = match item.config_status.as_str() {
                             "CONFIGURED_HEALTHY" => "✓",
                             "CONFLICT_DETECTED" => "⚠️",
+                            s if s.contains("Will remove") => "🗑️",
                             _ => "○",
                         };
                         println!("  {} {} ({:?})", icon, item.display_name, item.detection);
@@ -810,10 +821,19 @@ fn run() -> Result<()> {
                     }
                     println!("──────────────────────────────────────────────────────────");
                     if is_dry_run && !apply {
-                        println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
-                        println!("  Run `engram setup --apply` to execute this integration plan.");
+                        if remove {
+                            println!("  ℹ️ DRY-RUN REMOVAL. No files were modified.");
+                            println!("  Run `engram setup --remove --apply` to execute this removal plan.");
+                        } else {
+                            println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
+                            println!("  Run `engram setup --apply` to execute this integration plan.");
+                        }
                     } else if apply {
-                        println!("  ✓ Applied {} integration changes (0 data loss).", report.changes_applied);
+                        if remove {
+                            println!("  ✓ Safely removed {} integration changes (0 data loss).", report.changes_applied);
+                        } else {
+                            println!("  ✓ Applied {} integration changes (0 data loss).", report.changes_applied);
+                        }
                     }
                 }
             }

@@ -326,6 +326,7 @@ pub struct SetupOptions {
     pub apply: bool,
     pub force: bool,
     pub status: bool,
+    pub remove: bool,
 }
 
 /// Orchestrates setup planning, detection, conflict resolution, and atomic application.
@@ -354,6 +355,91 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
     let mut items = Vec::new();
     let mut changes_applied = 0;
     let mut conflicts_detected = 0;
+
+    if opts.remove {
+        for target in targets {
+            let config_path = (target.default_config_path)(root);
+            let instruction_path = target.default_instruction_path.map(|f| f(root));
+
+            let mcp_configured = config_path.exists() && {
+                fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|v| v.get("mcpServers")?.get("engram").cloned())
+                    .is_some()
+            };
+
+            let instruction_has_block = if let Some(ref ip) = instruction_path {
+                ip.exists() && {
+                    fs::read_to_string(ip)
+                        .map(|t| t.contains(instructions::START_MARKER))
+                        .unwrap_or(false)
+                }
+            } else {
+                false
+            };
+
+            // If neither is present and client wasn't explicitly specified, skip
+            if opts.client.is_none() && !mcp_configured && !instruction_has_block {
+                continue;
+            }
+
+            let detection = (target.detect_fn)(root);
+
+            let config_status = if mcp_configured {
+                "CONFIGURED (Will remove)".to_string()
+            } else {
+                "NOT_CONFIGURED".to_string()
+            };
+
+            let instruction_status = if instruction_has_block {
+                Some("MANAGED_BLOCK (Will strip)".to_string())
+            } else if instruction_path.is_some() {
+                Some("NOT_PRESENT".to_string())
+            } else {
+                None
+            };
+
+            if opts.apply {
+                if mcp_configured && remove_mcp_config(&config_path)? {
+                    changes_applied += 1;
+                }
+                if let Some(ref ip) = instruction_path {
+                    if instruction_has_block {
+                        let res = instructions::strip_managed_block(ip, false)?;
+                        if res.action != instructions::ManagedBlockAction::NotFound {
+                            changes_applied += 1;
+                        }
+                    }
+                }
+            }
+
+            items.push(IntegrationPlanItem {
+                client_id: target.id.to_string(),
+                display_name: target.display_name.to_string(),
+                detection,
+                config_path: config_path.to_string_lossy().to_string(),
+                config_status,
+                instruction_path: instruction_path.map(|p| p.to_string_lossy().to_string()),
+                instruction_status,
+                conflict: false,
+                conflict_details: None,
+            });
+        }
+
+        let mode = if opts.apply {
+            "REMOVED"
+        } else {
+            "DRY_RUN (REMOVAL)"
+        };
+
+        return Ok(SetupReport {
+            mode: mode.to_string(),
+            integrations: items,
+            changes_applied,
+            conflicts_detected: 0,
+        });
+    }
 
     for target in targets {
         let detection = (target.detect_fn)(root);
@@ -525,6 +611,29 @@ fn apply_mcp_config(dest: &Path, binary: &str, root_canon: &str) -> Result<bool>
     // Atomic write
     write_atomic_json(dest, &config)?;
     Ok(true)
+}
+
+pub fn remove_mcp_config(dest: &Path) -> Result<bool> {
+    if !dest.exists() {
+        return Ok(false);
+    }
+    let text = match fs::read_to_string(dest) {
+        Ok(t) => t,
+        Err(_) => return Ok(false),
+    };
+    let mut config: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return Ok(false),
+    };
+    if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+        if servers.remove("engram").is_some() {
+            let bak = dest.with_extension("json.bak");
+            let _ = fs::copy(dest, bak);
+            write_atomic_json(dest, &config)?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn write_atomic_json(dest: &Path, value: &Value) -> Result<()> {

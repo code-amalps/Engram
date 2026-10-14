@@ -268,11 +268,16 @@ engram setup vscode --apply
 engram setup cursor --apply
 engram setup claude --apply
 engram setup windsurf --apply
+
+# 4. Clean Exit / Zero Lock-in (Revert anytime in 1 command):
+engram setup --remove          # Dry-run preview of removing Engram
+engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks
 ```
 
 #### How Engram Protects Your Existing Files:
 - **Zero Rule Loss (Managed Blocks):** If `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
 - **Surgical JSON Merging:** When configuring `.vscode/mcp.json` or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
+- **Clean Reversibility (`--remove`):** Running `engram setup --remove --apply` surgically removes the `"engram"` server entry without touching other servers, strips only the managed block from your instruction files without touching user content, and leaves 0 leftover artifacts.
 
 ---
 

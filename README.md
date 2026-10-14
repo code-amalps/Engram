@@ -384,7 +384,7 @@ jobs:
           fetch-depth: 0 # Full history recommended for accurate baseline diff
 
       - name: Run Engram Change Guard
-        uses: code-amalps/Engram@v1.4.0
+        uses: code-amalps/Engram@main # Or pin to latest released version
         with:
           base-ref: ${{ github.base_ref }}
           strict: false

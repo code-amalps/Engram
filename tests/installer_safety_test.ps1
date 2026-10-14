@@ -122,6 +122,18 @@ try {
     $UpdatedContent = Get-Content $T6_Existing
     Assert-Condition ($UpdatedContent -eq "NEW_VALIDATED_BINARY_V1_2") "Staged replacement commits updated binary cleanly"
 
+    # ── TEST 7: Installer CLI Argument Parsing (--tag / --version) ───────
+    Write-Host "`nTest 7: Installer CLI Flag Parsing (--tag / --version)" -ForegroundColor Yellow
+    $InstallSh = Join-Path $RepoRoot "install.sh"
+    $ShContent = Get-Content $InstallSh -Raw
+    $HasTagParsing = $ShContent.Contains("--tag|--version)") -and $ShContent.Contains("VERSION=""`$2""")
+    Assert-Condition ($HasTagParsing) "install.sh implements explicit --tag and --version flag parsing"
+
+    # ── TEST 8: Private Repository Asset API URL Extraction ─────────────
+    Write-Host "`nTest 8: Private Repository API Asset Resolution" -ForegroundColor Yellow
+    $HasApiAssetDownload = $ShContent.Contains("get_asset_api_url()") -and $ShContent.Contains("application/octet-stream")
+    Assert-Condition ($HasApiAssetDownload) "install.sh supports authenticated GitHub API asset download for private repos"
+
 } finally {
     if (Test-Path $SandboxRoot) {
         Remove-Item -Path $SandboxRoot -Recurse -Force -ErrorAction SilentlyContinue

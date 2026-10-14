@@ -52,14 +52,30 @@ runs:
   steps:
     - name: Ensure Git History Available
       shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
       run: |
         if [ -d ".git" ]; then
-          echo "Fetching base ref origin/${{ inputs.base-ref }} to prevent shallow clone truncation..."
-          git fetch origin "${{ inputs.base-ref }}" --depth=100 2>/dev/null || true
+          # Validate and sanitize base-ref
+          if [[ "$BASE_REF" =~ [^a-zA-Z0-9_./\-] ]]; then
+            echo "::error::Invalid base-ref '$BASE_REF'. Must only contain alphanumeric characters, dots, slashes, underscores, and hyphens."
+            exit 1
+          fi
+
+          FETCH_TARGET="$BASE_REF"
+          if [[ "$FETCH_TARGET" =~ ^origin/ ]]; then
+            FETCH_TARGET="${FETCH_TARGET#origin/}"
+          fi
+
+          echo "Fetching base ref origin/$FETCH_TARGET to prevent shallow clone truncation..."
+          git fetch origin "$FETCH_TARGET" --depth=100 2>/dev/null || true
         fi
 
     - name: Install Engram Binary
       shell: bash
+      env:
+        ENGRAM_VERSION: ${{ inputs.version }}
+        ENGRAM_AUTH_TOKEN: ${{ inputs.github-token }}
       run: |
         if command -v engram >/dev/null 2>&1; then
           echo "Engram already present in PATH: $(which engram)"
@@ -67,60 +83,80 @@ runs:
           exit 0
         fi
 
-        echo "Installing Engram ${{ inputs.version }}..."
+        echo "Installing Engram $ENGRAM_VERSION..."
         if [ -f "./install.sh" ]; then
-          GITHUB_TOKEN="${{ inputs.github-token }}" ./install.sh --tag "${{ inputs.version }}" || true
+          GITHUB_TOKEN="$ENGRAM_AUTH_TOKEN" ./install.sh --tag "$ENGRAM_VERSION"
         else
-          curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | GITHUB_TOKEN="${{ inputs.github-token }}" sh -s -- --tag "${{ inputs.version }}" || true
+          curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | GITHUB_TOKEN="$ENGRAM_AUTH_TOKEN" sh -s -- --tag "$ENGRAM_VERSION"
         fi
 
         # Add default installation locations to PATH
         if [ -d "$HOME/.local/bin" ]; then
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
         fi
         if [ -d "$HOME/bin" ]; then
-          echo "$HOME/bin" >> $GITHUB_PATH
+          echo "$HOME/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/bin:$PATH"
         fi
 
     - name: Execute Engram Change Guard Check
       id: run-guard
       shell: bash
+      env:
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        INPUT_CONTRACT_ID: ${{ inputs.contract-id }}
+        INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_ALLOW_NO_CONTRACT: ${{ inputs.allow-no-contract }}
+        INPUT_CHECK_PROVENANCE: ${{ inputs.check-provenance }}
       run: |
-        CMD="engram contract check --base origin/${{ inputs.base-ref }}"
-
-        if [ -n "${{ inputs.contract-file }}" ]; then
-          CMD="$CMD --file ${{ inputs.contract-file }}"
-        elif [ -n "${{ inputs.contract-id }}" ]; then
-          CMD="$CMD ${{ inputs.contract-id }}"
+        # 1. Validate base-ref input against shell injection
+        if [[ "$INPUT_BASE_REF" =~ [^a-zA-Z0-9_./\-] ]]; then
+          echo "::error::Invalid base-ref '$INPUT_BASE_REF'. Contains disallowed characters."
+          exit 1
         fi
 
-        if [ "${{ inputs.strict }}" = "true" ]; then
-          CMD="$CMD --strict"
+        # 2. Normalize base ref: commit SHA, origin/ prefix, or branch name
+        TARGET_BASE="$INPUT_BASE_REF"
+        if [[ ! "$TARGET_BASE" =~ ^[0-9a-fA-F]{40}$ ]] && [[ ! "$TARGET_BASE" =~ ^origin/ ]] && [[ "$TARGET_BASE" != "HEAD" ]] && [[ "$TARGET_BASE" != "WORKTREE" ]]; then
+          TARGET_BASE="origin/$TARGET_BASE"
         fi
 
-        if [ "${{ inputs.allow-no-contract }}" = "true" ]; then
-          CMD="$CMD --allow-no-contract"
+        # 3. Construct arguments safely as a bash array (zero eval!)
+        ARGS=("contract" "check" "--base" "$TARGET_BASE")
+
+        if [ -n "$INPUT_CONTRACT_FILE" ]; then
+          ARGS+=("--file" "$INPUT_CONTRACT_FILE")
+        elif [ -n "$INPUT_CONTRACT_ID" ]; then
+          ARGS+=("$INPUT_CONTRACT_ID")
         fi
 
-        if [ "${{ inputs.check-provenance }}" = "true" ]; then
-          CMD="$CMD --check-provenance"
+        if [ "$INPUT_STRICT" = "true" ]; then
+          ARGS+=("--strict")
         fi
 
-        echo "Running: $CMD"
+        if [ "$INPUT_ALLOW_NO_CONTRACT" = "true" ]; then
+          ARGS+=("--allow-no-contract")
+        fi
+
+        if [ "$INPUT_CHECK_PROVENANCE" = "true" ]; then
+          ARGS+=("--check-provenance")
+        fi
+
+        echo "Executing: engram ${ARGS[*]}"
         set +e
-        eval "$CMD"
+        engram "${ARGS[@]}"
         EXIT_CODE=$?
         set -e
 
         if [ $EXIT_CODE -eq 0 ]; then
-          echo "status=PASSED" >> $GITHUB_OUTPUT
-          echo "exit_code=0" >> $GITHUB_OUTPUT
+          echo "status=PASSED" >> "$GITHUB_OUTPUT"
+          echo "exit_code=0" >> "$GITHUB_OUTPUT"
           echo "✅ Engram Change Guard: Passed"
         else
-          echo "status=FAILED" >> $GITHUB_OUTPUT
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "status=FAILED" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
           echo "::error::Engram Change Guard verification failed (Exit code: $EXIT_CODE)"
           exit $EXIT_CODE
         fi

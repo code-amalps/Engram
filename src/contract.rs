@@ -755,13 +755,35 @@ pub fn validate_contract_diff_with_constitution(
     contract: &ChangeContract,
     changed_files: &[String],
 ) -> (Vec<FileClassification>, Vec<MissingChange>, ContractSummary) {
+    validate_contract_diff_with_constitution_and_base(root, contract, changed_files, None)
+}
+
+/// Validate actual changed files against Change Contract elastic boundaries
+/// with absolute precedence of the Project Constitution, anchored to an authoritative PR base revision.
+pub fn validate_contract_diff_with_constitution_and_base(
+    root: &Path,
+    contract: &ChangeContract,
+    changed_files: &[String],
+    base_commit: Option<&str>,
+) -> (Vec<FileClassification>, Vec<MissingChange>, ContractSummary) {
     let mut classifications = Vec::new();
     let mut expected_count = 0;
     let mut expansion_count = 0;
     let mut unexpected_count = 0;
     let mut violation_count = 0;
 
-    let constitution_rules = crate::constitution::load_constitution(root).unwrap_or_default();
+    let base_rules = base_commit
+        .and_then(|rev| crate::constitution::load_constitution_at_revision(root, rev).ok())
+        .unwrap_or_default();
+    let worktree_rules = crate::constitution::load_constitution(root).unwrap_or_default();
+
+    // Base rules are authoritative. Add any non-duplicate enabled rules from worktree.
+    let mut constitution_rules = base_rules;
+    for rule in worktree_rules {
+        if !constitution_rules.iter().any(|r| r.id == rule.id) {
+            constitution_rules.push(rule);
+        }
+    }
 
     let normalized_expected: Vec<String> = contract
         .boundary
@@ -773,12 +795,34 @@ pub fn validate_contract_diff_with_constitution(
     for file in changed_files {
         let norm_file = normalize_rel_path(file);
         let clean = norm_file.trim_start_matches("./").trim_end_matches('/');
-        if clean == ".engram"
-            || clean.starts_with(".engram/")
-            || clean == ".git"
+        if clean == ".git"
             || clean.starts_with(".git/")
+            || clean.starts_with(".engram/cache")
+            || clean.starts_with(".engram/sessions")
+            || clean.ends_with(".db")
+            || clean.ends_with(".db-wal")
+            || clean.ends_with(".db-shm")
         {
             continue;
+        }
+
+        // Check for unratified policy modification in PR mode or when base_commit is specified
+        if crate::constitution::is_policy_file(&norm_file) && base_commit.is_some() {
+            let is_contract_ratified = contract.provenance.ratification_status == RatificationStatus::Ratified;
+            let is_in_expected = normalized_expected.contains(&norm_file);
+
+            if !is_contract_ratified || !is_in_expected {
+                violation_count += 1;
+                classifications.push(FileClassification {
+                    path: file.clone(),
+                    category: FileValidationCategory::BoundaryViolation,
+                    reason: format!(
+                        "UNRATIFIED_POLICY_MUTATION: Sovereign policy file '{}' was modified or deleted in PR without explicit human ratification",
+                        file
+                    ),
+                });
+                continue;
+            }
         }
 
         // 1. Check Project Constitution rules FIRST (Absolute Precedence)
@@ -1062,7 +1106,20 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 return make_error_result("none", err_code, msg);
             }
 
-            let constitution_rules = crate::constitution::load_constitution(&root).unwrap_or_default();
+            let base_rules = options
+                .base_commit
+                .as_deref()
+                .and_then(|rev| crate::constitution::load_constitution_at_revision(&root, rev).ok())
+                .unwrap_or_default();
+            let worktree_rules = crate::constitution::load_constitution(&root).unwrap_or_default();
+
+            let mut constitution_rules = base_rules;
+            for rule in worktree_rules {
+                if !constitution_rules.iter().any(|r| r.id == rule.id) {
+                    constitution_rules.push(rule);
+                }
+            }
+
             let mut classifications = Vec::new();
             let mut failure_reasons = Vec::new();
             let mut violation_count = 0;
@@ -1070,7 +1127,28 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
             for file in &changed_files {
                 let norm_file = normalize_rel_path(file);
                 let clean = norm_file.trim_start_matches("./").trim_end_matches('/');
-                if clean == ".engram" || clean.starts_with(".engram/") || clean == ".git" || clean.starts_with(".git/") {
+                if clean == ".git"
+                    || clean.starts_with(".git/")
+                    || clean.starts_with(".engram/cache")
+                    || clean.starts_with(".engram/sessions")
+                    || clean.ends_with(".db")
+                    || clean.ends_with(".db-wal")
+                    || clean.ends_with(".db-shm")
+                {
+                    continue;
+                }
+
+                // In allow_no_contract mode, any modification or deletion to policy files in PR mode without a contract is forbidden
+                if crate::constitution::is_policy_file(&norm_file) && options.base_commit.is_some() {
+                    violation_count += 1;
+                    classifications.push(FileClassification {
+                        path: file.clone(),
+                        category: FileValidationCategory::BoundaryViolation,
+                        reason: format!(
+                            "UNRATIFIED_POLICY_MUTATION: Sovereign policy file '{}' cannot be modified or deleted in PR without a ratified Change Contract",
+                            file
+                        ),
+                    });
                     continue;
                 }
 
@@ -1111,10 +1189,21 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 }
             }
 
-            if violation_count > 0 {
+            if classifications.iter().any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION")) {
+                failure_reasons.push(
+                    "CONSTITUTION_MODIFIED_IN_PR: Sovereign policy files were modified or deleted in PR diff without a ratified Change Contract.".to_string(),
+                );
+            }
+
+            let boundary_violation_count = classifications
+                .iter()
+                .filter(|c| c.category == FileValidationCategory::BoundaryViolation && !c.reason.contains("UNRATIFIED_POLICY_MUTATION"))
+                .count();
+
+            if boundary_violation_count > 0 {
                 failure_reasons.push(format!(
                     "CONSTITUTION_VIOLATION: Detected {} boundary violation(s) crossing Project Constitution forbidden boundaries.",
-                    violation_count
+                    boundary_violation_count
                 ));
             }
 
@@ -1202,7 +1291,7 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
 
     // 3. Classify changes with Constitution precedence
     let (classifications, missing_changes, summary_counts) =
-        validate_contract_diff_with_constitution(&root, &contract, &changed_files);
+        validate_contract_diff_with_constitution_and_base(&root, &contract, &changed_files, options.base_commit.as_deref());
 
     let mut failure_reasons = Vec::new();
     let mut advisory_warnings = Vec::new();
@@ -1213,6 +1302,12 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
             "CONTRACT_BLOCKED_AWAITING_HUMAN: Change Contract '{}' is BLOCKED_AWAITING_HUMAN. Human reconciliation required before changes can be accepted.",
             contract.contract_id
         ));
+    }
+
+    if classifications.iter().any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION")) {
+        failure_reasons.push(
+            "CONSTITUTION_MODIFIED_IN_PR: Sovereign policy files were modified or deleted in PR diff without explicit human ratification.".to_string(),
+        );
     }
 
     if options.check_provenance || options.base_commit.is_some() {

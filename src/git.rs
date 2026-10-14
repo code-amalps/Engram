@@ -33,13 +33,18 @@ pub fn normalize_git_path(p: &str) -> String {
         .replace('\\', "/")
 }
 
-/// Check if a path is internal metadata (.engram, .git) that should be excluded from repository diffs.
+/// Check if a path is internal metadata (.git, local cache/sessions) that should be excluded from repository diffs.
+/// Note: Sovereign policy files (.engram/constitution.yaml, memory.yaml, contracts/) are tracked repository files
+/// and are NEVER ignored.
 pub fn is_internal_metadata_path(p: &str) -> bool {
     let clean = p.trim_start_matches("./").trim_end_matches('/');
-    clean == ".engram"
-        || clean.starts_with(".engram/")
-        || clean == ".git"
+    clean == ".git"
         || clean.starts_with(".git/")
+        || clean.starts_with(".engram/cache")
+        || clean.starts_with(".engram/sessions")
+        || clean.ends_with(".db")
+        || clean.ends_with(".db-wal")
+        || clean.ends_with(".db-shm")
 }
 
 /// Check if the path is inside a Git repository.
@@ -361,10 +366,28 @@ pub fn get_diff_changed_files(
         }
 
         let text = String::from_utf8_lossy(&output.stdout);
-        let files = text
+        let mut files: Vec<GitChangedFile> = text
             .lines()
             .filter_map(|l| parse_name_status_line(l, false))
             .collect();
+
+        // Also include any working tree changes (uncommitted/staged/untracked)
+        let wt_output = Command::new("git")
+            .args(["status", "--porcelain=v1", "-uall"])
+            .current_dir(root)
+            .output()?;
+        if wt_output.status.success() {
+            let wt_text = String::from_utf8_lossy(&wt_output.stdout);
+            for l in wt_text.lines() {
+                if let Some(cf) = parse_porcelain_line(l) {
+                    if !files.iter().any(|f| f.path == cf.path) {
+                        files.push(cf);
+                    }
+                }
+            }
+        }
+
+        let files = expand_changed_files(root, files);
         return Ok(Ok((files, format!("PR_HEAD (base: {base})"))));
     }
 

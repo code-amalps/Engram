@@ -211,6 +211,8 @@ rules:
     description: "Billing cannot be modified by agent without team sign-off."
 "#;
     fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
+    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
+    Command::new("git").args(["commit", "-m", "Add constitution"]).current_dir(&root).output().unwrap();
 
     // 2. Agent creates contract declaring billing/gateway.rs as EXPECTED
     let contract = create_contract(
@@ -236,7 +238,7 @@ rules:
     assert_eq!(res.status, "FAILED");
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
     assert_eq!(res.summary.boundary_violations, 1);
-    assert!(res.changes[0].reason.contains("Constitution rule 'Billing Layer Locked'"));
+    assert!(res.changes.iter().any(|c| c.reason.contains("Constitution rule 'Billing Layer Locked'")));
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -356,6 +358,135 @@ fn test_ci_guard_markdown_summary_and_annotations() {
     assert!(md_summary.contains("| Total Inspected Files | 1 |"));
     assert!(md_summary.contains("| Expected Changes | 1 |"));
     assert!(md_summary.contains("docs/guide.md"));
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn test_ci_guard_fails_when_pr_weakens_constitution() {
+    let root = setup_test_git_repo("weaken_const");
+
+    // Commit a constitution on main forbidding config/secrets/**
+    let engram_dir = root.join(".engram");
+    fs::create_dir_all(&engram_dir).unwrap();
+    let constitution_yaml = r#"
+schema_version: 1
+rules:
+  - id: RULE-PROTECTED-CONFIG
+    name: "Protected Config Files"
+    type: PATTERN
+    severity: ERROR
+    forbidden: "config/secrets/**"
+    description: "Secrets directory must never be altered."
+"#;
+    fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
+    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
+    Command::new("git").args(["commit", "-m", "Add base constitution"]).current_dir(&root).output().unwrap();
+
+    // Now switch to a PR branch
+    Command::new("git").args(["checkout", "-b", "feature/tamper"]).current_dir(&root).output().unwrap();
+
+    // The PR deletes the constitution file to weaken the rules!
+    fs::remove_file(engram_dir.join("constitution.yaml")).unwrap();
+    // And modifies the forbidden secret file!
+    let secret_file = root.join("config").join("secrets").join("api_key.txt");
+    fs::create_dir_all(secret_file.parent().unwrap()).unwrap();
+    fs::write(&secret_file, "LEAKED_KEY\n").unwrap();
+
+    // Check with base_commit = "main" and allow_no_contract = true
+    let opts = CheckOptions {
+        base_commit: Some("main".to_string()),
+        allow_no_contract: true,
+        ..Default::default()
+    };
+
+    let res = check_contract(&root, &opts);
+    assert_eq!(res.status, "FAILED", "Deleting constitution and editing forbidden secrets in PR must FAIL");
+    assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
+    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR") || r.contains("CONSTITUTION_VIOLATION")));
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn test_ci_guard_fails_when_pr_modifies_constitution_file() {
+    let root = setup_test_git_repo("modify_const");
+
+    let engram_dir = root.join(".engram");
+    fs::create_dir_all(&engram_dir).unwrap();
+    let constitution_yaml = r#"
+schema_version: 1
+rules:
+  - id: RULE-NO-PAYMENTS
+    name: "Payments Boundary"
+    type: PATTERN
+    severity: ERROR
+    forbidden: "src/payments/**"
+    description: "Do not touch payments."
+"#;
+    fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
+    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
+    Command::new("git").args(["commit", "-m", "Base constitution"]).current_dir(&root).output().unwrap();
+
+    Command::new("git").args(["checkout", "-b", "feature/modify-rules"]).current_dir(&root).output().unwrap();
+
+    // PR modifies constitution to remove the forbidden rule
+    let weakened_yaml = r#"
+schema_version: 1
+rules: []
+"#;
+    fs::write(engram_dir.join("constitution.yaml"), weakened_yaml).unwrap();
+
+    // PR also touches payments
+    let pay_file = root.join("src").join("payments").join("gateway.rs");
+    fs::create_dir_all(pay_file.parent().unwrap()).unwrap();
+    fs::write(&pay_file, "// untrusted payment logic\n").unwrap();
+
+    let opts = CheckOptions {
+        base_commit: Some("main".to_string()),
+        allow_no_contract: true,
+        ..Default::default()
+    };
+
+    let res = check_contract(&root, &opts);
+    assert_eq!(res.status, "FAILED", "Modifying constitution in PR to bypass rules must FAIL");
+    assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
+    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR") || r.contains("CONSTITUTION_VIOLATION")));
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn test_ci_guard_adversarial_inputs_handled_safely() {
+    let root = setup_test_git_repo("adversarial_input");
+
+    // 1. Adversarial base ref containing shell injection payloads
+    let opts1 = CheckOptions {
+        base_commit: Some("main; cat /etc/passwd #".to_string()),
+        allow_no_contract: true,
+        ..Default::default()
+    };
+    let res1 = check_contract(&root, &opts1);
+    assert_ne!(res1.exit_code, 0, "Adversarial base ref must not succeed");
+    assert_eq!(res1.status, "FAILED");
+
+    // 2. Adversarial contract file containing path traversal or shell metacharacters
+    let opts2 = CheckOptions {
+        file: Some("../../etc/shadow; touch /tmp/pwned".to_string()),
+        ..Default::default()
+    };
+    let res2 = check_contract(&root, &opts2);
+    assert_eq!(res2.exit_code, CheckExitCode::ContractNotFound.as_i32());
+    assert_eq!(res2.status, "FAILED");
+
+    // 3. Adversarial contract ID containing command substitution
+    let opts3 = CheckOptions {
+        contract_id: Some("$(id > /tmp/pwned)".to_string()),
+        ..Default::default()
+    };
+    let res3 = check_contract(&root, &opts3);
+    assert_eq!(res3.exit_code, CheckExitCode::ContractNotFound.as_i32());
+    assert_eq!(res3.status, "FAILED");
 
     fs::remove_dir_all(&root).unwrap();
 }

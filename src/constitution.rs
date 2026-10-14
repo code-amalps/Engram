@@ -15,14 +15,56 @@ pub struct ConstitutionFile {
     pub rules: Vec<ConstitutionRule>,
 }
 
+/// Checks whether a given repository relative path is a sovereign policy/governance file.
+pub fn is_policy_file(path: &str) -> bool {
+    let clean = path.replace('\\', "/");
+    let norm = clean.trim_start_matches("./").trim_end_matches('/');
+    norm == ".engram/constitution.yaml"
+        || norm == ".engram/constitution.yml"
+        || norm == ".engram/memory.yaml"
+        || norm.starts_with(".engram/policies/")
+}
+
 pub fn load_constitution(root: &Path) -> Result<Vec<ConstitutionRule>> {
-    let path = root.join(".engram").join("constitution.yaml");
-    if !path.exists() {
-        return Ok(Vec::new());
+    let candidates = [
+        root.join(".engram").join("constitution.yaml"),
+        root.join(".engram").join("constitution.yml"),
+    ];
+    for path in &candidates {
+        if path.exists() {
+            let content = fs::read_to_string(path)?;
+            let parsed: ConstitutionFile = serde_yaml::from_str(&content).unwrap_or_default();
+            return Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect());
+        }
     }
-    let content = fs::read_to_string(&path)?;
-    let parsed: ConstitutionFile = serde_yaml::from_str(&content).unwrap_or_default();
-    Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect())
+    Ok(Vec::new())
+}
+
+/// Load sovereign constitution rules at a specific git revision (e.g. PR base commit).
+pub fn load_constitution_at_revision(root: &Path, rev: &str) -> Result<Vec<ConstitutionRule>> {
+    let trimmed = rev.trim();
+    if trimmed == "WORKTREE" || trimmed.is_empty() {
+        return load_constitution(root);
+    }
+
+    let candidates = [".engram/constitution.yaml", ".engram/constitution.yml"];
+    for cand in &candidates {
+        let output = std::process::Command::new("git")
+            .args(["show", &format!("{}:{}", trimmed, cand)])
+            .current_dir(root)
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                let content = String::from_utf8_lossy(&out.stdout);
+                if let Ok(parsed) = serde_yaml::from_str::<ConstitutionFile>(&content) {
+                    return Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect());
+                }
+            }
+        }
+    }
+
+    Ok(Vec::new())
 }
 
 pub fn format_constraints(rules: &[ConstitutionRule]) -> Vec<String> {

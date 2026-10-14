@@ -7,6 +7,52 @@ set -eu
 REPO="code-amalps/Engram"
 VERSION="${ENGRAM_VERSION:-latest}"
 AUTH_TOKEN="${GITHUB_TOKEN:-}"
+INSTALL_DIR_OVERRIDE=""
+
+# Parse CLI flags
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tag|--version)
+      VERSION="$2"
+      shift 2
+      ;;
+    --tag=*|--version=*)
+      VERSION="${1#*=}"
+      shift 1
+      ;;
+    --token|--auth)
+      AUTH_TOKEN="$2"
+      shift 2
+      ;;
+    --token=*|--auth=*)
+      AUTH_TOKEN="${1#*=}"
+      shift 1
+      ;;
+    --dir|--install-dir)
+      INSTALL_DIR_OVERRIDE="$2"
+      shift 2
+      ;;
+    --dir=*|--install-dir=*)
+      INSTALL_DIR_OVERRIDE="${1#*=}"
+      shift 1
+      ;;
+    --repo)
+      REPO="$2"
+      shift 2
+      ;;
+    --repo=*)
+      REPO="${1#*=}"
+      shift 1
+      ;;
+    --help|-h)
+      echo "Usage: install.sh [--tag <version>] [--token <github_token>] [--dir <install_dir>]"
+      exit 0
+      ;;
+    *)
+      shift 1
+      ;;
+  esac
+done
 
 print_msg() {
   printf "\033[1;36m%s\033[0m\n" "$1"
@@ -59,7 +105,9 @@ case "$OS" in
 esac
 
 # 2. Determine Install Directory
-if [ -n "${ENGRAM_INSTALL_DIR:-}" ]; then
+if [ -n "$INSTALL_DIR_OVERRIDE" ]; then
+  INSTALL_DIR="$INSTALL_DIR_OVERRIDE"
+elif [ -n "${ENGRAM_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$ENGRAM_INSTALL_DIR"
 elif [ -w "/usr/local/bin" ]; then
   INSTALL_DIR="/usr/local/bin"
@@ -123,21 +171,56 @@ ARCHIVE_NAME="engram-${TAG}-${TARGET}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE_NAME}"
 SUMS_URL="https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
 
+# Resolve API asset URLs for private repositories
+get_asset_api_url() {
+  _target="$1"
+  awk -v target="$_target" '
+    /"url":/ {
+      u = $0
+      sub(/.*"url": *"/, "", u)
+      sub(/".*/, "", u)
+    }
+    /"name":/ {
+      n = $0
+      sub(/.*"name": *"/, "", n)
+      sub(/".*/, "", n)
+      if (n == target && u ~ /releases\/assets\//) {
+        print u
+        exit
+      }
+    }
+  ' "$RELEASE_JSON"
+}
+
+ARCHIVE_API_URL="$(get_asset_api_url "$ARCHIVE_NAME")"
+SUMS_API_URL="$(get_asset_api_url "SHA256SUMS")"
+
 ARCHIVE_FILE="$TMP_DIR/$ARCHIVE_NAME"
 SUMS_FILE="$TMP_DIR/SHA256SUMS"
 
 print_msg "Downloading $ARCHIVE_NAME..."
 if command -v curl >/dev/null 2>&1; then
-  if [ -n "$AUTH_HEADER" ]; then
-    curl -fL -H "$AUTH_HEADER" -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
-    curl -fL -H "$AUTH_HEADER" -o "$SUMS_FILE" "$SUMS_URL" || true
+  if [ -n "$AUTH_HEADER" ] && [ -n "$ARCHIVE_API_URL" ]; then
+    # Authenticated GitHub API asset endpoint for private repositories
+    curl -sSfL -H "$AUTH_HEADER" -H "Accept: application/octet-stream" -o "$ARCHIVE_FILE" "$ARCHIVE_API_URL"
+    if [ -n "$SUMS_API_URL" ]; then
+      curl -sSfL -H "$AUTH_HEADER" -H "Accept: application/octet-stream" -o "$SUMS_FILE" "$SUMS_API_URL" || true
+    fi
+  elif [ -n "$AUTH_HEADER" ]; then
+    curl -sSfL -H "$AUTH_HEADER" -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
+    curl -sSfL -H "$AUTH_HEADER" -o "$SUMS_FILE" "$SUMS_URL" || true
   else
-    curl -fL -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
-    curl -fL -o "$SUMS_FILE" "$SUMS_URL" || true
+    curl -sSfL -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
+    curl -sSfL -o "$SUMS_FILE" "$SUMS_URL" || true
   fi
 else
   wget -q -O "$ARCHIVE_FILE" "$DOWNLOAD_URL"
   wget -q -O "$SUMS_FILE" "$SUMS_URL" || true
+fi
+
+if [ ! -f "$ARCHIVE_FILE" ] || [ ! -s "$ARCHIVE_FILE" ]; then
+  print_error "Download failed: Archive file was not downloaded or is empty."
+  exit 1
 fi
 
 # 4. Fail-Closed Checksum Verification

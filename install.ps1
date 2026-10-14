@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Engram 1-Click Installer for Windows (PowerShell)
 .DESCRIPTION
@@ -52,7 +52,7 @@ $AuthToken = if (-not [string]::IsNullOrWhiteSpace($Token)) {
 }
 
 Write-Host "🧠 Engram Installer for Windows" -ForegroundColor Cyan
-Write-Host "──────────────────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host "------------------------------------------------------" -ForegroundColor DarkGray
 
 # 1. Pre-flight In-Use Check: Prevent modifying or replacing locked binaries
 $runningEngram = Get-Process -Name "engram*" -ErrorAction SilentlyContinue
@@ -144,9 +144,9 @@ try {
     # Verify Checksum Fail-Closed
     Write-Host "Verifying release checksum with SHA256SUMS..." -ForegroundColor Cyan
     $EscapedZip = [regex]::Escape($ZipName)
-    $MatchingLines = Get-Content $TempSums | Where-Object { $_ -match "\b[0-9a-fA-F]{64}\s+(\./)?$EscapedZip\b" }
+    $MatchingLines = @(Get-Content $TempSums | Where-Object { $_ -match "\b[0-9a-fA-F]{64}\s+(\./)?$EscapedZip\b" })
 
-    if (-not $MatchingLines -or $MatchingLines.Count -eq 0) {
+    if ($MatchingLines.Count -eq 0) {
         Write-Error "Integrity verification failed: Could not find checksum entry for '$ZipName' in SHA256SUMS.`nRefusing to install unverified artifact."
         exit 1
     }
@@ -239,10 +239,10 @@ try {
     }
 
     # 7. Final Smoke Test
-    Write-Host "──────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host "------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host "Verifying installed command..." -ForegroundColor Cyan
     & $DestBin --version
-    Write-Host "──────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host "------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host "🎉 Engram $Tag installed successfully!" -ForegroundColor Green
     Write-Host "To connect your editor in any repository, run:" -ForegroundColor White
     Write-Host "  engram setup --apply" -ForegroundColor Yellow

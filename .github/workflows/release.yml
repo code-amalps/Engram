@@ -11,6 +11,14 @@ on:
         required: false
         default: true
         type: boolean
+      attestation_policy:
+        description: 'Attestation policy (required | approved_without_attestation)'
+        required: false
+        default: 'required'
+        type: choice
+        options:
+          - 'required'
+          - 'approved_without_attestation'
 
 permissions:
   contents: write
@@ -224,10 +232,31 @@ jobs:
           "
           cat release-manifest.json
 
+      - name: Resolve and Validate Attestation Policy
+        id: policy
+        run: |
+          POLICY="${{ inputs.attestation_policy || vars.ATTESTATION_POLICY || 'required' }}"
+          echo "Resolved attestation policy: $POLICY"
+          if [ "$POLICY" = "required" ]; then
+            echo "run_attestation=true" >> "$GITHUB_OUTPUT"
+          elif [ "$POLICY" = "approved_without_attestation" ]; then
+            echo "run_attestation=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Attestation step bypassed under approved_without_attestation policy."
+          else
+            echo "::error::Invalid attestation policy '$POLICY'. Allowed values: 'required', 'approved_without_attestation'."
+            exit 1
+          fi
+
       - name: Attest Build Provenance
+        if: steps.policy.outputs.run_attestation == 'true'
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: 'release_assets/engram-*'
+
+      - name: Record Attestation Audit Disclosure
+        if: steps.policy.outputs.run_attestation == 'false'
+        run: |
+          echo "Release published without Sigstore provenance attestations pursuant to explicit operator authorization for private repository." >> release_assets/ATTESTATION_DISCLOSURE.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

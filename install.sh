@@ -6,6 +6,7 @@ set -eu
 
 REPO="code-amalps/Engram"
 VERSION="${ENGRAM_VERSION:-latest}"
+AUTH_TOKEN="${GITHUB_TOKEN:-}"
 
 print_msg() {
   printf "\033[1;36m%s\033[0m\n" "$1"
@@ -35,7 +36,8 @@ case "$OS" in
     case "$ARCH" in
       x86_64|amd64) TARGET="x86_64-unknown-linux-musl" ;;
       *)
-        print_error "Unsupported Linux architecture: $ARCH (Engram currently provides x86_64 musl binaries)"
+        print_error "Unsupported Linux architecture: $ARCH"
+        print_error "Engram currently provides x86_64 musl binaries. Linux ARM64 is not currently supported."
         exit 1
         ;;
     esac
@@ -62,13 +64,13 @@ if [ -n "${ENGRAM_INSTALL_DIR:-}" ]; then
 elif [ -w "/usr/local/bin" ]; then
   INSTALL_DIR="/usr/local/bin"
 else
-  INSTALL_DIR="$HOME/.engram/bin"
+  INSTALL_DIR="$HOME/.local/bin"
 fi
 
 mkdir -p "$INSTALL_DIR"
 
-# 3. Resolve Release
-TMP_DIR="$(mktemp -d -t engram_install_XXXXXX)"
+# 3. Resolve Release Metadata
+TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'engram_install_XXXXXX')"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 if [ "$VERSION" = "latest" ]; then
@@ -84,26 +86,34 @@ fi
 
 print_msg "Resolving release ($VERSION) for $TARGET..."
 
-DOWNLOAD_CMD=""
+RELEASE_JSON="$TMP_DIR/release.json"
+AUTH_HEADER=""
+if [ -n "$AUTH_TOKEN" ]; then
+  AUTH_HEADER="Authorization: Bearer $AUTH_TOKEN"
+fi
+
 if command -v curl >/dev/null 2>&1; then
-  DOWNLOAD_CMD="curl -fsSL"
+  if [ -n "$AUTH_HEADER" ]; then
+    HTTP_CODE="$(curl -sSL -H "User-Agent: Engram-Installer" -H "Accept: application/vnd.github.v3+json" -H "$AUTH_HEADER" -w "%{http_code}" "$API_URL" -o "$RELEASE_JSON")"
+  else
+    HTTP_CODE="$(curl -sSL -H "User-Agent: Engram-Installer" -H "Accept: application/vnd.github.v3+json" -w "%{http_code}" "$API_URL" -o "$RELEASE_JSON")"
+  fi
 elif command -v wget >/dev/null 2>&1; then
-  DOWNLOAD_CMD="wget -qO-"
+  if [ -n "$AUTH_HEADER" ]; then
+    wget -q --header="User-Agent: Engram-Installer" --header="Accept: application/vnd.github.v3+json" --header="$AUTH_HEADER" -O "$RELEASE_JSON" "$API_URL" || true
+  else
+    wget -q --header="User-Agent: Engram-Installer" --header="Accept: application/vnd.github.v3+json" -O "$RELEASE_JSON" "$API_URL" || true
+  fi
+  HTTP_CODE="200"
 else
   print_error "Neither curl nor wget is available. Please install curl."
   exit 1
 fi
 
-RELEASE_JSON="$TMP_DIR/release.json"
-if command -v curl >/dev/null 2>&1; then
-  curl -sSL -H "User-Agent: Engram-Installer" "$API_URL" -o "$RELEASE_JSON"
-else
-  wget -q -U "Engram-Installer" -O "$RELEASE_JSON" "$API_URL"
-fi
-
 TAG="$(grep -m1 '"tag_name":' "$RELEASE_JSON" | cut -d '"' -f 4 || true)"
 if [ -z "$TAG" ]; then
-  print_error "Failed to retrieve release metadata from $API_URL"
+  print_error "Failed to retrieve release metadata from GitHub API."
+  print_error "If '$REPO' is a private repository, export GITHUB_TOKEN before running."
   exit 1
 fi
 
@@ -118,49 +128,59 @@ SUMS_FILE="$TMP_DIR/SHA256SUMS"
 
 print_msg "Downloading $ARCHIVE_NAME..."
 if command -v curl >/dev/null 2>&1; then
-  curl -fL -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
-  curl -fsL -o "$SUMS_FILE" "$SUMS_URL" || true
+  if [ -n "$AUTH_HEADER" ]; then
+    curl -fL -H "$AUTH_HEADER" -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
+    curl -fL -H "$AUTH_HEADER" -o "$SUMS_FILE" "$SUMS_URL" || true
+  else
+    curl -fL -o "$ARCHIVE_FILE" "$DOWNLOAD_URL"
+    curl -fL -o "$SUMS_FILE" "$SUMS_URL" || true
+  fi
 else
   wget -q -O "$ARCHIVE_FILE" "$DOWNLOAD_URL"
   wget -q -O "$SUMS_FILE" "$SUMS_URL" || true
 fi
 
-# 4. Checksum Verification
-if [ -f "$SUMS_FILE" ]; then
-  print_msg "Verifying SHA256 checksum..."
-  EXPECTED_HASH="$(grep "$ARCHIVE_NAME" "$SUMS_FILE" | awk '{print $1}' || true)"
-  if [ -n "$EXPECTED_HASH" ]; then
-    if command -v sha256sum >/dev/null 2>&1; then
-      ACTUAL_HASH="$(sha256sum "$ARCHIVE_FILE" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-      ACTUAL_HASH="$(shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}')"
-    else
-      ACTUAL_HASH=""
-      print_warn "Neither sha256sum nor shasum available; skipping checksum verification."
-    fi
-
-    if [ -n "$ACTUAL_HASH" ]; then
-      if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-        print_error "Checksum verification failed!"
-        print_error "Expected: $EXPECTED_HASH"
-        print_error "Actual:   $ACTUAL_HASH"
-        exit 1
-      fi
-      print_success "Checksum verified ✓ ($ACTUAL_HASH)"
-    fi
-  else
-    print_warn "Archive not found in SHA256SUMS, proceeding with install."
-  fi
+# 4. Fail-Closed Checksum Verification
+if [ ! -f "$SUMS_FILE" ] || [ ! -s "$SUMS_FILE" ]; then
+  print_error "Integrity verification failed: SHA256SUMS manifest was not found or is empty."
+  print_error "Refusing to install unverified artifact."
+  exit 1
 fi
 
-# 5. Extract and Install
-print_msg "Installing engram to $INSTALL_DIR..."
+print_msg "Verifying SHA256 checksum (fail-closed)..."
+EXPECTED_HASH="$(grep -E "[0-9a-fA-F]{64}\s+(\./)?${ARCHIVE_NAME}$" "$SUMS_FILE" | awk '{print $1}' || true)"
+
+if [ -z "$EXPECTED_HASH" ]; then
+  print_error "Integrity verification failed: Could not find checksum entry for '$ARCHIVE_NAME' in SHA256SUMS."
+  print_error "Refusing to install unverified artifact."
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_HASH="$(sha256sum "$ARCHIVE_FILE" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL_HASH="$(shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}')"
+else
+  print_error "Neither sha256sum nor shasum is available on this system."
+  print_error "Refusing to install unverified binary without cryptographic tooling."
+  exit 1
+fi
+
+if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+  print_error "Integrity verification failed: SHA-256 checksum mismatch for $ARCHIVE_NAME!"
+  print_error "Expected: $EXPECTED_HASH"
+  print_error "Actual:   $ACTUAL_HASH"
+  print_error "Refusing to install corrupted or tampered binary."
+  exit 1
+fi
+print_success "Checksum verified ✓ ($ACTUAL_HASH)"
+
+# 5. Staged Extraction & Smoke Test
+print_msg "Extracting and verifying staged binary..."
 tar -xzf "$ARCHIVE_FILE" -C "$TMP_DIR"
 
 if [ -f "$TMP_DIR/engram" ]; then
   BIN_SRC="$TMP_DIR/engram"
-elif [ -f "$TMP_DIR/target/release/engram" ]; then
-  BIN_SRC="$TMP_DIR/target/release/engram"
 else
   BIN_SRC="$(find "$TMP_DIR" -type f -name engram | head -n 1)"
 fi
@@ -170,15 +190,38 @@ if [ -z "$BIN_SRC" ] || [ ! -f "$BIN_SRC" ]; then
   exit 1
 fi
 
+chmod +x "$BIN_SRC"
+
+# Execute smoke-test on staged binary
+"$BIN_SRC" --version >/dev/null 2>&1 || {
+  print_error "Staged binary execution failed. Refusing to replace installed executable."
+  exit 1
+}
+
+# 6. Safe Installation
 DEST_BIN="$INSTALL_DIR/engram"
-mv "$BIN_SRC" "$DEST_BIN"
-chmod +x "$DEST_BIN"
+BACKUP_BIN="$INSTALL_DIR/engram.bak"
 
-print_success "Installed engram successfully ✓"
+if [ -f "$DEST_BIN" ]; then
+  cp -f "$DEST_BIN" "$BACKUP_BIN" 2>/dev/null || true
+fi
 
-# 6. Verify PATH & Smoke Test
+if mv -f "$BIN_SRC" "$DEST_BIN"; then
+  chmod +x "$DEST_BIN"
+  rm -f "$BACKUP_BIN" 2>/dev/null || true
+  print_success "Installed engram successfully to $DEST_BIN ✓"
+else
+  if [ -f "$BACKUP_BIN" ]; then
+    mv -f "$BACKUP_BIN" "$DEST_BIN" 2>/dev/null || true
+    print_error "Installation failed. Restored previous working binary."
+  else
+    print_error "Installation failed."
+  fi
+  exit 1
+fi
+
+# 7. Verify PATH
 printf "──────────────────────────────────────────────────────\n"
-print_msg "Verifying installation..."
 "$DEST_BIN" --version
 
 case ":$PATH:" in
@@ -186,14 +229,10 @@ case ":$PATH:" in
   *)
     print_warn ""
     print_warn "Notice: $INSTALL_DIR is not in your current PATH."
-    print_warn "Add it to your shell configuration file (e.g. ~/.bashrc, ~/.zshrc):"
+    print_warn "Add it to your shell configuration (e.g. ~/.bashrc or ~/.zshrc):"
     printf "  export PATH=\"%s:\$PATH\"\n\n" "$INSTALL_DIR"
     ;;
 esac
 
 printf "──────────────────────────────────────────────────────\n"
 print_success "🎉 Engram $TAG installed successfully!"
-printf "To get started in any repository, run:\n"
-printf "  engram init\n"
-printf "  engram setup cursor  # or claude, windsurf\n"
-printf "  engram bench\n"

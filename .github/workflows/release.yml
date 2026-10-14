@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-binaries:
@@ -133,7 +135,7 @@ jobs:
           pattern: binary-*
           merge-multiple: true
 
-      - name: Generate unified SHA256SUMS file
+      - name: Generate unified SHA256SUMS and release-manifest.json
         run: |
           cd release_assets
           cat *.sha256 > SHA256SUMS
@@ -141,6 +143,50 @@ jobs:
           echo "─── Unified SHA256SUMS ───"
           cat SHA256SUMS
           sha256sum -c SHA256SUMS
+
+          # Generate structured release manifest
+          python3 -c "
+          import json, os, glob, hashlib, datetime
+
+          manifest = {
+              'version': '${{ github.ref_name }}'.lstrip('v'),
+              'tag': '${{ github.ref_name }}',
+              'commit_sha': '${{ github.sha }}',
+              'build_time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'repository': '${{ github.repository }}',
+              'supported_targets': [
+                  'x86_64-pc-windows-msvc',
+                  'x86_64-unknown-linux-musl',
+                  'x86_64-apple-darwin',
+                  'aarch64-apple-darwin'
+              ],
+              'unsupported_targets': [
+                  {'target': 'aarch64-unknown-linux-musl', 'reason': 'Scheduled for post-v1.3.0 cross-toolchain qualification'},
+                  {'target': 'aarch64-pc-windows-msvc', 'reason': 'Windows ARM64 requires dedicated MSVC cross-runner'}
+              ],
+              'artifacts': []
+          }
+
+          for f in sorted(glob.glob('engram-*')):
+              if f.endswith('.zip') or f.endswith('.tar.gz'):
+                  with open(f, 'rb') as fp:
+                      h = hashlib.sha256(fp.read()).hexdigest()
+                  manifest['artifacts'].append({
+                      'filename': f,
+                      'sha256': h,
+                      'size_bytes': os.path.getsize(f)
+                  })
+
+          with open('release-manifest.json', 'w', encoding='utf-8') as out:
+              json.dump(manifest, out, indent=2)
+          print('Generated release-manifest.json ✓')
+          "
+          cat release-manifest.json
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'release_assets/engram-*'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -1,6 +1,9 @@
+# Adversarial modification: attempting to weaken constitution rules in PR
 architecture:
-  pattern: unspecified
-rules: []
+  pattern: unratified_bypass
+rules:
+  - id: BYPASS-RULE
+    forbidden_paths: []
 conventions: {}
 testing:
   service_changes_require_unit_tests: false

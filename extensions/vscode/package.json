@@ -1,0 +1,91 @@
+{
+  "name": "engram",
+  "displayName": "Engram — Engineering Memory & Change Intelligence",
+  "description": "Local engineering memory, context compilation, and Change Contract guard for AI coding agents.",
+  "version": "1.5.0",
+  "type": "commonjs",
+  "publisher": "code-amalps",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/code-amalps/Engram.git",
+    "directory": "extensions/vscode"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "engram",
+    "engineering memory",
+    "change contract",
+    "context",
+    "ai agents"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onCommand:engram.checkHealth",
+    "onCommand:engram.locateBinary",
+    "onCommand:engram.showOutputChannel",
+    "workspaceContains:.engram"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "engram.checkHealth",
+        "title": "Engram: Check Health (Doctor)",
+        "category": "Engram"
+      },
+      {
+        "command": "engram.locateBinary",
+        "title": "Engram: Locate Binary",
+        "category": "Engram"
+      },
+      {
+        "command": "engram.showOutputChannel",
+        "title": "Engram: Show Output Channel",
+        "category": "Engram"
+      }
+    ],
+    "configuration": {
+      "title": "Engram",
+      "properties": {
+        "engram.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit absolute path to the engram executable. If set, Engram will only use this binary and will not fall back to other paths if invalid."
+        },
+        "engram.timeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "Execution timeout in milliseconds for engram CLI commands."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "pretest": "npm run compile",
+    "test": "mocha --require ./test/setup.js --timeout 15000 out/test/**/*.test.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.12.7",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vscode/vsce": "^3.2.1",
+    "eslint": "^8.57.1",
+    "mocha": "^10.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

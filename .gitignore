@@ -4,4 +4,5 @@
 .engram/*.db
 target/
 graphify-out/
+/.trusted-action/
 

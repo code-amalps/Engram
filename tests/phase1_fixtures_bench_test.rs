@@ -10,6 +10,9 @@ use engram::bench::{
     run_incremental_efficiency_benchmark,
 };
 use std::path::Path;
+use std::sync::Mutex;
+
+static FIXTURE_BENCH_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn test_all_seven_language_fixtures_exist() {
@@ -79,6 +82,7 @@ fn test_adversarial_fixtures_exist() {
 
 #[test]
 fn test_incremental_efficiency_measurement_runner() {
+    let _lock = FIXTURE_BENCH_LOCK.lock().unwrap();
     let metrics = run_incremental_efficiency_benchmark().expect("Incremental efficiency benchmark should succeed");
 
     assert!(
@@ -127,6 +131,7 @@ fn test_incremental_efficiency_measurement_runner() {
 
 #[test]
 fn test_external_benchmark_runner_and_report_formatting() {
+    let _lock = FIXTURE_BENCH_LOCK.lock().unwrap();
     let target = Path::new("tests/fixtures/real_world/typescript");
     let result = run_external_benchmark(target).expect("External benchmark should succeed on typescript fixture");
 
@@ -175,6 +180,7 @@ fn test_external_benchmark_file_path_rejected() {
 
 #[test]
 fn test_all_language_fixtures_analyze_cleanly() {
+    let _lock = FIXTURE_BENCH_LOCK.lock().unwrap();
     let fixtures = ["typescript", "javascript", "python", "csharp", "rust", "go", "java"];
     for lang in &fixtures {
         let path = Path::new("tests/fixtures/real_world").join(lang);
@@ -187,6 +193,7 @@ fn test_all_language_fixtures_analyze_cleanly() {
 
 #[test]
 fn test_all_adversarial_fixtures_analyze_cleanly() {
+    let _lock = FIXTURE_BENCH_LOCK.lock().unwrap();
     let fixtures = ["cyclic_deps", "deep_hierarchy", "syntax_edge_cases", "missing_imports"];
     for adv in &fixtures {
         let path = Path::new("tests/adversarial").join(adv);

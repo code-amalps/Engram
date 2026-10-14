@@ -167,17 +167,45 @@ pub fn print_validation(val: &Value) {
         }
     }
 
-    if let Some(overrides) = val.get("overridden_violations").and_then(|v| v.as_array()) {
-        if !overrides.is_empty() {
-            println!("\nAudited Overrides (Engineering Memory):");
-            for o in overrides {
-                println!(
-                    "  ✓ [{}] {} overridden: \"{}\"",
-                    o["rule_id"].as_str().unwrap_or(""),
-                    o["file"].as_str().unwrap_or(""),
-                    o["override_reason"].as_str().unwrap_or("")
-                );
-            }
+    if let Some(overrides) = val.get("overridden_violations").and_then(|v| v.as_array()).filter(|o| !o.is_empty()) {
+        println!("\nAudited Overrides (Engineering Memory):");
+        for o in overrides {
+            println!(
+                "  ✓ [{}] {} overridden: \"{}\"",
+                o["rule_id"].as_str().unwrap_or(""),
+                o["file"].as_str().unwrap_or(""),
+                o["override_reason"].as_str().unwrap_or("")
+            );
         }
     }
 }
+
+pub fn print_incremental_summary(res: &crate::incremental::IncrementalAnalysisResult) {
+    println!("⚡ Engram Two-Tier Incremental Analysis");
+    println!("──────────────────────────────────────────");
+    println!("  Protocol:          {}", res.protocol_version);
+    println!("  Revision:          {}", res.revision);
+    println!("  Total Files:       {}", res.total_files);
+    println!("  Tier 1 Reparsed:   {} file(s)", res.tier1_reparsed_files.len());
+    for f in &res.tier1_reparsed_files {
+        println!("    • {}", f);
+    }
+    println!("  Tier 1 Deleted:    {} file(s)", res.tier1_deleted_files.len());
+    for f in &res.tier1_deleted_files {
+        println!("    • {}", f);
+    }
+    println!("  Tier 2 Relinked:   {} file(s) ({} entities)", res.tier2_relinked_files.len(), res.tier2_relinked_entities);
+    for f in &res.tier2_relinked_files {
+        println!("    • {}", f);
+    }
+    println!("  Unchanged Files:   {}", res.unchanged_files_count);
+    println!("  Fast-Path Hits:    {}", res.fast_path_hits);
+    println!("  Duration:          {:.2} ms", res.duration_ms);
+    println!("──────────────────────────────────────────");
+    println!("  Status: {}", res.status);
+}
+
+pub fn print_drift_report(report: &crate::drift::DriftReport) {
+    print!("{}", crate::drift::format_drift_report(report));
+}
+

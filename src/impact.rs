@@ -125,6 +125,7 @@ pub fn compute_impact_cone(
     let root = root_path(root)?;
     let trimmed_target = target.trim();
     let norm_target = crate::go_parser::normalize_go_symbol_name(trimmed_target);
+    let norm_java = crate::java_parser::normalize_java_symbol_name(trimmed_target);
 
     // 1. Locate Direct Target Entities in SQLite
     let mut direct_entities = Vec::new();
@@ -134,11 +135,11 @@ pub fn compute_impact_cone(
         let mut stmt = conn.prepare(
             "SELECT entity_id, path, name, kind, start_line, signature 
              FROM entity_versions 
-             WHERE (name = ?1 OR name = ?2 OR path = ?1 OR path || '::' || name = ?1)
+             WHERE (name = ?1 OR name = ?2 OR name = ?3 OR path = ?1 OR path || '::' || name = ?1)
                AND invalidated_at_revision IS NULL"
         )?;
 
-        let rows = stmt.query_map(params![trimmed_target, norm_target], |r| {
+        let rows = stmt.query_map(params![trimmed_target, norm_target, norm_java], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,

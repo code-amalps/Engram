@@ -1,0 +1,7 @@
+[package]
+name = "pipeline-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic real-world Rust fixture for Engram benchmarks"
+
+[dependencies]

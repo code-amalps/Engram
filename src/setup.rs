@@ -106,14 +106,11 @@ pub fn setup_client(
     // Check status
     if status_only {
         let exists = config_path.exists();
-        let mut configured = false;
-        if exists {
-            if let Ok(c) = fs::read_to_string(&config_path) {
-                if let Ok(v) = serde_json::from_str::<Value>(&c) {
-                    configured = v.get("mcpServers").and_then(|s| s.get("engram")).is_some();
-                }
-            }
-        }
+        let configured = fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+            .and_then(|v| v.get("mcpServers")?.get("engram").cloned())
+            .is_some();
         let binary_exists = Path::new(&binary).exists();
         let health = if configured && binary_exists {
             verify_mcp_health(&binary, root).is_ok()

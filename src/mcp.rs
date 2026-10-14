@@ -214,6 +214,45 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let res = crate::flywheel::postflight_check(&root, &opts)?;
             json_result(serde_json::to_value(res)?)
         }
+        "engram_recover" => {
+            let contract_id = args["contract_id"]
+                .as_str()
+                .or_else(|| args["id"].as_str())
+                .unwrap_or("");
+            let id = if contract_id.is_empty() {
+                crate::contract::get_active_contract(&root)?
+                    .map(|c| c.contract_id)
+                    .ok_or_else(|| anyhow!("No contract_id specified and no active contract found"))?
+            } else {
+                contract_id.to_string()
+            };
+            let rep = crate::recovery::recover_contract(&root, &id)?;
+            json_result(serde_json::to_value(rep)?)
+        }
+        "engram_drift" => {
+            let module = args["module"].as_str().map(str::to_string);
+            let decision = args["decision"]
+                .as_str()
+                .or_else(|| args["decision_id"].as_str())
+                .map(str::to_string);
+            let since = args["since"]
+                .as_str()
+                .or_else(|| args["since_commit"].as_str())
+                .map(str::to_string);
+            let threshold = args["staleness_threshold"]
+                .as_u64()
+                .or_else(|| args["threshold"].as_u64())
+                .unwrap_or(crate::drift::DEFAULT_STALENESS_THRESHOLD as u64) as usize;
+
+            let opts = crate::drift::DriftOptions {
+                module,
+                decision,
+                since,
+                staleness_threshold: threshold,
+            };
+            let rep = crate::drift::analyze_drift(&root, &opts)?;
+            json_result(serde_json::to_value(rep)?)
+        }
         _ => return Err(anyhow!("Unknown tool: {name}")),
     })
 }
@@ -433,6 +472,29 @@ pub fn mcp(root: &Path) -> Result<()> {
                                 "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against" },
                                 "strict": { "type": "boolean", "description": "Fail with exit code 1 if unexpected files are changed" },
                                 "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "engram_recover",
+                        "description": "Formulate structured, non-destructive recovery plan for contract violations and check exhaustion gate.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "contract_id": { "type": "string", "description": "Change Contract ID to formulate recovery plan for" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "engram_drift",
+                        "description": "Analyze architectural decision drift, boundary erosion, and scoped staleness across commits.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "module": { "type": "string", "description": "Filter by module name" },
+                                "decision": { "type": "string", "description": "Filter by decision ID" },
+                                "since": { "type": "string", "description": "Analyze commits since this commit hash" },
+                                "staleness_threshold": { "type": "integer", "description": "Configured mutation threshold for STALE_REVIEW (default 5)" }
                             }
                         }
                     }

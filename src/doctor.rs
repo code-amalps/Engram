@@ -30,8 +30,16 @@ pub struct DoctorItem {
     pub suggested_actions: Vec<String>,
 }
 
+pub const PROTOCOL_VERSION: &str = "1.1";
+
+fn default_protocol_version() -> String {
+    PROTOCOL_VERSION.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: String,
     pub total_memories: usize,
     pub live_count: usize,
     pub dormant_count: usize,
@@ -39,6 +47,10 @@ pub struct DoctorReport {
     pub superseded_count: usize,
     pub archival_candidate_count: usize,
     pub items: Vec<DoctorItem>,
+    #[serde(default)]
+    pub event_chain_status: Option<String>,
+    #[serde(default)]
+    pub event_chain_details: Option<String>,
 }
 
 fn symbol_exists(conn: &Connection, sym: &str) -> bool {
@@ -123,6 +135,17 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                         "Re-anchor to new symbol or file via 'engram memory update'".into(),
                         "Retire decision if architecture permanently changed".into(),
                         "Archive to cold storage".into(),
+                    ],
+                )
+            }
+            MemoryLifecycleState::StaleReview => {
+                stale_count += 1;
+                (
+                    LivenessStatus::Stale,
+                    "Governed code evolved beyond staleness threshold. Marked STALE_REVIEW.".to_string(),
+                    vec![
+                        format!("Run 'engram memory re-ratify {}' to re-ratify", mem.id),
+                        "Verify policy alignment with active codebase".into(),
                     ],
                 )
             }
@@ -224,7 +247,13 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
         save_durable_memories(&root, &doc)?;
     }
 
+    let (event_chain_status, event_chain_details) = match crate::telemetry::verify_event_chain(&root) {
+        Ok((status, details)) => (Some(status.to_string()), Some(details)),
+        Err(e) => (Some("EVENT_CHAIN_BROKEN".to_string()), Some(format!("Error verifying telemetry event chain: {e}"))),
+    };
+
     Ok(DoctorReport {
+        protocol_version: PROTOCOL_VERSION.to_string(),
         total_memories: items.len(),
         live_count,
         dormant_count,
@@ -232,6 +261,8 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
         superseded_count,
         archival_candidate_count,
         items,
+        event_chain_status,
+        event_chain_details,
     })
 }
 
@@ -248,6 +279,14 @@ pub fn format_doctor_report(report: &DoctorReport) -> String {
         report.stale_count,
         report.archival_candidate_count
     ));
+
+    if let Some(ref status) = report.event_chain_status {
+        out.push_str(&format!("Audit Event Telemetry Chain: {}\n", status));
+        if let Some(ref details) = report.event_chain_details {
+            out.push_str(&format!("  Verification: {}\n", details));
+        }
+        out.push_str("\n");
+    }
 
     for item in &report.items {
         let icon = match item.liveness {

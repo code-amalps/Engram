@@ -1,4 +1,7 @@
 .engram/local/
+.engram/cache/
+.engram/events/
 .engram/*.db
 target/
 graphify-out/
+

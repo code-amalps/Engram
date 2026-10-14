@@ -161,7 +161,7 @@ rules:
     let violations = evaluate_rules(&dir, &["user.component.ts".into()], &conn).unwrap();
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].rule_id, "RULE-001");
-    assert_eq!(violations[0].overridden, false);
+    assert!(!violations[0].overridden);
 
     // Record an advisory override decision
     conn.execute(
@@ -174,7 +174,7 @@ rules:
     // Re-evaluate: violation is now recognized as overridden with reason
     let violations_after = evaluate_rules(&dir, &["user.component.ts".into()], &conn).unwrap();
     assert_eq!(violations_after.len(), 1);
-    assert_eq!(violations_after[0].overridden, true);
+    assert!(violations_after[0].overridden);
     assert_eq!(violations_after[0].override_reason, Some("Legacy migration exception".into()));
 }
 

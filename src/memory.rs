@@ -22,6 +22,7 @@ pub enum MemoryLifecycleState {
     Durable,
     Superseded,
     Dormant,
+    StaleReview,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -170,6 +171,20 @@ pub struct DurableMemory {
     pub superseded_by: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub ratified_at_commit: Option<String>,
+    #[serde(default)]
+    pub ratified_by: Option<String>,
+    #[serde(default)]
+    pub ratified_at: Option<DateTime<Utc>>,
+}
+
+impl DurableMemory {
+    pub fn ratified_commit(&self) -> Option<&str> {
+        self.ratified_at_commit
+            .as_deref()
+            .or_else(|| self.provenance.as_ref().and_then(|p| p.source_commit.as_deref()))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,10 +292,18 @@ pub fn record_scoped_decision(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("mem_{}", Uuid::new_v4().simple()));
 
+    let current_sha = if crate::git::is_git_repo(&root) {
+        crate::git::current_revision(&root)
+            .ok()
+            .filter(|s| s != "WORKTREE" && !s.is_empty())
+    } else {
+        None
+    };
+
     let provenance = MemoryProvenance {
         source_type: "human_decision".to_string(),
         source_id: id.map(|s| s.to_string()),
-        source_commit: None,
+        source_commit: current_sha.clone(),
         source_contract: None,
         source_decision: id.map(|s| s.to_string()),
         ratified_by: Some(accepted_by.to_string()),
@@ -305,6 +328,9 @@ pub fn record_scoped_decision(
         supersedes: None,
         superseded_by: None,
         tags: Vec::new(),
+        ratified_at_commit: current_sha,
+        ratified_by: Some(accepted_by.to_string()),
+        ratified_at: Some(Utc::now()),
     };
 
     doc.memories.push(memory.clone());
@@ -378,6 +404,14 @@ pub fn supersede_memory(
         ratified_at: Some(Utc::now()),
     };
 
+    let current_sha = if crate::git::is_git_repo(&root) {
+        crate::git::current_revision(&root)
+            .ok()
+            .filter(|s| s != "WORKTREE" && !s.is_empty())
+    } else {
+        None
+    };
+
     let new_memory = DurableMemory {
         id: new_id,
         title: new_title.to_string(),
@@ -396,6 +430,9 @@ pub fn supersede_memory(
         supersedes: Some(old_id.to_string()),
         superseded_by: None,
         tags: Vec::new(),
+        ratified_at_commit: current_sha,
+        ratified_by: Some(accepted_by.to_string()),
+        ratified_at: Some(Utc::now()),
     };
 
     doc.memories.push(new_memory.clone());
@@ -448,6 +485,19 @@ pub fn record_task_candidate(
     let file_path = dir.join(format!("{candidate_id}.json"));
     let json = serde_json::to_string_pretty(&candidate)?;
     fs::write(&file_path, json)?;
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "CANDIDATE_CREATION",
+        None,
+        proposed_by,
+        serde_json::json!({
+            "candidate_id": &candidate.candidate_id,
+            "task_id": task_id,
+            "title": title,
+            "modules": &candidate.scope.modules,
+        }),
+    );
 
     Ok(candidate)
 }
@@ -523,6 +573,13 @@ pub fn promote_candidate(
         supersedes: None,
         superseded_by: None,
         tags: Vec::new(),
+        ratified_at_commit: if crate::git::is_git_repo(&root) {
+            crate::git::current_revision(&root).ok().filter(|s| s != "WORKTREE" && !s.is_empty())
+        } else {
+            None
+        },
+        ratified_by: Some(accepted_by.to_string()),
+        ratified_at: Some(Utc::now()),
     };
 
     doc.memories.push(durable.clone());
@@ -531,6 +588,18 @@ pub fn promote_candidate(
     // Update candidate status to Accepted
     candidate.lifecycle_state = MemoryLifecycleState::Accepted;
     fs::write(&file_path, serde_json::to_string_pretty(&candidate)?)?;
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "CANDIDATE_PROMOTION",
+        None,
+        accepted_by,
+        serde_json::json!({
+            "candidate_id": candidate_id,
+            "durable_memory_id": &durable.id,
+            "accepted_by": accepted_by,
+        }),
+    );
 
     Ok(durable)
 }
@@ -776,6 +845,7 @@ pub fn query_scoped_memories(
         }
         if mem.lifecycle_state != MemoryLifecycleState::Durable
             && mem.lifecycle_state != MemoryLifecycleState::Superseded
+            && mem.lifecycle_state != MemoryLifecycleState::StaleReview
         {
             continue;
         }
@@ -915,3 +985,75 @@ pub fn query_relevant_memories(
 ) -> Result<Vec<DurableMemory>> {
     query_scoped_memories(root, task, files, &[], false)
 }
+
+/// Re-ratify an architectural decision with current or specified commit and reviewer name.
+/// Resets governed mutation count and clears STALE_REVIEW back to Durable.
+pub fn re_ratify_decision(
+    root: &Path,
+    decision_id: &str,
+    commit: Option<&str>,
+    by: &str,
+) -> Result<DurableMemory> {
+    let root = root_path(root)?;
+    let mut doc = load_durable_memories(&root)?;
+
+    let target_commit = match commit {
+        Some(c) if !c.trim().is_empty() => {
+            let c_trimmed = c.trim();
+            if crate::git::is_git_repo(&root) {
+                match crate::git::resolve_baseline(&root, c_trimmed)? {
+                    Ok(full_sha) => full_sha,
+                    Err(err) => return Err(anyhow!("Cannot re-ratify: {err}")),
+                }
+            } else {
+                c_trimmed.to_string()
+            }
+        }
+        _ => {
+            if crate::git::is_git_repo(&root) {
+                crate::git::current_revision(&root).unwrap_or_else(|_| "HEAD".to_string())
+            } else {
+                "HEAD".to_string()
+            }
+        }
+    };
+
+    let idx = doc
+        .memories
+        .iter()
+        .position(|m| m.id == decision_id)
+        .ok_or_else(|| anyhow!("Memory decision '{decision_id}' not found"))?;
+
+    let mem = &mut doc.memories[idx];
+    mem.ratified_at_commit = Some(target_commit.clone());
+    mem.ratified_by = Some(by.to_string());
+    mem.ratified_at = Some(Utc::now());
+
+    if let Some(ref mut prov) = mem.provenance {
+        prov.source_commit = Some(target_commit.clone());
+        prov.ratified_by = Some(by.to_string());
+        prov.ratified_at = Some(Utc::now());
+    }
+
+    if mem.lifecycle_state == MemoryLifecycleState::StaleReview {
+        mem.lifecycle_state = MemoryLifecycleState::Durable;
+    }
+
+    let updated = mem.clone();
+    save_durable_memories(&root, &doc)?;
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "DECISION_RE_RATIFIED",
+        None,
+        by,
+        serde_json::json!({
+            "decision_id": decision_id,
+            "ratified_at_commit": target_commit,
+            "ratified_by": by,
+        }),
+    );
+
+    Ok(updated)
+}
+

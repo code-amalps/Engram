@@ -80,6 +80,7 @@ pub fn language(path: &Path) -> Option<&'static str> {
         "cs" => Some("csharp"),
         "rs" => Some("rust"),
         "go" => Some("go"),
+        "java" => Some("java"),
         _ => None,
     }
 }
@@ -91,6 +92,7 @@ pub fn lang_for(name: &str) -> Language {
         "python" => tree_sitter_python::LANGUAGE.into(),
         "rust" => tree_sitter_rust::LANGUAGE.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
+        "java" => tree_sitter_java::LANGUAGE.into(),
         _ => tree_sitter_c_sharp::LANGUAGE.into(),
     }
 }
@@ -121,6 +123,12 @@ pub fn recognized(kind: &str, lang: &str) -> Option<&'static str> {
         ("rust", "impl_item") => Some("IMPL"),
         ("rust", "mod_item") => Some("MODULE"),
         ("rust", "type_item") => Some("TYPE"),
+        ("java", "class_declaration") => Some("CLASS"),
+        ("java", "interface_declaration") => Some("INTERFACE"),
+        ("java", "record_declaration") => Some("RECORD"),
+        ("java", "enum_declaration") => Some("ENUM"),
+        ("java", "method_declaration") => Some("METHOD"),
+        ("java", "constructor_declaration") => Some("CONSTRUCTOR"),
         _ => None,
     }
 }
@@ -158,6 +166,8 @@ pub fn extract_import_specifier(text: &str, lang: &str) -> String {
         } else if text.starts_with("mod ") {
             return text[4..].trim().trim_matches(';').to_string();
         }
+    } else if lang == "java" && text.starts_with("import ") {
+        return text[7..].trim().trim_start_matches("static ").trim().trim_matches(';').to_string();
     }
     text.chars().take(120).collect()
 }
@@ -269,6 +279,23 @@ pub fn parse_file(
             rel,
             &ast,
             go_mod.as_ref(),
+        );
+        let display = redact(&source);
+        let record = FileRecord {
+            path: rel.into(),
+            hash: hash(bytes),
+            language: lang.into(),
+            excerpt: display.chars().take(20000).collect(),
+        };
+        return Ok((record, symbols, rels));
+    }
+
+    if lang == "java" {
+        let ast = crate::java_parser::extract_java_ast(&source)?;
+        let (symbols, rels) = crate::java_parser::convert_java_ast_to_engram_with_root(
+            root,
+            rel,
+            &ast,
         );
         let display = redact(&source);
         let record = FileRecord {
@@ -568,6 +595,7 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         let rel = p.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
         files.push((p.to_path_buf(), rel));
     }
+    crate::incremental::init_meta_cache(&conn)?;
     let tx = conn.transaction()?;
     let head = git(&root, &["rev-parse", "HEAD"]);
     let commit_hash = if head.is_empty() { "WORKTREE" } else { &head };
@@ -583,13 +611,24 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
     let mut seen = HashSet::new();
     let current_paths: HashSet<String> = files.iter().map(|(_, path)| path.clone()).collect();
     let mut assigned_entity_ids = HashSet::new();
+    let mut changed_files_list: Vec<String> = Vec::new();
+    let mut changed_symbols_list: Vec<String> = Vec::new();
     for (abs, rel) in &files {
-        let bytes = match fs::read(abs) {
-            Ok(b) if b.len() <= 2_000_000 && !b.contains(&0) => b,
-            _ => continue,
+        let (content_hash, bytes, _is_fast) = match crate::incremental::get_authoritative_content_hash(abs, rel, &tx) {
+            Ok(res) => res,
+            Err(_) => {
+                let b = match fs::read(abs) {
+                    Ok(b) if b.len() <= 2_000_000 && !b.contains(&0) => b,
+                    _ => continue,
+                };
+                let h = hash(&b);
+                (h, b, false)
+            }
         };
+        if !bytes.is_empty() && (bytes.len() > 2_000_000 || bytes.contains(&0)) {
+            continue;
+        }
         seen.insert(rel.clone());
-        let content_hash = hash(&bytes);
         let file_language = language(abs).expect("language checked above");
         let file_analysis_key = model::analysis_key(
             &content_hash,
@@ -611,9 +650,21 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         {
             continue;
         }
+        let bytes = if bytes.is_empty() {
+            match fs::read(abs) {
+                Ok(b) if b.len() <= 2_000_000 && !b.contains(&0) => b,
+                _ => continue,
+            }
+        } else {
+            bytes
+        };
         let (file, mut symbols, rels) = parse_file(&root, rel, &bytes, &rev)?;
         reconcile_symbol_ids(&tx, &mut symbols, &current_paths, &mut assigned_entity_ids)?;
         changed += 1;
+        changed_files_list.push(rel.clone());
+        for s in &symbols {
+            changed_symbols_list.push(s.name.clone());
+        }
         tx.execute(
             "INSERT INTO files(path, content_hash, analysis_key, language, excerpt, revision, analyzed_at) 
              VALUES(?1,?2,?3,?4,?5,?6,?7) 
@@ -734,10 +785,20 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
             removed += 1;
         }
     }
+    if !changed_files_list.is_empty() {
+        if let Ok(dependents) = crate::incremental::find_tier2_relational_dependents(&tx, &changed_files_list, &changed_symbols_list) {
+            for dep in dependents {
+                tx.execute(
+                    "UPDATE relationships SET created_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
+                    params![rev, dep],
+                ).ok();
+            }
+        }
+    }
     tx.execute(
         "INSERT INTO metadata(key, value) VALUES('head_revision', ?1) 
          ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        [&rev]
+        [&rev],
     )?;
     tx.commit()?;
 

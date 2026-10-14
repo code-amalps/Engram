@@ -1,0 +1,12 @@
+{
+  "name": "@engram-fixtures/js-catalog",
+  "version": "1.0.0",
+  "description": "Deterministic real-world JavaScript fixture for Engram benchmarks",
+  "main": "src/catalog.js",
+  "scripts": {
+    "test": "node test/catalog.test.js"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21"
+  }
+}

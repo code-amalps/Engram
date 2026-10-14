@@ -404,7 +404,8 @@ func (s *OrderService) Export() error {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// 9. North-Star E2E Flywheel: Complete end-to-end Go lifecycle test
+/// 9. North-Star E2E Flywheel: Complete end-to-end Go lifecycle test:
+///
 /// Task -> Analyze -> Go Dependency Grounding -> Context Compilation ->
 /// Change Contract -> Simulated Agent Edits -> Change Guard Violation ->
 /// Human Reconciliation -> Re-Validation -> Memory Promotion -> Next Task Memory Retrieval

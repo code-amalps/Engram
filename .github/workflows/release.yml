@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -177,12 +178,14 @@ jobs:
 
             ---
 
-            ### 🔬 Scientific Empirical Benchmark Highlights
-            - **Discovery Context Tokens:** 157 tokens (-96.5% vs. simulated baseline scans)
-            - **Discovery Tool Calls:** 1 call (-91.7% reduction)
-            - **Composite Grounding F1:** 0.866 (File Recall: 91.7%, Precision: 77.5%)
-            - **Elastic Contract Accuracy:** 100.0% (16/16 synthetic mutations correct)
-            - **Memory Compounding Lift:** Confirmed ✓ (100% team rationale recall)
+            ### 🚀 Highlights & Capabilities
+            - **7 Supported Languages:** Native Tree-sitter parsers for Rust, Go, TypeScript, JavaScript, Python, C#, and Java (Maven/Gradle).
+            - **Change Contracts & Change Guard:** Prevents AI coding agents from making unintended edits outside their task scope.
+            - **Stateful Automated Recovery (`engram recover`):** Bounded repair directives (max 2 attempts) without directly altering code.
+            - **Architectural Drift & Decay (`engram drift`):** Scoped staleness tracking commits touching governed code since explicit ratification.
+            - **Two-Tier Incremental Engine:** Authoritative content hash with fast-path hint (>6× warm analysis speedup).
+            - **Local Execution:** 100% local, zero outbound network telemetry, SQLite WAL storage.
+            - **MCP Server:** 1-click configuration for Cursor, Claude Desktop, and Windsurf (`engram setup cursor`).
 
             ---
 

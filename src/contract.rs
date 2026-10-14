@@ -20,6 +20,7 @@ pub enum ContractStatus {
     Reconciled,
     Completed,
     Cancelled,
+    BlockedAwaitingHuman,
 }
 
 fn default_true() -> bool {
@@ -201,8 +202,16 @@ pub struct CheckSummary {
     pub missing_required: usize,
 }
 
+pub const PROTOCOL_VERSION: &str = "1.1";
+
+fn default_protocol_version() -> String {
+    PROTOCOL_VERSION.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckResult {
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: String,
     pub contract_id: String,
     pub task_id: String,
     pub task_goal: String,
@@ -257,13 +266,42 @@ pub fn get_contract(root: &Path, contract_id: &str) -> Result<ChangeContract> {
     Ok(contract)
 }
 
+/// List all saved Change Contracts in repository cache.
+pub fn list_all_contracts(root: &Path) -> Result<Vec<ChangeContract>> {
+    let dir = contracts_dir(root)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut contracts = Vec::new();
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("json")
+            && path.file_name().and_then(|s| s.to_str()) != Some("active.json")
+        {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(contract) = serde_json::from_str::<ChangeContract>(&content) {
+                    contracts.push(contract);
+                }
+            }
+        }
+    }
+    contracts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(contracts)
+}
+
 /// Save a contract to cache and update the active pointer.
 pub fn save_contract(root: &Path, contract: &ChangeContract) -> Result<()> {
     let file = contract_file_path(root, &contract.contract_id)?;
     let json_data = serde_json::to_string_pretty(contract)?;
     fs::write(&file, &json_data)?;
 
-    if contract.status == ContractStatus::Active || contract.status == ContractStatus::Reconciled {
+    if contract.status == ContractStatus::Active
+        || contract.status == ContractStatus::Reconciled
+        || contract.status == ContractStatus::BlockedAwaitingHuman
+    {
         let active_file = active_contract_path(root)?;
         fs::write(&active_file, &json_data)?;
     }
@@ -319,13 +357,19 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
 pub fn extract_module(path: &str) -> String {
     let norm = normalize_rel_path(path);
     let parts: Vec<&str> = norm.split('/').collect();
-    if parts.len() >= 2 && (parts[0] == "src" || parts[0] == "lib" || parts[0] == "packages" || parts[0] == "internal" || parts[0] == "pkg") {
-        parts[1].to_string()
+    let candidate = if parts.len() >= 2 && (parts[0] == "src" || parts[0] == "lib" || parts[0] == "packages" || parts[0] == "internal" || parts[0] == "pkg") {
+        parts[1]
     } else if !parts.is_empty() {
-        parts[0].to_string()
+        parts[0]
     } else {
-        "root".to_string()
-    }
+        "root"
+    };
+
+    Path::new(candidate)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(candidate)
+        .to_string()
 }
 
 /// Create a new Change Contract, auto-grounding expected files and modules if not provided.
@@ -459,6 +503,7 @@ pub enum SymbolMatchResult {
 /// Normalizes receiver pointer notations (e.g. `*OrderService.ExportCSV` and `OrderService.ExportCSV` match identically).
 pub fn matches_contract_symbol(expected_symbol: &str, actual_symbol: &str) -> bool {
     crate::go_parser::matches_go_contract_symbol(expected_symbol, actual_symbol)
+        || crate::java_parser::matches_java_contract_symbol(expected_symbol, actual_symbol)
 }
 
 /// Evaluate an actual symbol against a contract's expected symbols boundary.
@@ -646,6 +691,14 @@ pub fn validate_contract_diff_with_constitution(
 
     for file in changed_files {
         let norm_file = normalize_rel_path(file);
+        let clean = norm_file.trim_start_matches("./").trim_end_matches('/');
+        if clean == ".engram"
+            || clean.starts_with(".engram/")
+            || clean == ".git"
+            || clean.starts_with(".git/")
+        {
+            continue;
+        }
 
         // 1. Check Project Constitution rules FIRST (Absolute Precedence)
         let mut constitution_violation = None;
@@ -813,97 +866,40 @@ pub fn inspect_changed_files(
     baseline: &str,
     options: &CheckOptions,
 ) -> Result<(Vec<String>, String, Option<CheckExitCode>)> {
-    // Verify baseline commit if it's a specific SHA
-    if baseline != "WORKTREE" && !baseline.is_empty() {
-        let check_sha = Command::new("git")
-            .args(["rev-parse", "--verify", "--quiet", &format!("{baseline}^{{commit}}")])
-            .current_dir(root)
-            .output();
-
-        if let Ok(out) = check_sha {
-            if !out.status.success() {
-                return Ok((
-                    Vec::new(),
-                    "UNAVAILABLE".to_string(),
-                    Some(CheckExitCode::BaselineUnavailable),
-                ));
-            }
-        }
-    }
-
-    let (args, snapshot_name) = if let Some(ref base) = options.base_commit {
-        (
-            vec!["diff".to_string(), "--name-only".to_string(), format!("{base}...HEAD")],
-            format!("PR_HEAD (base: {base})"),
-        )
-    } else if options.staged {
-        if baseline != "WORKTREE" && !baseline.is_empty() {
-            (
-                vec![
-                    "diff".to_string(),
-                    "--name-only".to_string(),
-                    "--cached".to_string(),
-                    baseline.to_string(),
-                ],
-                format!("STAGED (baseline: {baseline})"),
-            )
-        } else {
-            (
-                vec!["diff".to_string(), "--name-only".to_string(), "--cached".to_string()],
-                "STAGED".to_string(),
-            )
-        }
-    } else if baseline != "WORKTREE" && !baseline.is_empty() {
-        (
-            vec!["diff".to_string(), "--name-only".to_string(), baseline.to_string()],
-            format!("WORKING_TREE (baseline: {baseline})"),
-        )
+    let base_opt = if baseline != "WORKTREE" && !baseline.is_empty() {
+        Some(baseline)
     } else {
-        (
-            vec!["status".to_string(), "--porcelain".to_string()],
-            "WORKING_TREE".to_string(),
-        )
+        None
     };
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(root)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if !out.status.success() {
-                // If git diff failed because baseline commit wasn't found
-                let err_str = String::from_utf8_lossy(&out.stderr);
-                if err_str.contains("unknown revision") || err_str.contains("bad revision") {
-                    return Ok((Vec::new(), snapshot_name, Some(CheckExitCode::BaselineUnavailable)));
-                }
-                return Ok((Vec::new(), snapshot_name, Some(CheckExitCode::InternalError)));
-            }
-
-            let text = String::from_utf8_lossy(&out.stdout);
-            let files: Vec<String> = if args[0] == "status" {
-                text.lines()
-                    .filter_map(|l| {
-                        let trimmed = l.trim();
-                        if trimmed.len() >= 3 {
-                            Some(trimmed[3..].trim().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            } else {
-                text.lines()
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty())
-                    .map(String::from)
-                    .collect()
-            };
-
-            Ok((files, snapshot_name, None))
+    let snapshot_name = if let Some(ref base) = options.base_commit {
+        format!("PR_HEAD (base: {base})")
+    } else if options.staged {
+        if let Some(b) = base_opt {
+            format!("STAGED (baseline: {b})")
+        } else {
+            "STAGED".to_string()
         }
-        Err(_) => Ok((Vec::new(), snapshot_name, Some(CheckExitCode::InternalError))),
+    } else if let Some(b) = base_opt {
+        format!("WORKING_TREE (baseline: {b})")
+    } else {
+        "WORKING_TREE".to_string()
+    };
+
+    match crate::git::extract_changed_paths(root, base_opt, options.staged, options.base_commit.as_deref())? {
+        Ok((files, snapshot)) => Ok((files, snapshot, None)),
+        Err(err) => {
+            if err == crate::git::SHALLOW_HISTORY_TRUNCATED
+                || err.contains("unavailable")
+                || err.contains("unknown revision")
+                || err.contains("bad revision")
+                || err.contains("fatal:")
+            {
+                Ok((Vec::new(), snapshot_name, Some(CheckExitCode::BaselineUnavailable)))
+            } else {
+                Ok((Vec::new(), snapshot_name, Some(CheckExitCode::InternalError)))
+            }
+        }
     }
 }
 
@@ -950,10 +946,19 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
 
     if let Some(err_code) = maybe_err {
         let msg = match err_code {
-            CheckExitCode::BaselineUnavailable => format!(
-                "Baseline commit '{}' is unavailable in current Git history (shallow clone or missing commit).",
-                contract.baseline_revision
-            ),
+            CheckExitCode::BaselineUnavailable => {
+                if crate::git::is_shallow_repository(&root) {
+                    format!(
+                        "SHALLOW_HISTORY_TRUNCATED: Baseline commit '{}' is unavailable in current Git history (shallow repository).",
+                        contract.baseline_revision
+                    )
+                } else {
+                    format!(
+                        "Baseline commit '{}' is unavailable in current Git history (shallow clone or missing commit).",
+                        contract.baseline_revision
+                    )
+                }
+            }
             _ => "Internal Git execution error.".to_string(),
         };
         return make_error_result(&contract.contract_id, err_code, msg);
@@ -967,6 +972,13 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
     let mut advisory_warnings = Vec::new();
 
     // 4. Evaluate Contract Trust Model (Provenance Check in PR Mode)
+    if contract.status == ContractStatus::BlockedAwaitingHuman {
+        failure_reasons.push(format!(
+            "CONTRACT_BLOCKED_AWAITING_HUMAN: Change Contract '{}' is BLOCKED_AWAITING_HUMAN. Human reconciliation required before changes can be accepted.",
+            contract.contract_id
+        ));
+    }
+
     if options.check_provenance || options.base_commit.is_some() {
         if contract.provenance.ratification_status == RatificationStatus::Unratified
             && contract.version > 1
@@ -1031,8 +1043,9 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         missing_required: required_missing,
     };
 
-    CheckResult {
-        contract_id: contract.contract_id,
+    let res = CheckResult {
+        protocol_version: PROTOCOL_VERSION.to_string(),
+        contract_id: contract.contract_id.clone(),
         task_id: contract.task_id,
         task_goal: contract.task_goal,
         baseline_commit: contract.baseline_revision,
@@ -1041,16 +1054,32 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         exit_code,
         policy: if options.strict { "STRICT".to_string() } else { "STANDARD".to_string() },
         provenance: contract.provenance,
-        summary,
+        summary: summary.clone(),
         changes: classifications,
         missing_changes,
         failure_reasons,
         advisory_warnings,
-    }
+    };
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "BOUNDARY_CHECK",
+        Some(&contract.contract_id),
+        "change_guard",
+        serde_json::json!({
+            "status": &res.status,
+            "exit_code": res.exit_code,
+            "total_changed": summary.total_changed,
+            "boundary_violations": summary.boundary_violations,
+        }),
+    );
+
+    res
 }
 
 fn make_error_result(contract_id: &str, code: CheckExitCode, reason: String) -> CheckResult {
     CheckResult {
+        protocol_version: PROTOCOL_VERSION.to_string(),
         contract_id: contract_id.to_string(),
         task_id: "none".to_string(),
         task_goal: "none".to_string(),
@@ -1333,5 +1362,6 @@ pub fn reconcile_contract(
     });
 
     save_contract(&root, &contract)?;
+    let _ = crate::recovery::unblock_session(&root, contract_id);
     Ok(contract)
 }

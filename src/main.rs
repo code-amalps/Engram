@@ -5,23 +5,29 @@ pub mod compiler;
 pub mod constitution;
 pub mod contract;
 pub mod doctor;
+pub mod drift;
 pub mod flywheel;
 pub mod gc;
+pub mod git;
 pub mod git_history;
 pub mod go_parser;
+pub mod java_parser;
 pub mod graph;
 pub mod guard;
 pub mod impact;
+pub mod incremental;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
 pub mod memory_graph;
 pub mod model;
 pub mod printer;
+pub mod recovery;
 pub mod setup;
 pub mod storage;
+pub mod telemetry;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -62,7 +68,11 @@ enum CommandLine {
     Init,
     /// Analyze repository structure, symbols, and dependencies
     #[command(alias = ".")]
-    Analyze,
+    Analyze {
+        /// Use two-tier incremental invalidation engine
+        #[arg(long)]
+        incremental: bool,
+    },
     /// Compile minimum sufficient context for a given task
     Context {
         task: String,
@@ -142,6 +152,8 @@ enum CommandLine {
     Bench {
         #[arg(long, short = 'v')]
         verbose: bool,
+        #[arg(long)]
+        external: Option<std::path::PathBuf>,
     },
     /// Answer why code was designed this way, with active policy, historical evolution, and provenance
     Why {
@@ -180,6 +192,26 @@ enum CommandLine {
         base: Option<String>,
         #[arg(long)]
         ci: bool,
+    },
+    /// Formulate structured recovery repair plan for a contract violation
+    Recover {
+        /// Change Contract ID to recover (defaults to active contract if omitted)
+        contract_id: Option<String>,
+    },
+    /// Analyze architectural decision drift, boundary erosion, and scoped staleness
+    Drift {
+        /// Filter drift analysis to a specific module
+        #[arg(long)]
+        module: Option<String>,
+        /// Filter drift analysis to a specific decision ID
+        #[arg(long)]
+        decision: Option<String>,
+        /// Commit hash to calculate drift since
+        #[arg(long)]
+        since: Option<String>,
+        /// Configured mutation threshold for STALE_REVIEW (default 5)
+        #[arg(long, default_value_t = drift::DEFAULT_STALENESS_THRESHOLD, alias = "threshold")]
+        staleness_threshold: usize,
     },
 }
 
@@ -271,6 +303,15 @@ enum MemoryAction {
         #[arg(long)]
         rejected_by: Option<String>,
     },
+    /// Re-ratify an architectural decision with current or specified commit and reviewer name
+    #[command(name = "re-ratify")]
+    ReRatify {
+        decision_id: String,
+        #[arg(long)]
+        commit: Option<String>,
+        #[arg(long, default_value = "developer")]
+        by: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -305,7 +346,7 @@ fn init(root: &Path) -> Result<Value> {
         (
             "config.yaml",
             &format!(
-                "schema_version: 1\nanalyzer_version: engram-{}\nlanguages: [typescript, javascript, python, csharp, rust]\ndefault_token_budget: 1200\nhistorical_half_life_commits: 200\n",
+                "schema_version: 1\nanalyzer_version: engram-{}\nlanguages: [typescript, javascript, python, csharp, rust, go, java]\ndefault_token_budget: 1200\nhistorical_half_life_commits: 200\n",
                 env!("CARGO_PKG_VERSION")
             ),
         ),
@@ -337,12 +378,29 @@ fn run() -> Result<()> {
     let force_json = cli.json;
 
     match cli.command {
-        None | Some(CommandLine::Analyze) => {
+        None => {
             let res = analyze(root)?;
             if force_json {
                 print_json(res)?;
             } else {
                 printer::print_analysis_summary(&res);
+            }
+        }
+        Some(CommandLine::Analyze { incremental }) => {
+            if incremental {
+                let res = incremental::incremental_analyze(root)?;
+                if force_json {
+                    print_json(&res)?;
+                } else {
+                    printer::print_incremental_summary(&res);
+                }
+            } else {
+                let res = analyze(root)?;
+                if force_json {
+                    print_json(res)?;
+                } else {
+                    printer::print_analysis_summary(&res);
+                }
             }
         }
         Some(CommandLine::Init) => print_json(init(root)?)?,
@@ -470,6 +528,23 @@ fn run() -> Result<()> {
                     memory::reject_candidate(root, &candidate_id, act, &reason)?;
                     print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
                 }
+                MemoryAction::ReRatify { decision_id, commit, by } => {
+                    let mem = memory::re_ratify_decision(root, &decision_id, commit.as_deref(), &by)?;
+                    if force_json {
+                        print_json(&mem)?;
+                    } else {
+                        println!("✓ Decision '{}' successfully re-ratified.", mem.id);
+                        println!(
+                            "  Ratified at commit: {}",
+                            mem.ratified_at_commit.as_deref().unwrap_or("WORKTREE")
+                        );
+                        println!(
+                            "  Ratified by:        {}",
+                            mem.ratified_by.as_deref().unwrap_or(&by)
+                        );
+                        println!("  Lifecycle State:    {:?}", mem.lifecycle_state);
+                    }
+                }
             }
         }
         Some(CommandLine::History { action }) => {
@@ -516,7 +591,7 @@ fn run() -> Result<()> {
                 contract::evaluate_impact_against_contract(c, &cone)
             });
             let affected_paths = cone.all_affected_paths();
-            let audit_memories = memory::query_scoped_memories(root, &target, &affected_paths, &[target.clone()], true).unwrap_or_default();
+            let audit_memories = memory::query_scoped_memories(root, &target, &affected_paths, std::slice::from_ref(&target), true).unwrap_or_default();
             let memory_conflicts = memory::detect_memory_conflicts(&audit_memories);
 
             if force_json {
@@ -589,6 +664,9 @@ fn run() -> Result<()> {
                                 } else {
                                     println!("  {}  Status:    DURABLE", pipe);
                                 }
+                            }
+                            memory::MemoryLifecycleState::StaleReview => {
+                                println!("  {}  Status:    STALE_REVIEW (re-ratification required)", pipe);
                             }
                             _ => {
                                 println!("  {}  Status:    {:?}", pipe, m.lifecycle_state);
@@ -666,13 +744,22 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Mcp) => mcp(root)?,
-        Some(CommandLine::Bench { verbose }) => {
-            let rev = storage::revision(root);
-            let results = bench::run_benchmark_suite(&rev)?;
-            if force_json {
-                print_json(results)?;
+        Some(CommandLine::Bench { verbose, external }) => {
+            if let Some(ext_path) = external {
+                let results = bench::run_external_benchmark(&ext_path)?;
+                if force_json {
+                    print_json(results)?;
+                } else {
+                    print!("{}", bench::format_external_benchmark_report(&results));
+                }
             } else {
-                print!("{}", bench::format_human_benchmark_report(&results, verbose));
+                let rev = storage::revision(root);
+                let results = bench::run_benchmark_suite(&rev)?;
+                if force_json {
+                    print_json(results)?;
+                } else {
+                    print!("{}", bench::format_human_benchmark_report(&results, verbose));
+                }
             }
         }
         Some(CommandLine::Why { target }) => {
@@ -740,6 +827,41 @@ fn run() -> Result<()> {
             }
             if res.exit_code != 0 {
                 std::process::exit(res.exit_code);
+            }
+        }
+        Some(CommandLine::Recover { contract_id }) => {
+            let id = match contract_id {
+                Some(id) => id,
+                None => {
+                    contract::get_active_contract(root)?
+                        .map(|c| c.contract_id)
+                        .ok_or_else(|| anyhow!("No contract ID specified and no active contract found. Usage: engram recover <contract-id>"))?
+                }
+            };
+            let rep = recovery::recover_contract(root, &id)?;
+            if force_json {
+                print_json(&rep)?;
+            } else {
+                print!("{}", recovery::format_recovery_report(&rep));
+            }
+        }
+        Some(CommandLine::Drift {
+            module,
+            decision,
+            since,
+            staleness_threshold,
+        }) => {
+            let opts = drift::DriftOptions {
+                module,
+                decision,
+                since,
+                staleness_threshold,
+            };
+            let rep = drift::analyze_drift(root, &opts)?;
+            if force_json {
+                print_json(&rep)?;
+            } else {
+                printer::print_drift_report(&rep);
             }
         }
     }

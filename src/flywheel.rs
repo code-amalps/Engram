@@ -41,8 +41,16 @@ pub struct GoverningPolicySummary {
     pub rationale: String,
 }
 
+pub const PROTOCOL_VERSION: &str = "1.1";
+
+fn default_protocol_version() -> String {
+    PROTOCOL_VERSION.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreflightResult {
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: String,
     pub task_id: String,
     pub contract_id: String,
     pub task_goal: String,
@@ -81,6 +89,8 @@ pub enum PostflightVerdict {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostflightResult {
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: String,
     pub contract_id: String,
     pub task_goal: String,
     pub baseline_commit: String,
@@ -135,6 +145,28 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
     // 1. Idempotency Check: Check if an active contract already matches this task and revision
     if let Ok(Some(active)) = get_active_contract(&root) {
         if active.task_goal.trim().eq_ignore_ascii_case(normalized_task) {
+            if active.status == crate::contract::ContractStatus::BlockedAwaitingHuman {
+                return Ok(PreflightResult {
+                    protocol_version: PROTOCOL_VERSION.to_string(),
+                    task_id: active.contract_id.clone(),
+                    contract_id: active.contract_id.clone(),
+                    task_goal: active.task_goal,
+                    baseline_commit: base_commit,
+                    context_files: 0,
+                    context_tokens: 0,
+                    ambiguity_gaps: vec!["Contract is BLOCKED_AWAITING_HUMAN. Human reconciliation required before proceeding.".to_string()],
+                    predicted_impact_count: 0,
+                    predicted_impact_paths: Vec::new(),
+                    governing_policies: Vec::new(),
+                    expected_files: active.boundary.expected_files,
+                    expected_modules: active.boundary.expected_modules,
+                    forbidden_boundaries: active.boundary.forbidden_boundaries,
+                    is_reused_contract: true,
+                    status: PreflightStatus::Blocked,
+                    message: "Contract is BLOCKED_AWAITING_HUMAN. Human reconciliation required before implementation.".into(),
+                });
+            }
+
             let ctx = context(&root, normalized_task, opts.token_budget)?;
             let touched_paths: Vec<String> = ctx.files.iter().map(|f| f.path.clone()).collect();
             let touched_symbols = extract_symbols_for_paths(&root, &touched_paths);
@@ -159,9 +191,10 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
                 })
                 .collect();
 
-            return Ok(PreflightResult {
+            let res = PreflightResult {
+                protocol_version: PROTOCOL_VERSION.to_string(),
                 task_id: active.contract_id.clone(),
-                contract_id: active.contract_id,
+                contract_id: active.contract_id.clone(),
                 task_goal: active.task_goal,
                 baseline_commit: base_commit,
                 context_files: ctx.files.len(),
@@ -176,7 +209,22 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
                 is_reused_contract: true,
                 status: PreflightStatus::ReadyForImplementation,
                 message: "Deterministic active contract reused (Preflight Idempotent)".into(),
-            });
+            };
+
+            let _ = crate::telemetry::record_event(
+                &root,
+                "PREFLIGHT_HANDSHAKE",
+                Some(&res.contract_id),
+                "agent_preflight",
+                serde_json::json!({
+                    "task_goal": &res.task_goal,
+                    "context_files": res.context_files,
+                    "is_reused": true,
+                    "status": format!("{:?}", res.status),
+                }),
+            );
+
+            return Ok(res);
         }
     }
 
@@ -246,9 +294,10 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
         forbidden,
     )?;
 
-    Ok(PreflightResult {
+    let res = PreflightResult {
+        protocol_version: PROTOCOL_VERSION.to_string(),
         task_id: contract.contract_id.clone(),
-        contract_id: contract.contract_id,
+        contract_id: contract.contract_id.clone(),
         task_goal: contract.task_goal,
         baseline_commit: base_commit,
         context_files,
@@ -263,7 +312,22 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
         is_reused_contract: false,
         status: PreflightStatus::ReadyForImplementation,
         message: "Ready for implementation. Change Contract locked.".into(),
-    })
+    };
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "PREFLIGHT_HANDSHAKE",
+        Some(&res.contract_id),
+        "agent_preflight",
+        serde_json::json!({
+            "task_goal": &res.task_goal,
+            "context_files": res.context_files,
+            "is_reused": false,
+            "status": format!("{:?}", res.status),
+        }),
+    );
+
+    Ok(res)
 }
 
 /// Execute deterministic Post-Flight Guard Check (`engram postflight`).
@@ -285,6 +349,13 @@ pub fn postflight_check(root: &Path, opts: &PostflightOptions) -> Result<Postfli
         get_active_contract(&root)?
             .ok_or_else(|| anyhow!("No active Change Contract found. Run 'engram preflight \"<task>\"' before making modifications."))?
     };
+
+    if contract.status == crate::contract::ContractStatus::BlockedAwaitingHuman {
+        return Err(anyhow!(
+            "CONTRACT_BLOCKED_AWAITING_HUMAN: Change Contract '{}' is BLOCKED_AWAITING_HUMAN. Automated postflight cannot proceed or auto-close until human intervention (reconcile or ratify).",
+            contract.contract_id
+        ));
+    }
 
     // 2. Discover Changed Files
     let changed_files = if let Some(ref base) = opts.base_commit {
@@ -374,6 +445,10 @@ pub fn postflight_check(root: &Path, opts: &PostflightOptions) -> Result<Postfli
     let mut generated_candidates = Vec::new();
     let mut human_action = None;
 
+    if verdict == PostflightVerdict::Pass {
+        let _ = crate::recovery::resolve_session(&root, &contract.contract_id);
+    }
+
     if verdict == PostflightVerdict::Pass && !changed_files.is_empty() {
         let task_title = if contract.task_goal.len() > 40 {
             format!("{}...", &contract.task_goal[..37])
@@ -410,8 +485,9 @@ pub fn postflight_check(root: &Path, opts: &PostflightOptions) -> Result<Postfli
         }
     }
 
-    Ok(PostflightResult {
-        contract_id: contract.contract_id,
+    let res = PostflightResult {
+        protocol_version: PROTOCOL_VERSION.to_string(),
+        contract_id: contract.contract_id.clone(),
         task_goal: contract.task_goal,
         baseline_commit: revision(&root),
         verdict,
@@ -428,7 +504,23 @@ pub fn postflight_check(root: &Path, opts: &PostflightOptions) -> Result<Postfli
         generated_candidates,
         human_action_required: human_action,
         summary,
-    })
+    };
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "POSTFLIGHT_CHECK",
+        Some(&res.contract_id),
+        "agent_postflight",
+        serde_json::json!({
+            "verdict": format!("{:?}", res.verdict),
+            "exit_code": res.exit_code,
+            "total_changed_files": res.total_changed_files,
+            "boundary_violations": res.boundary_violation_count,
+            "candidates_count": res.generated_candidates.len(),
+        }),
+    );
+
+    Ok(res)
 }
 
 /// Format human-readable Pre-Flight report for terminal output.

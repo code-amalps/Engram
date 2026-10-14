@@ -52,7 +52,7 @@ fn test_memory_code_graph_bidirectional_traversal() {
     analyze(&root).unwrap();
 
     // 1. Record ADR-014 (Module scoped)
-    let adr14 = record_scoped_decision(
+    let _adr14 = record_scoped_decision(
         &root,
         Some("ADR-014"),
         "In-Memory CSV Export",

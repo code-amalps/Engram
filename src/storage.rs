@@ -17,8 +17,8 @@ pub fn hash(bytes: &[u8]) -> String {
 }
 
 pub fn root_path(root: &Path) -> Result<PathBuf> {
-    Ok(fs::canonicalize(root)
-        .with_context(|| format!("Cannot resolve repository root {}", root.display()))?)
+    fs::canonicalize(root)
+        .with_context(|| format!("Cannot resolve repository root {}", root.display()))
 }
 
 pub fn project_id(root: &Path) -> String {
@@ -257,7 +257,7 @@ pub fn git(root: &Path, args: &[&str]) -> String {
 pub fn revision(root: &Path) -> String {
     let head = git(root, &["rev-parse", "HEAD"]);
     let head = if head.is_empty() { "WORKTREE" } else { &head };
-    let status = git(root, &["status", "--porcelain=v1"]);
+    let status = git(root, &["status", "--porcelain=v1", "-uall"]);
     if status.is_empty() {
         return head.to_string();
     }
@@ -270,6 +270,7 @@ pub fn revision(root: &Path) -> String {
             ""
         };
         if !path.is_empty() {
+            #[allow(clippy::collapsible_if)]
             if let Ok(bytes) = fs::read(root.join(path)) {
                 snapshot.push_str(&hash(&bytes));
             }
@@ -296,7 +297,7 @@ pub fn config_hash(root: &Path) -> String {
 
 pub fn git_changed(root: &Path) -> Vec<String> {
     let output = Command::new("git")
-        .args(["status", "--porcelain=v1", "-z"])
+        .args(["status", "--porcelain=v1", "-z", "-uall"])
         .current_dir(root)
         .output()
         .ok()
@@ -319,6 +320,14 @@ pub fn git_changed(root: &Path) -> Vec<String> {
             .trim()
             .trim_matches('"')
             .replace('\\', "/");
+        let clean = path.trim_start_matches("./").trim_end_matches('/');
+        if clean == ".engram"
+            || clean.starts_with(".engram/")
+            || clean == ".git"
+            || clean.starts_with(".git/")
+        {
+            continue;
+        }
         if !path.is_empty() {
             changed.push(path);
         }

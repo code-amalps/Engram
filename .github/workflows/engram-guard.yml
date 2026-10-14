@@ -2,26 +2,28 @@ name: Engram Change Guard
 
 on:
   pull_request:
-    branches:
-      - main
-      - Development
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   change-guard:
-    name: Validate Change Contract
+    name: Enforce Change Boundaries & Constitution
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository with full history
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Full history recommended for baseline diff
 
-      - name: Install Engram standalone CLI
-        run: |
-          chmod +x ./install.sh || true
-          ENGRAM_INSTALL_DIR="$HOME/.engram/bin" ./install.sh
-          echo "$HOME/.engram/bin" >> $GITHUB_PATH
-
-      - name: Verify Engram Change Guard
-        run: |
-          engram contract check --base ${{ github.event.pull_request.base.sha }} --check-provenance
+      - name: Run Engram Change Guard
+        uses: code-amalps/Engram@v1.4.0
+        with:
+          base-ref: ${{ github.base_ref }}
+          strict: false
+          allow-no-contract: true
+          check-provenance: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}

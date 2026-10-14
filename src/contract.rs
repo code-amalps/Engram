@@ -185,10 +185,12 @@ impl CheckExitCode {
 #[derive(Debug, Clone, Default)]
 pub struct CheckOptions {
     pub contract_id: Option<String>,
+    pub file: Option<String>,
     pub strict: bool,
     pub staged: bool,
     pub base_commit: Option<String>,
     pub check_provenance: bool,
+    pub allow_no_contract: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -228,7 +230,11 @@ pub struct CheckResult {
     pub advisory_warnings: Vec<String>,
 }
 
-fn contracts_dir(root: &Path) -> Result<PathBuf> {
+fn repo_contracts_dir(root: &Path) -> PathBuf {
+    root.join(".engram").join("contracts")
+}
+
+fn cache_contracts_dir(root: &Path) -> Result<PathBuf> {
     let dir = cache_dir(root)?.join("contracts");
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
@@ -237,11 +243,37 @@ fn contracts_dir(root: &Path) -> Result<PathBuf> {
 }
 
 fn active_contract_path(root: &Path) -> Result<PathBuf> {
-    Ok(contracts_dir(root)?.join("active.json"))
+    let repo_active = repo_contracts_dir(root).join("active.json");
+    if repo_active.exists() {
+        return Ok(repo_active);
+    }
+    let alt_repo_active = root.join(".engram").join("active-contract.json");
+    if alt_repo_active.exists() {
+        return Ok(alt_repo_active);
+    }
+    Ok(cache_contracts_dir(root)?.join("active.json"))
 }
 
 fn contract_file_path(root: &Path, contract_id: &str) -> Result<PathBuf> {
-    Ok(contracts_dir(root)?.join(format!("{contract_id}.json")))
+    let p = Path::new(contract_id);
+    if p.is_file() {
+        return Ok(p.to_path_buf());
+    }
+    let rel = root.join(p);
+    if rel.is_file() {
+        return Ok(rel);
+    }
+
+    let repo_file = repo_contracts_dir(root).join(format!("{contract_id}.json"));
+    if repo_file.exists() {
+        return Ok(repo_file);
+    }
+    let repo_raw = repo_contracts_dir(root).join(contract_id);
+    if repo_raw.exists() {
+        return Ok(repo_raw);
+    }
+
+    Ok(cache_contracts_dir(root)?.join(format!("{contract_id}.json")))
 }
 
 /// Retrieve the currently active Change Contract, if any.
@@ -255,7 +287,7 @@ pub fn get_active_contract(root: &Path) -> Result<Option<ChangeContract>> {
     Ok(Some(contract))
 }
 
-/// Load a specific contract by ID.
+/// Load a specific contract by ID or file path.
 pub fn get_contract(root: &Path, contract_id: &str) -> Result<ChangeContract> {
     let path = contract_file_path(root, contract_id)?;
     if !path.exists() {
@@ -266,36 +298,68 @@ pub fn get_contract(root: &Path, contract_id: &str) -> Result<ChangeContract> {
     Ok(contract)
 }
 
-/// List all saved Change Contracts in repository cache.
+/// List all saved Change Contracts in repository cache and repo contracts dir.
 pub fn list_all_contracts(root: &Path) -> Result<Vec<ChangeContract>> {
-    let dir = contracts_dir(root)?;
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
+    let mut seen = HashSet::new();
     let mut contracts = Vec::new();
-    for entry in fs::read_dir(&dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file()
-            && path.extension().and_then(|s| s.to_str()) == Some("json")
-            && path.file_name().and_then(|s| s.to_str()) != Some("active.json")
-        {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(contract) = serde_json::from_str::<ChangeContract>(&content) {
-                    contracts.push(contract);
+
+    // 1. Repo contracts (.engram/contracts/)
+    let repo_dir = repo_contracts_dir(root);
+    if repo_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&repo_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && path.extension().and_then(|s| s.to_str()) == Some("json")
+                    && path.file_name().and_then(|s| s.to_str()) != Some("active.json")
+                {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        if let Ok(contract) = serde_json::from_str::<ChangeContract>(&content) {
+                            if seen.insert(contract.contract_id.clone()) {
+                                contracts.push(contract);
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+
+    // 2. Cache contracts (~/.cache/engram/<id>/contracts/)
+    if let Ok(dir) = cache_contracts_dir(root) {
+        if dir.exists() {
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().and_then(|s| s.to_str()) == Some("json")
+                        && path.file_name().and_then(|s| s.to_str()) != Some("active.json")
+                    {
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            if let Ok(contract) = serde_json::from_str::<ChangeContract>(&content) {
+                                if seen.insert(contract.contract_id.clone()) {
+                                    contracts.push(contract);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     contracts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(contracts)
 }
 
 /// Save a contract to cache and update the active pointer.
+/// Also mirrors to .engram/contracts/ if present in the repository.
 pub fn save_contract(root: &Path, contract: &ChangeContract) -> Result<()> {
     let file = contract_file_path(root, &contract.contract_id)?;
     let json_data = serde_json::to_string_pretty(contract)?;
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent)?;
+    }
     fs::write(&file, &json_data)?;
 
     if contract.status == ContractStatus::Active
@@ -303,8 +367,25 @@ pub fn save_contract(root: &Path, contract: &ChangeContract) -> Result<()> {
         || contract.status == ContractStatus::BlockedAwaitingHuman
     {
         let active_file = active_contract_path(root)?;
+        if let Some(parent) = active_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(&active_file, &json_data)?;
     }
+
+    // Mirror to .engram/contracts/ if repo has directory
+    let repo_dir = repo_contracts_dir(root);
+    if repo_dir.exists() {
+        let repo_file = repo_dir.join(format!("{}.json", contract.contract_id));
+        let _ = fs::write(&repo_file, &json_data);
+        if contract.status == ContractStatus::Active
+            || contract.status == ContractStatus::Reconciled
+            || contract.status == ContractStatus::BlockedAwaitingHuman
+        {
+            let _ = fs::write(repo_dir.join("active.json"), &json_data);
+        }
+    }
+
     Ok(())
 }
 
@@ -912,10 +993,24 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         }
     };
 
-    // 1. Locate active or requested Change Contract
-    let contract = if let Some(ref id) = options.contract_id {
+    // 1. Locate active, requested, or file-specified Change Contract
+    let contract_opt = if let Some(ref file_path) = options.file {
+        let p = Path::new(file_path);
+        let abs = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+        if !abs.exists() {
+            return make_error_result("file", CheckExitCode::ContractNotFound, format!("Specified contract file '{}' not found.", abs.display()));
+        }
+        let data = match fs::read_to_string(&abs) {
+            Ok(d) => d,
+            Err(e) => return make_error_result("file", CheckExitCode::ContractInvalid, format!("Failed to read contract file: {e}")),
+        };
+        match serde_json::from_str::<ChangeContract>(&data) {
+            Ok(c) => Some(c),
+            Err(e) => return make_error_result("file", CheckExitCode::ContractInvalid, format!("Corrupt contract schema in file: {e}")),
+        }
+    } else if let Some(ref id) = options.contract_id {
         match get_contract(&root, id) {
-            Ok(c) => c,
+            Ok(c) => Some(c),
             Err(e) => {
                 let err_msg = format!("{e}");
                 if err_msg.contains("not found") {
@@ -926,13 +1021,154 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         }
     } else {
         match get_active_contract(&root) {
-            Ok(Some(c)) => c,
+            Ok(Some(c)) => Some(c),
             Ok(None) => {
-                return make_error_result("none", CheckExitCode::ContractNotFound, "No active Change Contract found in repository.".to_string());
+                if options.allow_no_contract {
+                    None
+                } else {
+                    return make_error_result("none", CheckExitCode::ContractNotFound, "No active Change Contract found in repository.".to_string());
+                }
             }
             Err(e) => {
                 return make_error_result("active", CheckExitCode::ContractInvalid, format!("Failed reading active contract: {e}"));
             }
+        }
+    };
+
+    let contract = match contract_opt {
+        Some(c) => c,
+        None => {
+            // CONSTITUTION-ONLY GUARD: When no contract is provided and require_contract is false,
+            // enforce all Project Constitution rules against git changed files!
+            let baseline_ref = options.base_commit.as_deref().unwrap_or("HEAD");
+            let (changed_files, snapshot_name, maybe_err) = match inspect_changed_files(&root, baseline_ref, options) {
+                Ok(r) => r,
+                Err(e) => {
+                    return make_error_result("none", CheckExitCode::InternalError, format!("Git inspection failed: {e}"));
+                }
+            };
+
+            if let Some(err_code) = maybe_err {
+                let msg = match err_code {
+                    CheckExitCode::BaselineUnavailable => {
+                        if crate::git::is_shallow_repository(&root) {
+                            format!("SHALLOW_HISTORY_TRUNCATED: Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow repository).")
+                        } else {
+                            format!("Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow clone or missing commit).")
+                        }
+                    }
+                    _ => "Internal Git execution error.".to_string(),
+                };
+                return make_error_result("none", err_code, msg);
+            }
+
+            let constitution_rules = crate::constitution::load_constitution(&root).unwrap_or_default();
+            let mut classifications = Vec::new();
+            let mut failure_reasons = Vec::new();
+            let mut violation_count = 0;
+
+            for file in &changed_files {
+                let norm_file = normalize_rel_path(file);
+                let clean = norm_file.trim_start_matches("./").trim_end_matches('/');
+                if clean == ".engram" || clean.starts_with(".engram/") || clean == ".git" || clean.starts_with(".git/") {
+                    continue;
+                }
+
+                let mut constitution_violation = None;
+                for rule in &constitution_rules {
+                    let matches_rule = if let Some(ref f) = rule.forbidden {
+                        matches_boundary(&norm_file, f)
+                    } else if let Some(ref t) = rule.target_files {
+                        rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, t)
+                    } else if let Some(ref s) = rule.source {
+                        rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, s)
+                    } else {
+                        false
+                    };
+
+                    if matches_rule {
+                        constitution_violation = Some(format!(
+                            "Constitution rule '{}' ({}) strictly forbids modifying this boundary",
+                            rule.name, rule.id
+                        ));
+                        break;
+                    }
+                }
+
+                if let Some(reason) = constitution_violation {
+                    violation_count += 1;
+                    classifications.push(FileClassification {
+                        path: file.clone(),
+                        category: FileValidationCategory::BoundaryViolation,
+                        reason,
+                    });
+                } else {
+                    classifications.push(FileClassification {
+                        path: file.clone(),
+                        category: FileValidationCategory::Expected,
+                        reason: "Conforms to Project Constitution (No Change Contract specified)".to_string(),
+                    });
+                }
+            }
+
+            if violation_count > 0 {
+                failure_reasons.push(format!(
+                    "CONSTITUTION_VIOLATION: Detected {} boundary violation(s) crossing Project Constitution forbidden boundaries.",
+                    violation_count
+                ));
+            }
+
+            let is_passed = failure_reasons.is_empty();
+            let exit_code = if is_passed {
+                CheckExitCode::Pass.as_i32()
+            } else {
+                CheckExitCode::ContractViolation.as_i32()
+            };
+
+            let summary = CheckSummary {
+                total_changed: changed_files.len(),
+                expected: changed_files.len().saturating_sub(violation_count),
+                expected_expansion: 0,
+                unexpected: 0,
+                boundary_violations: violation_count,
+                missing_expected: 0,
+                missing_required: 0,
+            };
+
+            let res = CheckResult {
+                protocol_version: PROTOCOL_VERSION.to_string(),
+                contract_id: "none".to_string(),
+                task_id: "none".to_string(),
+                task_goal: "Constitution Boundary Verification".to_string(),
+                baseline_commit: baseline_ref.to_string(),
+                target_snapshot: snapshot_name,
+                status: if is_passed { "PASSED".to_string() } else { "FAILED".to_string() },
+                exit_code,
+                policy: "CONSTITUTION_ONLY".to_string(),
+                provenance: ContractProvenance::default(),
+                summary: summary.clone(),
+                changes: classifications,
+                missing_changes: Vec::new(),
+                failure_reasons,
+                advisory_warnings: vec![
+                    "No active Change Contract specified. Running in Constitution Guard mode.".to_string()
+                ],
+            };
+
+            let _ = crate::telemetry::record_event(
+                &root,
+                "CONSTITUTION_CHECK",
+                None,
+                "change_guard",
+                serde_json::json!({
+                    "status": &res.status,
+                    "exit_code": res.exit_code,
+                    "total_changed": summary.total_changed,
+                    "boundary_violations": summary.boundary_violations,
+                }),
+            );
+
+            return res;
         }
     };
 
@@ -1176,6 +1412,59 @@ pub fn format_check_report(result: &CheckResult, is_github_ci: bool) -> String {
         out.push_str("Result: CONTRACT CHECK PASSED ✓\n");
     } else {
         out.push_str(&format!("Result: CONTRACT CHECK FAILED (Exit Code: {})\n", result.exit_code));
+    }
+
+    out
+}
+
+/// Format machine and human-friendly Markdown for GitHub Actions Job Summary ($GITHUB_STEP_SUMMARY).
+pub fn format_check_markdown_summary(result: &CheckResult) -> String {
+    let mut out = String::new();
+    let badge = if result.status == "PASSED" {
+        "### 🛡️ Engram Change Guard: PASS ✅"
+    } else {
+        "### 🛡️ Engram Change Guard: BLOCKED ❌"
+    };
+    out.push_str(&format!("{badge}\n\n"));
+    out.push_str(&format!("**Contract ID:** `{}` | **Policy:** `{}` | **Status:** `{}`\n\n", result.contract_id, result.policy, result.status));
+    out.push_str(&format!("**Task Goal:** {}\n\n", result.task_goal));
+
+    out.push_str("| Metric | Count |\n|---|---|\n");
+    out.push_str(&format!("| Total Inspected Files | {} |\n", result.summary.total_changed));
+    out.push_str(&format!("| Expected Changes | {} |\n", result.summary.expected));
+    out.push_str(&format!("| Expected Expansions | {} |\n", result.summary.expected_expansion));
+    out.push_str(&format!("| Unexpected Modifications | {} |\n", result.summary.unexpected));
+    out.push_str(&format!("| Boundary Violations | {} |\n\n", result.summary.boundary_violations));
+
+    if !result.failure_reasons.is_empty() {
+        out.push_str("#### ❌ Violations & Failures\n\n");
+        for f in &result.failure_reasons {
+            out.push_str(&format!("- **Error:** {}\n", f));
+        }
+        out.push_str("\n");
+    }
+
+    if !result.changes.is_empty() {
+        out.push_str("<details><summary><b>View Detailed File Classifications</b></summary>\n\n");
+        out.push_str("| File | Category | Reason |\n|---|---|---|\n");
+        for c in &result.changes {
+            let icon = match c.category {
+                FileValidationCategory::Expected => "✅ Expected",
+                FileValidationCategory::ExpectedExpansion => "🔄 Expansion",
+                FileValidationCategory::Unexpected => "⚠️ Unexpected",
+                FileValidationCategory::BoundaryViolation => "❌ Forbidden",
+            };
+            out.push_str(&format!("| `{}` | {} | {} |\n", c.path, icon, c.reason));
+        }
+        out.push_str("\n</details>\n\n");
+    }
+
+    if !result.advisory_warnings.is_empty() {
+        out.push_str("#### ⚠️ Advisory Warnings\n\n");
+        for w in &result.advisory_warnings {
+            out.push_str(&format!("- {}\n", w));
+        }
+        out.push_str("\n");
     }
 
     out

@@ -1,0 +1,126 @@
+name: "Engram Change Guard"
+description: "Enforce Change Contracts, module boundaries, and Project Constitution rules on Pull Requests"
+author: "code-amalps"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  base-ref:
+    description: "Base branch or revision to diff against (e.g. main)"
+    required: false
+    default: "main"
+  contract-id:
+    description: "Explicit Change Contract ID to verify against"
+    required: false
+    default: ""
+  contract-file:
+    description: "Path to a standalone Change Contract JSON file"
+    required: false
+    default: ""
+  strict:
+    description: "Block PR on unexpected module files or missing expected files"
+    required: false
+    default: "false"
+  allow-no-contract:
+    description: "Run Project Constitution rule checks even when no contract is found"
+    required: false
+    default: "true"
+  check-provenance:
+    description: "Require human ratification if contract boundary was expanded in PR"
+    required: false
+    default: "true"
+  version:
+    description: "Engram binary release tag to install"
+    required: false
+    default: "v1.3.0"
+  github-token:
+    description: "GitHub Token for authenticated API downloads and annotations"
+    required: false
+    default: "${{ github.token }}"
+
+outputs:
+  status:
+    description: "Guard verification status (PASSED or FAILED)"
+    value: "${{ steps.run-guard.outputs.status }}"
+  exit-code:
+    description: "Verification exit code"
+    value: "${{ steps.run-guard.outputs.exit_code }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure Git History Available
+      shell: bash
+      run: |
+        if [ -d ".git" ]; then
+          echo "Fetching base ref origin/${{ inputs.base-ref }} to prevent shallow clone truncation..."
+          git fetch origin "${{ inputs.base-ref }}" --depth=100 2>/dev/null || true
+        fi
+
+    - name: Install Engram Binary
+      shell: bash
+      run: |
+        if command -v engram >/dev/null 2>&1; then
+          echo "Engram already present in PATH: $(which engram)"
+          engram --version
+          exit 0
+        fi
+
+        echo "Installing Engram ${{ inputs.version }}..."
+        if [ -f "./install.sh" ]; then
+          GITHUB_TOKEN="${{ inputs.github-token }}" ./install.sh --tag "${{ inputs.version }}" || true
+        else
+          curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | GITHUB_TOKEN="${{ inputs.github-token }}" sh -s -- --tag "${{ inputs.version }}" || true
+        fi
+
+        # Add default installation locations to PATH
+        if [ -d "$HOME/.local/bin" ]; then
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+        fi
+        if [ -d "$HOME/bin" ]; then
+          echo "$HOME/bin" >> $GITHUB_PATH
+          export PATH="$HOME/bin:$PATH"
+        fi
+
+    - name: Execute Engram Change Guard Check
+      id: run-guard
+      shell: bash
+      run: |
+        CMD="engram contract check --base origin/${{ inputs.base-ref }}"
+
+        if [ -n "${{ inputs.contract-file }}" ]; then
+          CMD="$CMD --file ${{ inputs.contract-file }}"
+        elif [ -n "${{ inputs.contract-id }}" ]; then
+          CMD="$CMD ${{ inputs.contract-id }}"
+        fi
+
+        if [ "${{ inputs.strict }}" = "true" ]; then
+          CMD="$CMD --strict"
+        fi
+
+        if [ "${{ inputs.allow-no-contract }}" = "true" ]; then
+          CMD="$CMD --allow-no-contract"
+        fi
+
+        if [ "${{ inputs.check-provenance }}" = "true" ]; then
+          CMD="$CMD --check-provenance"
+        fi
+
+        echo "Running: $CMD"
+        set +e
+        eval "$CMD"
+        EXIT_CODE=$?
+        set -e
+
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "status=PASSED" >> $GITHUB_OUTPUT
+          echo "exit_code=0" >> $GITHUB_OUTPUT
+          echo "✅ Engram Change Guard: Passed"
+        else
+          echo "status=FAILED" >> $GITHUB_OUTPUT
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "::error::Engram Change Guard verification failed (Exit code: $EXIT_CODE)"
+          exit $EXIT_CODE
+        fi

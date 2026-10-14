@@ -250,6 +250,8 @@ enum ContractAction {
     Check {
         contract_id: Option<String>,
         #[arg(long)]
+        file: Option<String>,
+        #[arg(long)]
         strict: bool,
         #[arg(long)]
         staged: bool,
@@ -257,6 +259,8 @@ enum ContractAction {
         base: Option<String>,
         #[arg(long)]
         check_provenance: bool,
+        #[arg(long)]
+        allow_no_contract: bool,
     },
     /// Ratify a Change Contract boundary expansion with human authorization
     Ratify {
@@ -447,17 +451,21 @@ fn run() -> Result<()> {
                 }
                 Some(ContractAction::Check {
                     contract_id,
+                    file,
                     strict,
                     staged,
                     base,
                     check_provenance,
+                    allow_no_contract,
                 }) => {
                     let options = contract::CheckOptions {
                         contract_id,
+                        file,
                         strict,
                         staged,
                         base_commit: base,
                         check_provenance,
+                        allow_no_contract,
                     };
                     let result = contract::check_contract(root, &options);
                     if force_json {
@@ -466,6 +474,14 @@ fn run() -> Result<()> {
                         let is_github_ci = std::env::var("GITHUB_ACTIONS").is_ok()
                             || std::env::var("CI").is_ok();
                         print!("{}", contract::format_check_report(&result, is_github_ci));
+                    }
+                    if let Ok(summary_file) = std::env::var("GITHUB_STEP_SUMMARY") {
+                        if !summary_file.is_empty() {
+                            use std::io::Write;
+                            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&summary_file) {
+                                let _ = writeln!(f, "{}", contract::format_check_markdown_summary(&result));
+                            }
+                        }
                     }
                     if result.exit_code != 0 {
                         std::process::exit(result.exit_code);

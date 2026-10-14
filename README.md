@@ -366,10 +366,14 @@ engram contract uninstall-hook
 When you commit, Change Guard validates staged changes against active contracts.
 
 ### GitHub Actions CI Enforcement
-Validate pull requests automatically by adding `.github/workflows/engram-guard.yml`:
+
+Enforce Change Contracts and Project Constitution rules automatically on pull requests using the official Engram GitHub Action:
+
 ```yaml
 name: Engram Change Guard
-on: [pull_request]
+on:
+  pull_request:
+    branches: [ main ]
 
 jobs:
   change-guard:
@@ -377,10 +381,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - run: |
-          curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
-          engram contract check --base ${{ github.event.pull_request.base.sha }} --check-provenance
+          fetch-depth: 0 # Full history recommended for accurate baseline diff
+
+      - name: Run Engram Change Guard
+        uses: code-amalps/Engram@v1.4.0
+        with:
+          base-ref: ${{ github.base_ref }}
+          strict: false
+          allow-no-contract: true
+          check-provenance: true
+```
+
+Or run directly via CLI in custom workflows:
+```bash
+engram contract check --base origin/main --check-provenance --allow-no-contract
 ```
 
 ### Stable Numeric Exit Codes

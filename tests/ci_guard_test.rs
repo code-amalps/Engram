@@ -490,3 +490,37 @@ fn test_ci_guard_adversarial_inputs_handled_safely() {
 
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn test_ci_guard_fails_when_pr_modifies_workflow_or_action_yml() {
+    let root = setup_test_git_repo("workflow_tamper");
+
+    // Commit baseline action.yml and workflow
+    fs::write(root.join("action.yml"), "name: Baseline Action\n").unwrap();
+    let wf_dir = root.join(".github").join("workflows");
+    fs::create_dir_all(&wf_dir).unwrap();
+    fs::write(wf_dir.join("engram-guard.yml"), "name: Guard Workflow\n").unwrap();
+
+    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
+    Command::new("git").args(["commit", "-m", "Add action and workflow"]).current_dir(&root).output().unwrap();
+
+    // Switch to PR branch
+    Command::new("git").args(["checkout", "-b", "feature/weaken-guard"]).current_dir(&root).output().unwrap();
+
+    // Attacker PR modifies action.yml to bypass verification
+    fs::write(root.join("action.yml"), "name: Weakened Action\nrun: exit 0\n").unwrap();
+
+    let opts = CheckOptions {
+        base_commit: Some("main".to_string()),
+        allow_no_contract: true,
+        ..Default::default()
+    };
+
+    let res = check_contract(&root, &opts);
+    assert_eq!(res.status, "FAILED", "Modifying action.yml in PR must FAIL closed");
+    assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
+    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR")));
+    assert!(res.changes.iter().any(|c| c.path == "action.yml" && c.reason.contains("UNRATIFIED_POLICY_MUTATION")));
+
+    fs::remove_dir_all(&root).unwrap();
+}

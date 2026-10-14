@@ -23,6 +23,8 @@ pub fn is_policy_file(path: &str) -> bool {
         || norm == ".engram/constitution.yml"
         || norm == ".engram/memory.yaml"
         || norm.starts_with(".engram/policies/")
+        || norm == "action.yml"
+        || norm.starts_with(".github/workflows/")
 }
 
 pub fn load_constitution(root: &Path) -> Result<Vec<ConstitutionRule>> {

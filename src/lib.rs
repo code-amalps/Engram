@@ -24,6 +24,8 @@ pub mod memory;
 pub mod memory_graph;
 pub mod model;
 pub mod printer;
+pub mod instructions;
+pub mod prompt;
 pub mod recovery;
 pub mod setup;
 pub mod storage;

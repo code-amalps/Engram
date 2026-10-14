@@ -185,16 +185,17 @@ Engram features native Tree-sitter parsers embedded into the binary:
 
 *See [`docs/supported-languages.md`](docs/supported-languages.md) for full capability details.*
 
-### Supported AI Clients (MCP)
+### Supported AI Clients & Editors
 
-Engram runs a background JSON-RPC 2.0 MCP server over `stdio` (`engram mcp`), exposing AST intelligence, contracts, and guard tools to any MCP-compliant coding assistant:
+Engram supports both MCP-connected IDEs and non-MCP environments through a non-destructive integration engine:
 
-- **Cursor:** Automated 1-click configuration via `engram setup cursor` (configures `.cursor/mcp.json`).
-- **Claude Desktop / Claude Code:** Automated 1-click configuration via `engram setup claude` (configures `claude_desktop_config.json`).
-- **Windsurf:** Automated 1-click configuration via `engram setup windsurf` (configures `.codeium/windsurf/mcp_config.json`).
-- **Cline / Roo Code / VS Code:** Add `{"command": "engram", "args": ["mcp"]}` to your MCP settings.
-
-*`engram setup` safely preserves existing third-party MCP servers and never overwrites unrelated configurations.*
+| Editor / Tool | MCP Protocol Target | Instruction Mechanism | Non-MCP Fallback |
+|---|---|---|---|
+| **Cursor** | `.cursor/mcp.json` | `.cursorrules` (managed block) | `engram prompt` |
+| **VS Code (Copilot / Cline / Roo)** | `.vscode/mcp.json` | `.github/copilot-instructions.md` | `engram prompt` |
+| **Claude Desktop / Claude Code** | `claude_desktop_config.json` | `CLAUDE.md` (managed block) | `engram prompt` |
+| **Windsurf** | `mcp_config.json` | `.windsurfrules` (managed block) | `engram prompt` |
+| **Visual Studio / JetBrains / Web LLMs**| — | Custom prompt rules | `engram prompt` (Clipboard helper) |
 
 ---
 
@@ -222,7 +223,7 @@ curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh 
 
 ---
 
-### Step 2: Integrate Engram Into Your Project
+### Step 2: Initialize Your Project (Conservative & Safe)
 
 Navigate to your existing repository root and initialize Engram:
 
@@ -232,7 +233,7 @@ engram init
 engram .
 ```
 
-This creates the local `.engram/` intelligence layer inside your project:
+**Safety Invariant:** `engram init` is strictly conservative. It creates the local `.engram/` intelligence layer and `.engramignore`, but **never modifies your editor settings, instruction files, or `.git/hooks/`**.
 
 ```text
 your-project/
@@ -246,39 +247,45 @@ your-project/
     └── events/                   # Append-only cryptographic audit logs (gitignored)
 ```
 
-Configure team architectural rules in `.engram/constitution.yaml` (e.g., forbidding modifications to security vaults or database clients from the frontend).
-
 ---
 
-### Step 3: Connect Your AI Coding Agent
+### Step 3: Connect Your AI Coding Agent (Explicit & Non-Destructive)
 
-Run the 1-click setup command for your editor:
+Engram's `setup` command uses a 2-stage change plan so you always see what will be modified before touching disk:
 
 ```bash
-# For Cursor
-engram setup cursor
+# 1. Preview detected editors and dry-run proposed integration plan (Read-Only)
+engram setup
 
-# For Claude Desktop / Claude Code
-engram setup claude
+# 2. Check health of already configured integrations (Read-Only)
+engram setup --check
 
-# For Windsurf
-engram setup windsurf
+# 3. Apply the proposed configurations (Requires explicit --apply)
+engram setup --apply
+
+# Or configure a specific editor explicitly:
+engram setup vscode --apply
+engram setup cursor --apply
+engram setup claude --apply
+engram setup windsurf --apply
 ```
+
+#### How Engram Protects Your Existing Files:
+- **Zero Rule Loss (Managed Blocks):** If `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
+- **Surgical JSON Merging:** When configuring `.vscode/mcp.json` or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
 
 ---
 
-### Step 4: Instruct the Agent (Project Rules)
+### Step 4: For Visual Studio, JetBrains, or Web LLMs (`engram prompt`)
 
-To ensure your AI agent proactively uses Engram's boundary flywheel instead of guessing, add this snippet to your project's agent instructions file (e.g. `.cursorrules`, `.windsurfrules`, or `CLAUDE.md`):
+If you or your team use editors without native MCP (e.g. Visual Studio, Xcode, web ChatGPT, or Claude web), use the universal prompt helper:
 
-```markdown
-# AI Coding Protocol with Engram
-Before modifying code in this repository:
-1. **Discover Context:** Invoke `engram_analyze_task` or `engram_get_context` to retrieve AST-grounded symbols and blast radius.
-2. **Lock Contract:** Declare your intended scope using `engram_create_change_contract` with `expected_files` and `forbidden` paths.
-3. **Implement Changes:** Modify only files declared in your contract.
-4. **Validate Diff:** Call `engram_validate_change` before concluding your task. If a boundary violation occurs, call `engram_recover` and follow the repair plan.
+```bash
+# Compiles minimal AST context and copies it directly to your system clipboard
+engram prompt "add refund capability to BillingService"
 ```
+
+Simply hit `Ctrl+V` (or `Cmd+V`) in any AI chat box. Engram generates structured context with AST symbol signatures, boundary rules, caller dependencies, and a completeness audit report.
 
 ---
 

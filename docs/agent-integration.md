@@ -95,10 +95,11 @@ rules:
     action: forbid
 ```
 
-### 3. Install Git Pre-Commit Hook (Optional but Recommended)
-Install Change Guard into `.git/hooks/pre-commit` to prevent committing unauthorized mutations:
+### 3. Git Hooks Policy (Strictly Opt-In)
+By default, `engram init` **never** installs Git hooks or interrupts local commits. If you explicitly want pre-commit checking on your machine:
 
 ```bash
+# Optional: install pre-commit hook only if desired
 engram contract install-hook
 ```
 
@@ -106,24 +107,37 @@ engram contract install-hook
 
 ## Part 2: Integrating With Your AI Coding Agent
 
-Engram runs as a background JSON-RPC 2.0 Model Context Protocol (MCP) server over `stdio`.
+Engram provides a 2-stage integration workflow: you can inspect the plan first, then apply it safely without risking existing settings.
 
-### 1-Click Automated Setup
-
-Engram provides built-in 1-click configuration for popular AI coding environments:
+### Explicit 2-Stage Setup
 
 ```bash
-# For Cursor IDE
-engram setup cursor
+# 1. Inspect detected IDEs and preview proposed configuration (Read-Only)
+engram setup
 
-# For Claude Desktop / Claude Code
-engram setup claude
+# 2. Check health of already configured integrations (Read-Only)
+engram setup --check
 
-# For Windsurf IDE
-engram setup windsurf
+# 3. Apply changes with explicit authorization
+engram setup --apply
+
+# Or configure a specific editor:
+engram setup vscode --apply
+engram setup cursor --apply
+engram setup claude --apply
+engram setup windsurf --apply
 ```
 
-*Note: `engram setup` safely merges with existing MCP servers in your editor config without overwriting them.*
+*Note: `engram setup` safely merges with existing MCP servers in your editor config without overwriting them, and uses managed blocks (`<!-- BEGIN ENGRAM MANAGED BLOCK -->`) to preserve 100% of existing team instruction files.*
+
+### For Non-MCP Editors (Visual Studio, Xcode, Web LLMs)
+
+If your environment does not use MCP:
+
+```bash
+engram prompt "your task here"
+```
+Engram compiles the minimal AST context and copies a structured prompt directly to your system clipboard, ready to paste into any chat interface.
 
 ### Manual MCP Configuration
 

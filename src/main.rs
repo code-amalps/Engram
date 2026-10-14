@@ -22,6 +22,8 @@ pub mod memory;
 pub mod memory_graph;
 pub mod model;
 pub mod printer;
+pub mod instructions;
+pub mod prompt;
 pub mod recovery;
 pub mod setup;
 pub mod storage;
@@ -41,7 +43,6 @@ use compiler::context;
 use guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
 use manifest::detect_ecosystem;
 use mcp::mcp;
-use setup::{list_targets, setup_client};
 use storage::{cache_dir, project_id, root_path};
 
 #[derive(Parser)]
@@ -134,17 +135,33 @@ enum CommandLine {
     },
     /// Inspect declared and resolved ecosystem packages and scripts
     Ecosystem,
-    /// Configure 1-click MCP integrations for Cursor, Claude Desktop, or Windsurf
+    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf)
     Setup {
         client: Option<String>,
         #[arg(long)]
         list: bool,
         #[arg(long)]
+        check: bool,
+        #[arg(long)]
         dry_run: bool,
         #[arg(long)]
-        remove: bool,
+        apply: bool,
+        #[arg(long)]
+        force: bool,
         #[arg(long)]
         status: bool,
+    },
+    /// Generate structured prompt context with AST symbols, boundaries, and completeness tracking
+    Prompt {
+        task: String,
+        #[arg(long, default_value_t = 1200)]
+        token_budget: usize,
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        #[arg(long)]
+        stdout: bool,
+        #[arg(long)]
+        no_clipboard: bool,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
     Mcp,
@@ -727,20 +744,104 @@ fn run() -> Result<()> {
         Some(CommandLine::Setup {
             client,
             list,
+            check,
             dry_run,
-            remove,
+            apply,
+            force,
             status,
         }) => {
-            if list || client.is_none() {
-                let targets = list_targets();
+            if list {
                 if force_json {
-                    print_json(targets)?;
+                    print_json(json!({
+                        "supported": [
+                            "cursor (Cursor IDE: .cursor/mcp.json + .cursorrules)",
+                            "vscode (VS Code: .vscode/mcp.json + .github/copilot-instructions.md)",
+                            "claude (Claude Desktop: claude_desktop_config.json + CLAUDE.md)",
+                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)"
+                        ]
+                    }))?;
                 } else {
-                    println!("Supported integrations:\n  ✓ Cursor (.cursor/mcp.json)\n  ✓ Claude Desktop (claude_desktop_config.json)\n  ✓ Windsurf (mcp_config.json)\n\nRoadmap integrations:\n  ○ Claude Code CLI\n  ○ VS Code / Cline\n  ○ VS Code / Roo Code\n\nUsage: engram setup <cursor|claude|windsurf> [--dry-run] [--status] [--remove]");
+                    println!("🧠 Engram Supported Integrations:");
+                    println!("  ✓ Cursor:   .cursor/mcp.json               | .cursorrules");
+                    println!("  ✓ VS Code:  .vscode/mcp.json               | .github/copilot-instructions.md");
+                    println!("  ✓ Claude:   claude_desktop_config.json     | CLAUDE.md");
+                    println!("  ✓ Windsurf: mcp_config.json                | .windsurfrules");
+                    println!("\nCommands:");
+                    println!("  engram setup                   # Read-only auto-detection and dry-run plan");
+                    println!("  engram setup --check           # Verify health of configured integrations");
+                    println!("  engram setup --apply           # Apply proposed changes safely");
+                    println!("  engram setup <target> --apply  # Configure specific editor");
                 }
-            } else if let Some(c) = client {
-                let res = setup_client(root, &c, dry_run, remove, status)?;
-                print_json(res)?;
+            } else {
+                let is_dry_run = dry_run || (!apply && !check && !status);
+                let opts = setup::SetupOptions {
+                    client,
+                    check,
+                    dry_run: is_dry_run,
+                    apply,
+                    force,
+                    status,
+                };
+                let report = setup::orchestrate_setup(root, opts)?;
+                if force_json || status {
+                    print_json(&report)?;
+                } else {
+                    println!("🧠 Engram Integration Setup ({})", report.mode);
+                    println!("──────────────────────────────────────────────────────────");
+                    if report.integrations.is_empty() {
+                        println!("  No matching or detected editor configurations found.");
+                        println!("  Run `engram setup --list` to view all supported targets.");
+                    }
+                    for item in &report.integrations {
+                        let icon = match item.config_status.as_str() {
+                            "CONFIGURED_HEALTHY" => "✓",
+                            "CONFLICT_DETECTED" => "⚠️",
+                            _ => "○",
+                        };
+                        println!("  {} {} ({:?})", icon, item.display_name, item.detection);
+                        println!("     Config:      {} [{}]", item.config_path, item.config_status);
+                        if let Some(ref ip) = item.instruction_path {
+                            let istat = item.instruction_status.as_deref().unwrap_or("none");
+                            println!("     Instruction: {} [{}]", ip, istat);
+                        }
+                        if let Some(ref conflict) = item.conflict_details {
+                            println!("     Conflict:    {}", conflict);
+                        }
+                    }
+                    println!("──────────────────────────────────────────────────────────");
+                    if is_dry_run && !apply {
+                        println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
+                        println!("  Run `engram setup --apply` to execute this integration plan.");
+                    } else if apply {
+                        println!("  ✓ Applied {} integration changes (0 data loss).", report.changes_applied);
+                    }
+                }
+            }
+        }
+        Some(CommandLine::Prompt {
+            task,
+            token_budget,
+            format,
+            stdout,
+            no_clipboard,
+        }) => {
+            let fmt = match format.to_lowercase().as_str() {
+                "text" => prompt::PromptFormat::Text,
+                _ => prompt::PromptFormat::Markdown,
+            };
+            let copy_clip = !no_clipboard && !stdout;
+            let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
+            if force_json {
+                print_json(&res)?;
+            } else {
+                if stdout || !res.clipboard_copied {
+                    println!("{}", res.content);
+                }
+                if res.clipboard_copied {
+                    eprintln!("✓ Copied ~{} tokens of structured AST context to clipboard.", res.estimated_tokens);
+                    eprintln!("  Status: {}", res.completeness_status);
+                    eprintln!("  Paste directly into your AI chat box (Cursor, Copilot, Visual Studio, ChatGPT).");
+                }
             }
         }
         Some(CommandLine::Mcp) => mcp(root)?,

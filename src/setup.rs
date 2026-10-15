@@ -1,7 +1,8 @@
 //! Safe, verified, capability-based editor and MCP setup for AI coding assistants.
-//! Supports Cursor, VS Code, Claude Desktop, and Windsurf with conflict detection and dry-run planning.
+//! Supports Cursor, VS Code, Claude Desktop, and Windsurf through a provider/adapter architecture,
+//! with safe JSON merge, managed instruction blocks, conflict detection, and dry-run planning.
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -9,9 +10,33 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use crate::instructions::{self, ManagedBlockAction, DEFAULT_INSTRUCTION_BODY};
+
+pub const GOVERNED_TOOL_NAMES: &[&str] = &[
+    "engram_check_constitution",
+    "engram_doctor",
+    "engram_drift",
+    "engram_get_cochanges",
+    "engram_get_context",
+    "engram_get_ecosystem",
+    "engram_get_impact",
+    "engram_get_memory",
+    "engram_inspect_symbol",
+    "engram_postflight",
+    "engram_preflight",
+    "engram_record_decision",
+    "engram_recover",
+    "engram_why",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SetupScope {
+    Project,
+    User,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorCapabilities {
@@ -21,6 +46,187 @@ pub struct EditorCapabilities {
     pub supports_stdio: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetectionConfidence {
+    Confirmed,
+    Likely,
+    NotDetected,
+}
+
+/// Provider trait abstracting editor-specific configuration, instruction rules, and detection.
+pub trait EditorProvider: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn display_name(&self) -> &'static str;
+    fn scope(&self) -> SetupScope;
+    fn capabilities(&self) -> EditorCapabilities;
+    fn default_config_path(&self, workspace_root: &Path) -> PathBuf;
+    fn default_instruction_path(&self, workspace_root: &Path) -> Option<PathBuf>;
+    fn detect(&self, workspace_root: &Path) -> DetectionConfidence;
+}
+
+pub struct CursorProvider;
+impl EditorProvider for CursorProvider {
+    fn id(&self) -> &'static str { "cursor" }
+    fn display_name(&self) -> &'static str { "Cursor IDE" }
+    fn scope(&self) -> SetupScope { SetupScope::Project }
+    fn capabilities(&self) -> EditorCapabilities {
+        EditorCapabilities {
+            project_mcp: true,
+            user_mcp: false,
+            instruction_files: true,
+            supports_stdio: true,
+        }
+    }
+    fn default_config_path(&self, root: &Path) -> PathBuf {
+        root.join(".cursor").join("mcp.json")
+    }
+    fn default_instruction_path(&self, root: &Path) -> Option<PathBuf> {
+        Some(root.join(".cursorrules"))
+    }
+    fn detect(&self, root: &Path) -> DetectionConfidence {
+        if root.join(".cursor").exists() {
+            DetectionConfidence::Confirmed
+        } else {
+            DetectionConfidence::NotDetected
+        }
+    }
+}
+
+pub struct VsCodeProvider;
+impl EditorProvider for VsCodeProvider {
+    fn id(&self) -> &'static str { "vscode" }
+    fn display_name(&self) -> &'static str { "Visual Studio Code (Copilot / Cline / Roo)" }
+    fn scope(&self) -> SetupScope { SetupScope::Project }
+    fn capabilities(&self) -> EditorCapabilities {
+        EditorCapabilities {
+            project_mcp: true,
+            user_mcp: false,
+            instruction_files: true,
+            supports_stdio: true,
+        }
+    }
+    fn default_config_path(&self, root: &Path) -> PathBuf {
+        root.join(".vscode").join("mcp.json")
+    }
+    fn default_instruction_path(&self, root: &Path) -> Option<PathBuf> {
+        Some(root.join(".github").join("copilot-instructions.md"))
+    }
+    fn detect(&self, root: &Path) -> DetectionConfidence {
+        if root.join(".vscode").exists() || root.join(".github").join("copilot-instructions.md").exists() {
+            DetectionConfidence::Confirmed
+        } else {
+            DetectionConfidence::NotDetected
+        }
+    }
+}
+
+pub struct ClaudeDesktopProvider;
+impl EditorProvider for ClaudeDesktopProvider {
+    fn id(&self) -> &'static str { "claude" }
+    fn display_name(&self) -> &'static str { "Claude Desktop" }
+    fn scope(&self) -> SetupScope { SetupScope::User }
+    fn capabilities(&self) -> EditorCapabilities {
+        EditorCapabilities {
+            project_mcp: false,
+            user_mcp: true,
+            instruction_files: true,
+            supports_stdio: true,
+        }
+    }
+    fn default_config_path(&self, _root: &Path) -> PathBuf {
+        if cfg!(windows) {
+            let appdata = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Default\\AppData\\Roaming".into());
+            PathBuf::from(appdata).join("Claude").join("claude_desktop_config.json")
+        } else if cfg!(target_os = "macos") {
+            let home = env::var("HOME").unwrap_or_else(|_| "/Users/default".into());
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("Claude")
+                .join("claude_desktop_config.json")
+        } else {
+            let home = env::var("HOME").unwrap_or_else(|_| "/home/default".into());
+            PathBuf::from(home)
+                .join(".config")
+                .join("Claude")
+                .join("claude_desktop_config.json")
+        }
+    }
+    fn default_instruction_path(&self, root: &Path) -> Option<PathBuf> {
+        Some(root.join("CLAUDE.md"))
+    }
+    fn detect(&self, _root: &Path) -> DetectionConfidence {
+        let path = if cfg!(windows) {
+            env::var("APPDATA").ok().map(|a| PathBuf::from(a).join("Claude"))
+        } else if cfg!(target_os = "macos") {
+            env::var("HOME").ok().map(|h| PathBuf::from(h).join("Library/Application Support/Claude"))
+        } else {
+            env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config/Claude"))
+        };
+        if let Some(p) = path {
+            if p.exists() {
+                return DetectionConfidence::Confirmed;
+            }
+        }
+        DetectionConfidence::NotDetected
+    }
+}
+
+pub struct WindsurfProvider;
+impl EditorProvider for WindsurfProvider {
+    fn id(&self) -> &'static str { "windsurf" }
+    fn display_name(&self) -> &'static str { "Windsurf IDE" }
+    fn scope(&self) -> SetupScope { SetupScope::User }
+    fn capabilities(&self) -> EditorCapabilities {
+        EditorCapabilities {
+            project_mcp: false,
+            user_mcp: true,
+            instruction_files: true,
+            supports_stdio: true,
+        }
+    }
+    fn default_config_path(&self, _root: &Path) -> PathBuf {
+        let home = if cfg!(windows) {
+            env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into())
+        } else {
+            env::var("HOME").unwrap_or_else(|_| "/home/default".into())
+        };
+        PathBuf::from(home).join(".codeium").join("windsurf").join("mcp_config.json")
+    }
+    fn default_instruction_path(&self, root: &Path) -> Option<PathBuf> {
+        Some(root.join(".windsurfrules"))
+    }
+    fn detect(&self, _root: &Path) -> DetectionConfidence {
+        let home = if cfg!(windows) {
+            env::var("USERPROFILE").ok()
+        } else {
+            env::var("HOME").ok()
+        };
+        if let Some(h) = home {
+            if PathBuf::from(h).join(".codeium").join("windsurf").exists() {
+                return DetectionConfidence::Confirmed;
+            }
+        }
+        DetectionConfidence::NotDetected
+    }
+}
+
+pub fn all_providers() -> Vec<Box<dyn EditorProvider>> {
+    vec![
+        Box::new(CursorProvider),
+        Box::new(VsCodeProvider),
+        Box::new(ClaudeDesktopProvider),
+        Box::new(WindsurfProvider),
+    ]
+}
+
+pub fn get_provider(id: &str) -> Option<Box<dyn EditorProvider>> {
+    all_providers().into_iter().find(|p| {
+        p.id().eq_ignore_ascii_case(id) || p.display_name().to_lowercase().contains(&id.to_lowercase())
+    })
+}
+
+// Backward-compatible struct and SUPPORTED_TARGETS for existing tests
 pub struct EditorIntegration {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -28,13 +234,6 @@ pub struct EditorIntegration {
     pub default_config_path: fn(&Path) -> PathBuf,
     pub default_instruction_path: Option<fn(&Path) -> PathBuf>,
     pub detect_fn: fn(&Path) -> DetectionConfidence,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DetectionConfidence {
-    Confirmed,
-    Likely,
-    NotDetected,
 }
 
 pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
@@ -47,15 +246,9 @@ pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
             instruction_files: true,
             supports_stdio: true,
         },
-        default_config_path: |root| root.join(".cursor").join("mcp.json"),
-        default_instruction_path: Some(|root| root.join(".cursorrules")),
-        detect_fn: |root| {
-            if root.join(".cursor").exists() {
-                DetectionConfidence::Confirmed
-            } else {
-                DetectionConfidence::NotDetected
-            }
-        },
+        default_config_path: |root| CursorProvider.default_config_path(root),
+        default_instruction_path: Some(|root| CursorProvider.default_instruction_path(root).unwrap()),
+        detect_fn: |root| CursorProvider.detect(root),
     },
     EditorIntegration {
         id: "vscode",
@@ -66,15 +259,9 @@ pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
             instruction_files: true,
             supports_stdio: true,
         },
-        default_config_path: |root| root.join(".vscode").join("mcp.json"),
-        default_instruction_path: Some(|root| root.join(".github").join("copilot-instructions.md")),
-        detect_fn: |root| {
-            if root.join(".vscode").exists() || root.join(".github").join("copilot-instructions.md").exists() {
-                DetectionConfidence::Confirmed
-            } else {
-                DetectionConfidence::NotDetected
-            }
-        },
+        default_config_path: |root| VsCodeProvider.default_config_path(root),
+        default_instruction_path: Some(|root| VsCodeProvider.default_instruction_path(root).unwrap()),
+        detect_fn: |root| VsCodeProvider.detect(root),
     },
     EditorIntegration {
         id: "claude",
@@ -85,41 +272,9 @@ pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
             instruction_files: true,
             supports_stdio: true,
         },
-        default_config_path: |_| {
-            if cfg!(windows) {
-                let appdata = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Default\\AppData\\Roaming".into());
-                PathBuf::from(appdata).join("Claude").join("claude_desktop_config.json")
-            } else if cfg!(target_os = "macos") {
-                let home = env::var("HOME").unwrap_or_else(|_| "/Users/default".into());
-                PathBuf::from(home)
-                    .join("Library")
-                    .join("Application Support")
-                    .join("Claude")
-                    .join("claude_desktop_config.json")
-            } else {
-                let home = env::var("HOME").unwrap_or_else(|_| "/home/default".into());
-                PathBuf::from(home)
-                    .join(".config")
-                    .join("Claude")
-                    .join("claude_desktop_config.json")
-            }
-        },
-        default_instruction_path: Some(|root| root.join("CLAUDE.md")),
-        detect_fn: |_| {
-            let path = if cfg!(windows) {
-                env::var("APPDATA").ok().map(|a| PathBuf::from(a).join("Claude"))
-            } else if cfg!(target_os = "macos") {
-                env::var("HOME").ok().map(|h| PathBuf::from(h).join("Library/Application Support/Claude"))
-            } else {
-                env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config/Claude"))
-            };
-            if let Some(p) = path {
-                if p.exists() {
-                    return DetectionConfidence::Confirmed;
-                }
-            }
-            DetectionConfidence::NotDetected
-        },
+        default_config_path: |root| ClaudeDesktopProvider.default_config_path(root),
+        default_instruction_path: Some(|root| ClaudeDesktopProvider.default_instruction_path(root).unwrap()),
+        detect_fn: |root| ClaudeDesktopProvider.detect(root),
     },
     EditorIntegration {
         id: "windsurf",
@@ -130,28 +285,9 @@ pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
             instruction_files: true,
             supports_stdio: true,
         },
-        default_config_path: |_| {
-            let home = if cfg!(windows) {
-                env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into())
-            } else {
-                env::var("HOME").unwrap_or_else(|_| "/home/default".into())
-            };
-            PathBuf::from(home).join(".codeium").join("windsurf").join("mcp_config.json")
-        },
-        default_instruction_path: Some(|root| root.join(".windsurfrules")),
-        detect_fn: |_| {
-            let home = if cfg!(windows) {
-                env::var("USERPROFILE").ok()
-            } else {
-                env::var("HOME").ok()
-            };
-            if let Some(h) = home {
-                if PathBuf::from(h).join(".codeium").join("windsurf").exists() {
-                    return DetectionConfidence::Confirmed;
-                }
-            }
-            DetectionConfidence::NotDetected
-        },
+        default_config_path: |root| WindsurfProvider.default_config_path(root),
+        default_instruction_path: Some(|root| WindsurfProvider.default_instruction_path(root).unwrap()),
+        detect_fn: |root| WindsurfProvider.detect(root),
     },
 ];
 
@@ -179,17 +315,14 @@ pub fn setup_client(
     remove: bool,
     status_only: bool,
 ) -> Result<Value> {
-    let target = SUPPORTED_TARGETS
-        .iter()
-        .find(|t| t.id.eq_ignore_ascii_case(client) || t.display_name.to_lowercase().contains(&client.to_lowercase()))
-        .ok_or_else(|| {
-            anyhow!(
-                "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
-                client
-            )
-        })?;
+    let provider = get_provider(client).ok_or_else(|| {
+        anyhow!(
+            "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
+            client
+        )
+    })?;
 
-    let config_path = (target.default_config_path)(root);
+    let config_path = provider.default_config_path(root);
     let binary = get_engram_binary_path();
     let root_canon = fs::canonicalize(root)
         .unwrap_or_else(|_| root.to_path_buf())
@@ -212,7 +345,8 @@ pub fn setup_client(
         };
 
         return Ok(json!({
-            "client": target.id,
+            "client": provider.id(),
+            "scope": format!("{:?}", provider.scope()),
             "config_path": config_path.to_string_lossy(),
             "config_exists": exists,
             "engram_configured": configured,
@@ -223,37 +357,11 @@ pub fn setup_client(
         }));
     }
 
-    // Read or initialize configuration
-    let mut config: Value = if config_path.exists() {
-        let text = fs::read_to_string(&config_path)?;
-        serde_json::from_str(&text).unwrap_or(json!({ "mcpServers": {} }))
-    } else {
-        json!({ "mcpServers": {} })
-    };
-
-    if !config.is_object() {
-        config = json!({ "mcpServers": {} });
-    }
-
-    let servers = config
-        .as_object_mut()
-        .unwrap()
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
-
-    if !servers.is_object() {
-        *servers = json!({});
-    }
-
-    let servers_obj = servers.as_object_mut().unwrap();
-
     if remove {
-        let removed = servers_obj.remove("engram").is_some();
-        if !dry_run && removed {
-            write_atomic_json(&config_path, &config)?;
-        }
+        let removed = remove_mcp_config(&config_path)?;
         return Ok(json!({
-            "client": target.id,
+            "client": provider.id(),
+            "scope": format!("{:?}", provider.scope()),
             "config_path": config_path.to_string_lossy(),
             "removed": removed,
             "dry_run": dry_run
@@ -261,34 +369,44 @@ pub fn setup_client(
     }
 
     if dry_run {
+        let mut config_preview = if config_path.exists() {
+            let text = fs::read_to_string(&config_path)?;
+            serde_json::from_str(&text).unwrap_or(json!({ "mcpServers": {} }))
+        } else {
+            json!({ "mcpServers": {} })
+        };
+        let servers = config_preview
+            .as_object_mut()
+            .unwrap()
+            .entry("mcpServers")
+            .or_insert_with(|| json!({}));
+        servers.as_object_mut().unwrap().insert(
+            "engram".to_string(),
+            json!({ "command": binary, "args": ["-C", root_canon, "mcp"] }),
+        );
+
         return Ok(json!({
-            "client": target.id,
+            "client": provider.id(),
+            "scope": format!("{:?}", provider.scope()),
             "config_path": config_path.to_string_lossy(),
-            "proposed_config": config,
+            "proposed_config": config_preview,
             "dry_run": true,
             "message": "Dry-run: configuration would be safely updated."
         }));
     }
 
-    // Safe merge: preserve other servers, set or update "engram"
-    let engram_server_block = json!({
-        "command": binary,
-        "args": ["-C", root_canon, "mcp"]
-    });
-    servers_obj.insert("engram".to_string(), engram_server_block);
-
-    // Backup and atomic write
+    // Apply
     if config_path.exists() {
         let bak = config_path.with_extension("json.bak");
         let _ = fs::copy(&config_path, &bak);
     }
-    write_atomic_json(&config_path, &config)?;
+    apply_mcp_config(&config_path, &binary, &root_canon)?;
 
-    // Verify MCP health
     let health = verify_mcp_health(&binary, root);
 
     Ok(json!({
-        "client": target.id,
+        "client": provider.id(),
+        "scope": format!("{:?}", provider.scope()),
         "config_path": config_path.to_string_lossy(),
         "configured": true,
         "health_check": match health {
@@ -302,6 +420,7 @@ pub fn setup_client(
 pub struct IntegrationPlanItem {
     pub client_id: String,
     pub display_name: String,
+    pub scope: SetupScope,
     pub detection: DetectionConfidence,
     pub config_path: String,
     pub config_status: String,
@@ -337,19 +456,15 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
         .to_string_lossy()
         .to_string();
 
-    let targets: Vec<&EditorIntegration> = if let Some(client) = &opts.client {
-        vec![SUPPORTED_TARGETS
-            .iter()
-            .find(|t| t.id.eq_ignore_ascii_case(client))
-            .ok_or_else(|| {
-                anyhow!(
-                    "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
-                    client
-                )
-            })?]
+    let providers: Vec<Box<dyn EditorProvider>> = if let Some(client) = &opts.client {
+        vec![get_provider(client).ok_or_else(|| {
+            anyhow!(
+                "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
+                client
+            )
+        })?]
     } else {
-        // Multi-target inspection: check all supported targets
-        SUPPORTED_TARGETS.iter().collect()
+        all_providers()
     };
 
     let mut items = Vec::new();
@@ -357,9 +472,9 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
     let mut conflicts_detected = 0;
 
     if opts.remove {
-        for target in targets {
-            let config_path = (target.default_config_path)(root);
-            let instruction_path = target.default_instruction_path.map(|f| f(root));
+        for provider in providers {
+            let config_path = provider.default_config_path(root);
+            let instruction_path = provider.default_instruction_path(root);
 
             let mcp_configured = config_path.exists() && {
                 fs::read_to_string(&config_path)
@@ -379,12 +494,11 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
                 false
             };
 
-            // If neither is present and client wasn't explicitly specified, skip
             if opts.client.is_none() && !mcp_configured && !instruction_has_block {
                 continue;
             }
 
-            let detection = (target.detect_fn)(root);
+            let detection = provider.detect(root);
 
             let config_status = if mcp_configured {
                 "CONFIGURED (Will remove)".to_string()
@@ -415,8 +529,9 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
             }
 
             items.push(IntegrationPlanItem {
-                client_id: target.id.to_string(),
-                display_name: target.display_name.to_string(),
+                client_id: provider.id().to_string(),
+                display_name: provider.display_name().to_string(),
+                scope: provider.scope(),
                 detection,
                 config_path: config_path.to_string_lossy().to_string(),
                 config_status,
@@ -441,15 +556,14 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
         });
     }
 
-    for target in targets {
-        let detection = (target.detect_fn)(root);
-        // If no explicit client was specified, only target editors with positive detection
+    for provider in providers {
+        let detection = provider.detect(root);
         if opts.client.is_none() && detection == DetectionConfidence::NotDetected {
             continue;
         }
 
-        let config_path = (target.default_config_path)(root);
-        let instruction_path = target.default_instruction_path.map(|f| f(root));
+        let config_path = provider.default_config_path(root);
+        let instruction_path = provider.default_instruction_path(root);
 
         // 1. Inspect MCP Config
         let (config_status, conflict, conflict_details) = inspect_mcp_config(&config_path, &binary, &root_canon)?;
@@ -458,7 +572,7 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
         }
 
         // 2. Inspect Instruction File
-        let instruction_status = if let Some(ip) = &instruction_path {
+        let instruction_status = if let Some(ref ip) = instruction_path {
             let res = instructions::sync_managed_block(ip, DEFAULT_INSTRUCTION_BODY, true)?;
             Some(format!("{:?}", res.action))
         } else {
@@ -475,14 +589,12 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
                 ));
             }
 
-            // Apply MCP update
             let applied_mcp = apply_mcp_config(&config_path, &binary, &root_canon)?;
             if applied_mcp {
                 changes_applied += 1;
             }
 
-            // Apply instruction file update
-            if let Some(ip) = &instruction_path {
+            if let Some(ref ip) = instruction_path {
                 let res = instructions::sync_managed_block(ip, DEFAULT_INSTRUCTION_BODY, false)?;
                 if res.action != ManagedBlockAction::Unchanged {
                     changes_applied += 1;
@@ -491,8 +603,9 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
         }
 
         items.push(IntegrationPlanItem {
-            client_id: target.id.to_string(),
-            display_name: target.display_name.to_string(),
+            client_id: provider.id().to_string(),
+            display_name: provider.display_name().to_string(),
+            scope: provider.scope(),
             detection,
             config_path: config_path.to_string_lossy().to_string(),
             config_status,
@@ -521,7 +634,7 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
     })
 }
 
-fn inspect_mcp_config(
+pub fn inspect_mcp_config(
     path: &Path,
     binary: &str,
     root_canon: &str,
@@ -537,7 +650,10 @@ fn inspect_mcp_config(
 
     let json: Value = match serde_json::from_str(&text) {
         Ok(j) => j,
-        Err(_) => return Ok(("MALFORMED_JSON".to_string(), false, None)),
+        Err(e) => {
+            let details = format!("Configuration file '{}' contains malformed JSON: {}", path.display(), e);
+            return Ok(("MALFORMED_JSON".to_string(), true, Some(details)));
+        }
     };
 
     let engram = json
@@ -568,14 +684,16 @@ fn inspect_mcp_config(
     }
 }
 
-fn apply_mcp_config(dest: &Path, binary: &str, root_canon: &str) -> Result<bool> {
+pub fn apply_mcp_config(dest: &Path, binary: &str, root_canon: &str) -> Result<bool> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
 
     let mut config: Value = if dest.exists() {
         let text = fs::read_to_string(dest)?;
-        serde_json::from_str(&text).unwrap_or(json!({ "mcpServers": {} }))
+        serde_json::from_str(&text).map_err(|e| {
+            anyhow!("Cannot apply: configuration file '{}' contains malformed JSON: {}", dest.display(), e)
+        })?
     } else {
         json!({ "mcpServers": {} })
     };
@@ -621,10 +739,10 @@ pub fn remove_mcp_config(dest: &Path) -> Result<bool> {
         Ok(t) => t,
         Err(_) => return Ok(false),
     };
-    let mut config: Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(_) => return Ok(false),
-    };
+    let mut config: Value = serde_json::from_str(&text).map_err(|e| {
+        anyhow!("Cannot remove: configuration file '{}' contains malformed JSON: {}", dest.display(), e)
+    })?;
+
     if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
         if servers.remove("engram").is_some() {
             let bak = dest.with_extension("json.bak");
@@ -643,7 +761,7 @@ fn write_atomic_json(dest: &Path, value: &Value) -> Result<()> {
     let temp = dest.with_extension(format!("tmp_{}", std::process::id()));
     let text = serde_json::to_string_pretty(value)?;
     fs::write(&temp, text)?;
-    
+
     #[cfg(windows)]
     {
         if dest.exists() {
@@ -667,7 +785,17 @@ fn write_atomic_json(dest: &Path, value: &Value) -> Result<()> {
 }
 
 /// Spawns engram mcp over stdio, sends initialize + tools/list, and verifies protocol handshake.
+/// Enforces a bounded 5-second timeout, validates server identity ("engram"), protocol ("2024-11-05"),
+/// capabilities ({tools, resources, prompts}), and exact 14 tool surface with zero duplicates.
 pub fn verify_mcp_health(binary: &str, root: &Path) -> Result<usize> {
+    verify_mcp_health_with_timeout(binary, root, 5)
+}
+
+pub fn verify_mcp_health_with_timeout(binary: &str, root: &Path, timeout_secs: u64) -> Result<usize> {
+    if !Path::new(binary).exists() {
+        bail!("Engram binary executable not found at '{}'", binary);
+    }
+
     let mut child = Command::new(binary)
         .arg("-C")
         .arg(root)
@@ -675,58 +803,129 @@ pub fn verify_mcp_health(binary: &str, root: &Path) -> Result<usize> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn Engram binary '{}': {}", binary, e))?;
 
     let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no child stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no child stdout"))?;
-    let mut reader = BufReader::new(stdout);
 
-    // 1. Send initialize
-    let init_req = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": { "name": "engram-setup-health", "version": "1.0" }
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let res = (|| -> Result<usize> {
+            let mut reader = BufReader::new(stdout);
+
+            // 1. Send initialize
+            let init_req = json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "engram-setup-health", "version": "1.5.0" }
+                }
+            });
+            writeln!(stdin, "{}", init_req)?;
+            stdin.flush()?;
+
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            let init_res: Value = serde_json::from_str(&line)
+                .map_err(|e| anyhow!("Failed to parse initialize response JSON: {}", e))?;
+
+            if let Some(err) = init_res.get("error") {
+                return Err(anyhow!("MCP initialize error: {:?}", err));
+            }
+
+            let result = init_res.get("result").ok_or_else(|| anyhow!("MCP initialize missing result"))?;
+            let server_name = result.get("serverInfo").and_then(|s| s.get("name")).and_then(|n| n.as_str());
+            if server_name != Some("engram") {
+                return Err(anyhow!("Server identity mismatch: expected 'engram', got '{:?}'", server_name));
+            }
+
+            let protocol_ver = result.get("protocolVersion").and_then(|v| v.as_str());
+            if protocol_ver != Some("2024-11-05") {
+                return Err(anyhow!("Protocol negotiation mismatch: expected '2024-11-05', got '{:?}'", protocol_ver));
+            }
+
+            let caps = result.get("capabilities").and_then(|c| c.as_object());
+            if let Some(c) = caps {
+                if !c.contains_key("tools") || !c.contains_key("resources") || !c.contains_key("prompts") {
+                    return Err(anyhow!("Server missing required capabilities: expected tools, resources, prompts"));
+                }
+            } else {
+                return Err(anyhow!("Server missing capabilities object"));
+            }
+
+            // 2. Send tools/list
+            let tools_req = json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {}
+            });
+            writeln!(stdin, "{}", tools_req)?;
+            stdin.flush()?;
+
+            line.clear();
+            reader.read_line(&mut line)?;
+            let tools_res: Value = serde_json::from_str(&line)
+                .map_err(|e| anyhow!("Failed to parse tools/list response JSON: {}", e))?;
+
+            if let Some(err) = tools_res.get("error") {
+                return Err(anyhow!("MCP tools/list error: {:?}", err));
+            }
+
+            let tools_arr = tools_res
+                .get("result")
+                .and_then(|r| r.get("tools"))
+                .and_then(|t| t.as_array())
+                .ok_or_else(|| anyhow!("MCP tools/list missing tools array"))?;
+
+            let mut tool_names: Vec<String> = tools_arr
+                .iter()
+                .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .collect();
+
+            let raw_count = tool_names.len();
+            tool_names.sort();
+            let before_dedup = tool_names.len();
+            tool_names.dedup();
+            if tool_names.len() != before_dedup {
+                return Err(anyhow!("MCP tools/list contains duplicate tool names"));
+            }
+
+            if tool_names.iter().any(|n| n == "engram_gc") {
+                return Err(anyhow!("Unsafe administrative tool 'engram_gc' leaked into MCP tool surface"));
+            }
+
+            for expected in GOVERNED_TOOL_NAMES {
+                if !tool_names.contains(&expected.to_string()) {
+                    return Err(anyhow!("Missing expected governed tool '{}' from MCP server", expected));
+                }
+            }
+
+            if raw_count != 14 {
+                return Err(anyhow!("Expected exactly 14 governed tools, server returned {}", raw_count));
+            }
+
+            Ok(raw_count)
+        })();
+        let _ = tx.send(res);
+    });
+
+    let res = match rx.recv_timeout(Duration::from_secs(timeout_secs)) {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!("MCP health check timed out after {}s", timeout_secs));
         }
-    });
-    writeln!(stdin, "{}", init_req)?;
-    stdin.flush()?;
-
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let init_res: Value = serde_json::from_str(&line)?;
-    if init_res.get("error").is_some() {
-        let _ = child.kill();
-        return Err(anyhow!("MCP initialize error: {:?}", init_res["error"]));
-    }
-
-    // 2. Send tools/list
-    let tools_req = json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-        "params": {}
-    });
-    writeln!(stdin, "{}", tools_req)?;
-    stdin.flush()?;
-
-    line.clear();
-    reader.read_line(&mut line)?;
-    let tools_res: Value = serde_json::from_str(&line)?;
-    let count = tools_res
-        .get("result")
-        .and_then(|r| r.get("tools"))
-        .and_then(|t| t.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+    };
 
     let _ = child.kill();
-    if count >= 7 {
-        Ok(count)
-    } else {
-        Err(anyhow!("Expected at least 7 tools, found {count}"))
-    }
+    let _ = child.wait();
+    let _ = handle.join();
+    res
 }

@@ -193,6 +193,15 @@ pub struct DurableMemoryDocument {
     pub memories: Vec<DurableMemory>,
 }
 
+impl Default for DurableMemoryDocument {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            memories: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryCandidate {
     pub candidate_id: String,
@@ -366,6 +375,85 @@ pub fn record_decision(
         symbols: Vec::new(),
     };
     record_scoped_decision(root, None, title, statement, reason, scope, source_ref, accepted_by)
+}
+
+/// Record a provisional architectural decision proposed via MCP or automated agents.
+/// Strictly marked as PROVISIONAL and requires explicit human CLI ratification to become DURABLE.
+pub fn record_provisional_decision(
+    root: &Path,
+    title: &str,
+    statement: &str,
+    reason: &str,
+    modules: Vec<String>,
+    files: Vec<String>,
+    source_ref: Option<String>,
+    proposed_by: &str,
+) -> Result<DurableMemory> {
+    let target = modules.first().cloned();
+    let level = if !modules.is_empty() {
+        ScopeLevel::Module
+    } else if !files.is_empty() {
+        ScopeLevel::Package
+    } else {
+        ScopeLevel::Global
+    };
+    let scope = MemoryScope {
+        level,
+        target,
+        team: None,
+        modules,
+        files,
+        symbols: Vec::new(),
+    };
+    let root = root_path(root)?;
+    let mut doc = load_durable_memories(&root)?;
+
+    let mem_id = format!("mem_{}", Uuid::new_v4().simple());
+
+    let current_sha = if crate::git::is_git_repo(&root) {
+        crate::git::current_revision(&root)
+            .ok()
+            .filter(|s| s != "WORKTREE" && !s.is_empty())
+    } else {
+        None
+    };
+
+    let provenance = MemoryProvenance {
+        source_type: "agent_mcp".to_string(),
+        source_id: Some(mem_id.clone()),
+        source_commit: current_sha.clone(),
+        source_contract: None,
+        source_decision: Some(mem_id.clone()),
+        ratified_by: None,
+        ratified_at: None,
+    };
+
+    let memory = DurableMemory {
+        id: mem_id,
+        title: title.to_string(),
+        statement: statement.to_string(),
+        reason: reason.to_string(),
+        source: Some(MemorySource {
+            source_type: "agent_mcp".to_string(),
+            reference: source_ref,
+        }),
+        provenance: Some(provenance),
+        accepted_by: proposed_by.to_string(),
+        accepted_at: Utc::now(),
+        scope,
+        evidence_tier: EvidenceTier::Inferred,
+        lifecycle_state: MemoryLifecycleState::Provisional,
+        supersedes: None,
+        superseded_by: None,
+        tags: vec!["provisional".to_string(), "mcp".to_string()],
+        ratified_at_commit: None,
+        ratified_by: None,
+        ratified_at: None,
+    };
+
+    doc.memories.push(memory.clone());
+    save_durable_memories(&root, &doc)?;
+    Ok(memory)
 }
 
 /// Supersede an existing durable memory with a new architectural policy.

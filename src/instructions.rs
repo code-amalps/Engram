@@ -15,8 +15,9 @@ pub const DEFAULT_INSTRUCTION_BODY: &str = "\
 ## Engram Architecture Context
 Before modifying code in this repository:
 1. Consult `.engram/` or invoke `engram context \"<task>\"` for minimal AST symbol slices and boundary rules.
-2. If using MCP tools, call `engram_analyze_task` and `engram_create_change_contract` before editing files.
-3. Keep changes strictly within declared task boundaries.";
+2. If using MCP tools, call `engram_preflight` before editing files to review governing decisions and lock a Change Contract.
+3. After modifications, call `engram_postflight` to audit compliance and record candidate memories.
+4. Keep changes strictly within declared task boundaries.";
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ManagedBlockAction {

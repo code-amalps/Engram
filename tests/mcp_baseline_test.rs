@@ -885,12 +885,18 @@ fn test_p1_14_symlink_escape_rejected() {
     };
     #[cfg(unix)]
     let (escape_created, link_rel) = {
-        let ok = std::os::unix::fs::symlink(&external_secret, &link_path).is_ok();
-        (ok, "src/external_symlink.txt".to_string())
+        let res = std::os::unix::fs::symlink(&external_secret, &link_path);
+        assert!(
+            res.is_ok(),
+            "Symlink creation failed on Unix runner ({:?}). Security test must fail closed.",
+            res.err()
+        );
+        (true, "src/external_symlink.txt".to_string())
     };
 
+    #[cfg(windows)]
     if !escape_created {
-        println!("[P1-14 NOTICE]: Neither symlink nor junction creation permitted by OS on this runner. Gating test gracefully.");
+        println!("[P1-14 NOTICE]: Neither symlink nor junction creation permitted by OS on this Windows runner. Gating test gracefully.");
         let _ = std::fs::remove_dir_all(&external_dir);
         return;
     }

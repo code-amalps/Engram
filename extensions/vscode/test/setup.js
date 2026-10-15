@@ -91,6 +91,23 @@ class MockMarkdownString {
   constructor(value) {
     this.value = value || '';
   }
+  appendMarkdown(value) {
+    this.value += value;
+    return this;
+  }
+}
+
+class MockTreeItem {
+  constructor(label, collapsibleState) {
+    this.label = label;
+    this.collapsibleState = collapsibleState || 0;
+    this.tooltip = '';
+    this.description = '';
+    this.contextValue = '';
+    this.iconPath = undefined;
+    this.command = undefined;
+    this.id = undefined;
+  }
 }
 
 class MockEventEmitter {
@@ -111,6 +128,12 @@ class MockEventEmitter {
   }
 }
 
+const mockClipboard = {
+  text: '',
+  writeText: async (t) => { mockClipboard.text = t; },
+  readText: async () => mockClipboard.text,
+};
+
 const mockVscode = {
   window: {
     createOutputChannel: (name) => new MockOutputChannel(name),
@@ -118,6 +141,11 @@ const mockVscode = {
     showInformationMessage: async (message, ...items) => items[0],
     showWarningMessage: async (message, ...items) => items[0],
     showErrorMessage: async (message, ...items) => items[0],
+    showInputBox: async (options) => options?.value || 'Mock Input',
+    showQuickPick: async (items, options) => Array.isArray(items) ? items[0] : undefined,
+    showWorkspaceFolderPick: async (options) => mockVscode.workspace.workspaceFolders[0],
+    registerTreeDataProvider: (viewId, provider) => ({ dispose: () => {} }),
+    showTextDocument: async (doc, options) => ({ document: doc }),
     withProgress: async (options, task) => {
       const cts = new MockCancellationTokenSource();
       return task({ report: () => {} }, cts.token);
@@ -127,6 +155,17 @@ const mockVscode = {
     Left: 1,
     Right: 2,
   },
+  TreeItemCollapsibleState: {
+    None: 0,
+    Collapsed: 1,
+    Expanded: 2,
+  },
+  ViewColumn: {
+    Beside: -2,
+    One: 1,
+    Two: 2,
+  },
+  TreeItem: MockTreeItem,
   ThemeColor: MockThemeColor,
   ThemeIcon: MockThemeIcon,
   commands: {
@@ -141,6 +180,10 @@ const mockVscode = {
       update: async () => {},
     }),
     onDidChangeConfiguration: (listener) => ({ dispose: () => {} }),
+    openTextDocument: async (options) => ({
+      getText: () => options?.content || '',
+      uri: { fsPath: 'untitled:preview.md' },
+    }),
     workspaceFolders: [],
   },
   ProgressLocation: {
@@ -153,6 +196,7 @@ const mockVscode = {
   Disposable: MockDisposable,
   env: {
     openExternal: async (uri) => true,
+    clipboard: mockClipboard,
   },
   Uri: {
     file: (fsPath) => ({ fsPath, scheme: 'file', toString: () => fsPath }),
@@ -178,4 +222,4 @@ require.cache['vscode'] = {
   exports: mockVscode,
 };
 
-module.exports = { mockVscode };
+module.exports = { mockVscode, mockClipboard };

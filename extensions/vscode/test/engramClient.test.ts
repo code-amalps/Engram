@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as cp from 'child_process';
 import * as vscode from 'vscode';
 import { EngramClient } from '../src/engramClient';
 import { EngramOutputChannel } from '../src/outputChannel';
@@ -109,6 +110,101 @@ describe('EngramClient Tests', () => {
         () => client.validateDoctorReport({ protocol_version: '1.1', total_memories: 0, live_count: 0, items: 'not-array' }),
         /Missing or invalid "items" array/
       );
+    });
+
+    describe('validateMemoryList', () => {
+      it('should validate and parse memory list response correctly', () => {
+        const raw = {
+          version: 1,
+          memories: [
+            {
+              id: 'DEC-001',
+              title: 'API Design Standard',
+              statement: 'Use JSON:API specifications.',
+              reason: 'Consistent error responses across endpoints.',
+              accepted_by: 'lead',
+              accepted_at: '2026-10-01T10:00:00Z',
+              scope: {
+                level: 'GLOBAL',
+                target: null,
+                team: 'platform',
+                modules: ['api'],
+                files: [],
+                symbols: [],
+              },
+              lifecycle_state: 'DURABLE',
+              tags: ['api', 'standards'],
+            },
+          ],
+        };
+
+        const res = client.validateMemoryList(raw);
+        assert.strictEqual(res.length, 1);
+        assert.strictEqual(res[0].id, 'DEC-001');
+        assert.strictEqual(res[0].title, 'API Design Standard');
+        assert.strictEqual(res[0].scope.level, 'GLOBAL');
+        assert.strictEqual(res[0].scope.modules[0], 'api');
+      });
+
+      it('should accept empty memories array', () => {
+        const res = client.validateMemoryList({ version: 1, memories: [] });
+        assert.deepStrictEqual(res, []);
+      });
+
+      it('should throw when memory list is invalid', () => {
+        assert.throws(() => client.validateMemoryList(null), /not a valid JSON object/);
+        assert.throws(() => client.validateMemoryList({}), /does not contain a "memories" array/);
+        assert.throws(
+          () => client.validateMemoryList({ memories: ['not-an-object'] }),
+          /is not an object/
+        );
+      });
+    });
+
+    describe('validateContextReport', () => {
+      it('should validate and parse context report response correctly', () => {
+        const raw = {
+          task: 'Fix race condition in session manager',
+          project: 'AMstraLift',
+          revision: 'abc987',
+          indexed_files: 50,
+          token_budget: 2000,
+          estimated_tokens: 450,
+          confidence: 'HIGH',
+          constraints: ['No breaking changes'],
+          relevant_memories: [],
+          cochange_alerts: [],
+          ecosystem_guard: 'Rust 2021',
+          gaps: [],
+          files: [
+            {
+              path: 'src/session.rs',
+              score: 0.95,
+              level: 1,
+              provenance: ['symbol: SessionManager'],
+              content: 'pub struct SessionManager;',
+            },
+          ],
+          excluded_files: [],
+        };
+
+        const res = client.validateContextReport(raw);
+        assert.strictEqual(res.task, 'Fix race condition in session manager');
+        assert.strictEqual(res.project, 'AMstraLift');
+        assert.strictEqual(res.confidence, 'HIGH');
+        assert.strictEqual(res.files.length, 1);
+        assert.strictEqual(res.files[0].path, 'src/session.rs');
+        assert.strictEqual(res.files[0].score, 0.95);
+      });
+
+      it('should throw when context report schema is invalid', () => {
+        assert.throws(() => client.validateContextReport(null), /not a JSON object/);
+        assert.throws(() => client.validateContextReport({}), /Missing or invalid "task"/);
+        assert.throws(
+          () => client.validateContextReport({ task: 'foo', files: 'invalid' }),
+          /Missing or invalid "files" array/
+        );
+      });
     });
   });
 
@@ -267,6 +363,187 @@ describe('EngramClient Tests', () => {
         },
         /Command timed out after 1ms/
       );
+    });
+
+    describe('Real CLI Invocations: listMemories', () => {
+      it('should list memories on real Engram workspace', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const memories = await client.listMemories(debugBin, repoRoot);
+        assert.ok(Array.isArray(memories));
+      });
+
+      it('should return empty list on uninitialized workspace directory', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mem-test-'));
+        try {
+          const memories = await client.listMemories(debugBin, tempDir);
+          assert.deepStrictEqual(memories, []);
+        } finally {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      });
+    });
+
+    describe('Real CLI Invocations: compileContext', () => {
+      it('should compile context for a task on real Engram repository', async function () {
+        this.timeout(45000);
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const report = await client.compileContext(
+          debugBin,
+          repoRoot,
+          'Add retry logic to payment service',
+          1200
+        );
+        assert.strictEqual(report.task, 'Add retry logic to payment service');
+        assert.strictEqual(report.token_budget, 1200);
+        assert.ok(typeof report.estimated_tokens === 'number');
+        assert.ok(Array.isArray(report.files));
+      });
+
+      it('should compile context gracefully on uninitialized directory', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-ctx-test-'));
+        try {
+          const report = await client.compileContext(
+            debugBin,
+            tempDir,
+            'Test empty workspace context compilation',
+            1000
+          );
+          assert.strictEqual(report.task, 'Test empty workspace context compilation');
+          assert.strictEqual(report.files.length, 0);
+          assert.strictEqual(report.estimated_tokens, 0);
+        } finally {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      });
+
+      it('RELIABILITY: should cancel context compilation when requested', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const cts = new vscode.CancellationTokenSource();
+        const promise = client.compileContext(
+          debugBin,
+          repoRoot,
+          'Task for cancellation test',
+          1200,
+          cts.token
+        );
+        cts.cancel();
+
+        await assert.rejects(
+          promise,
+          /Operation cancelled by user/
+        );
+      });
+
+      it('RELIABILITY: should handle context compilation timeout cleanly', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        await assert.rejects(
+          async () => {
+            await client.compileContext(
+              debugBin,
+              repoRoot,
+              'Task for timeout test',
+              1200,
+              undefined,
+              1
+            );
+          },
+          /Command timed out after 1ms/
+        );
+      });
+
+      it('RELIABILITY: should kill child process on cancellation without leaving orphans', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const cts = new vscode.CancellationTokenSource();
+
+        const promise = client.compileContext(
+          debugBin,
+          repoRoot,
+          'Task for cancellation orphan check',
+          1200,
+          cts.token,
+          30000
+        );
+
+        // Wait brief delay for child process to be spawned
+        await new Promise((r) => setTimeout(r, 60));
+        cts.cancel();
+
+        await assert.rejects(promise, /Operation cancelled by user/);
+
+        // Allow OS to finalize termination
+        await new Promise((r) => setTimeout(r, 250));
+
+        if (process.platform === 'win32') {
+          const check = cp.spawnSync('powershell.exe', [
+            '-NoProfile',
+            '-Command',
+            'Get-Process engram -ErrorAction SilentlyContinue',
+          ]);
+          assert.strictEqual(
+            check.stdout.toString().trim(),
+            '',
+            'No engram process should remain active after cancellation'
+          );
+        }
+      });
+
+      it('should reject concurrent compileContext invocations', async function () {
+        if (!fs.existsSync(debugBin)) {
+          this.skip();
+          return;
+        }
+
+        const p1 = client.compileContext(
+          debugBin,
+          repoRoot,
+          'Task 1 for concurrency test',
+          1200
+        );
+
+        await assert.rejects(
+          async () => {
+            await client.compileContext(
+              debugBin,
+              repoRoot,
+              'Task 2 for concurrency test',
+              1200
+            );
+          },
+          /A context compilation is already in progress/
+        );
+
+        await p1;
+      });
     });
   });
 });

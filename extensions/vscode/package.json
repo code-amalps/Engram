@@ -31,26 +31,91 @@
     "onCommand:engram.checkHealth",
     "onCommand:engram.locateBinary",
     "onCommand:engram.showOutputChannel",
+    "onCommand:engram.compileContext",
+    "onCommand:engram.copyContext",
+    "onCommand:engram.refreshMemories",
+    "onCommand:engram.showMemoryDetails",
+    "onView:engram.views.memories",
     "workspaceContains:.engram"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "engram-explorer",
+          "title": "Engram",
+          "icon": "resources/engram.svg"
+        }
+      ]
+    },
+    "views": {
+      "engram-explorer": [
+        {
+          "id": "engram.views.memories",
+          "name": "Engineering Memories"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "engram.checkHealth",
-        "title": "Engram: Check Health (Doctor)",
+        "title": "Check Health (Doctor)",
         "category": "Engram"
       },
       {
         "command": "engram.locateBinary",
-        "title": "Engram: Locate Binary",
+        "title": "Locate Binary",
         "category": "Engram"
       },
       {
         "command": "engram.showOutputChannel",
-        "title": "Engram: Show Output Channel",
+        "title": "Show Output Channel",
+        "category": "Engram"
+      },
+      {
+        "command": "engram.compileContext",
+        "title": "Compile Context",
+        "category": "Engram",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "engram.copyContext",
+        "title": "Copy Compiled Context",
+        "category": "Engram",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "engram.refreshMemories",
+        "title": "Refresh Memories",
+        "category": "Engram",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "engram.showMemoryDetails",
+        "title": "Show Memory Details",
         "category": "Engram"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "engram.compileContext",
+          "when": "view == engram.views.memories",
+          "group": "navigation@1"
+        },
+        {
+          "command": "engram.refreshMemories",
+          "when": "view == engram.views.memories",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "engram.showMemoryDetails",
+          "when": "view == engram.views.memories && viewItem == durableMemory"
+        }
+      ]
+    },
     "configuration": {
       "title": "Engram",
       "properties": {

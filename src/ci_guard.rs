@@ -146,10 +146,19 @@ pub struct ImpactCheckPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriftCheckPolicy {
+    pub enabled: bool,
+    pub severity: FindingSeverity,
+    pub max_drift_findings: usize,
+    pub staleness_threshold: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardChecksPolicy {
     pub contracts: ContractCheckPolicy,
     pub constitution: ConstitutionCheckPolicy,
     pub impact: ImpactCheckPolicy,
+    pub drift: DriftCheckPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -184,6 +193,12 @@ impl Default for GuardPolicy {
                     enabled: true,
                     max_affected_symbols: 50,
                     severity: FindingSeverity::Warn,
+                },
+                drift: DriftCheckPolicy {
+                    enabled: false,
+                    severity: FindingSeverity::Warn,
+                    max_drift_findings: 0,
+                    staleness_threshold: 5,
                 },
             },
             exclusions: GuardExclusionsPolicy {
@@ -268,6 +283,26 @@ pub fn parse_policy_toml(content: &str) -> Result<GuardPolicy> {
                 }
                 "severity" => policy.checks.impact.severity = parse_severity(value_part)?,
                 _ => return Err(anyhow!("Unknown property '{}' in [checks.impact]", key)),
+            }
+        } else if current_section == "checks.drift" {
+            match key {
+                "enabled" => policy.checks.drift.enabled = parse_bool(value_part)?,
+                "severity" | "fail_on" => {
+                    policy.checks.drift.severity = parse_severity(value_part)?
+                }
+                "max_drift_findings" => {
+                    policy.checks.drift.max_drift_findings =
+                        value_part.parse::<usize>().map_err(|_| {
+                            anyhow!("Invalid integer for max_drift_findings: '{}'", value_part)
+                        })?;
+                }
+                "staleness_threshold" => {
+                    policy.checks.drift.staleness_threshold =
+                        value_part.parse::<usize>().map_err(|_| {
+                            anyhow!("Invalid integer for staleness_threshold: '{}'", value_part)
+                        })?;
+                }
+                _ => return Err(anyhow!("Unknown property '{}' in [checks.drift]", key)),
             }
         } else if current_section == "exclusions" {
             if key == "paths" {
@@ -388,10 +423,19 @@ pub fn load_policy(root: &Path, custom_path: Option<&Path>) -> Result<(GuardPoli
     }
 
     let default_repo_policy = root.join(".engram").join("change-guard.toml");
-    if default_repo_policy.exists() {
-        let content = fs::read_to_string(&default_repo_policy)?;
+    let alt_repo_policy = root.join(".engram").join("guard.toml");
+    let candidate = if default_repo_policy.exists() {
+        Some(default_repo_policy)
+    } else if alt_repo_policy.exists() {
+        Some(alt_repo_policy)
+    } else {
+        None
+    };
+
+    if let Some(policy_path) = candidate {
+        let content = fs::read_to_string(&policy_path)?;
         let policy = parse_policy_toml(&content)?;
-        return Ok((policy, default_repo_policy.display().to_string()));
+        return Ok((policy, policy_path.display().to_string()));
     }
 
     Ok((GuardPolicy::default(), "default-in-memory".to_string()))
@@ -860,7 +904,68 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
         }
     }
 
-    // 7. Calculate Status and Exit Code
+    // 7. Architecture Drift Check
+    if !policy.checks.drift.enabled {
+        checks_skipped.push(CheckExecutionRecord {
+            name: "drift".to_string(),
+            status: "skipped".to_string(),
+            reason: Some("Architecture drift detection disabled in policy".to_string()),
+        });
+    } else {
+        checks_executed.push("drift".to_string());
+        let drift_opts = crate::drift::DriftOptions {
+            staleness_threshold: policy.checks.drift.staleness_threshold,
+            ..Default::default()
+        };
+        if let Ok(drift_report) = crate::drift::analyze_drift(&resolved_root, &drift_opts) {
+            let mut count = 0;
+            for f in &drift_report.findings {
+                if f.severity == crate::drift::DriftSeverity::Warn
+                    || f.severity == crate::drift::DriftSeverity::Block
+                {
+                    count += 1;
+                    let guard_sev = match f.severity {
+                        crate::drift::DriftSeverity::Block => FindingSeverity::Block,
+                        _ => policy.checks.drift.severity,
+                    };
+                    findings.push(GuardFinding {
+                        rule_id: format!("GUARD-{}", f.id),
+                        severity: guard_sev,
+                        message: format!(
+                            "Architecture drift detected [{}]: {}",
+                            f.reference_id, f.explanation
+                        ),
+                        path: f.affected_paths.first().cloned(),
+                        remediation: Some(f.suggested_action.clone()),
+                    });
+                }
+            }
+            if count > policy.checks.drift.max_drift_findings
+                && policy.checks.drift.max_drift_findings > 0
+            {
+                findings.push(GuardFinding {
+                    rule_id: "GUARD-DRIFT-001".to_string(),
+                    severity: policy.checks.drift.severity,
+                    message: format!(
+                        "Total drift findings ({count}) exceeded policy threshold ({})",
+                        policy.checks.drift.max_drift_findings
+                    ),
+                    path: None,
+                    remediation: Some(
+                        "Run 'engram drift' and resolve or re-ratify stale decisions".to_string(),
+                    ),
+                });
+            }
+        } else {
+            checks_skipped.push(CheckExecutionRecord {
+                name: "drift".to_string(),
+                status: "failed".to_string(),
+                reason: Some("Failed to execute architecture drift analysis".to_string()),
+            });
+        }
+    }
+
+    // 8. Calculate Status and Exit Code
     let has_blocking = findings
         .iter()
         .any(|f| f.severity == FindingSeverity::Block);

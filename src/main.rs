@@ -224,6 +224,9 @@ enum CommandLine {
         /// Configured mutation threshold for STALE_REVIEW (default 5)
         #[arg(long, default_value_t = drift::DEFAULT_STALENESS_THRESHOLD, alias = "threshold")]
         staleness_threshold: usize,
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: String,
     },
     /// Policy-driven Change Guard for local Git and CI pull-request workflows
     Guard {
@@ -345,12 +348,23 @@ enum MemoryAction {
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Reject a candidate, preventing promotion
+    /// Reject a candidate or provisional decision proposal, preventing promotion
     Reject {
         candidate_id: String,
+        #[arg(long, default_value = "Rejected by reviewer")]
         reason: String,
         #[arg(long)]
         rejected_by: Option<String>,
+    },
+    /// Explicitly ratify an architectural decision with human reviewer authorization
+    Ratify {
+        decision_id: String,
+        #[arg(long, default_value = "developer")]
+        by: String,
+        #[arg(long, default_value = "Human ratified architectural decision")]
+        reason: String,
+        #[arg(long)]
+        commit: Option<String>,
     },
     /// Re-ratify an architectural decision with current or specified commit and reviewer name
     #[command(name = "re-ratify")]
@@ -629,8 +643,43 @@ fn run() -> Result<()> {
                 rejected_by,
             } => {
                 let act = rejected_by.as_deref().unwrap_or("developer");
-                memory::reject_candidate(root, &candidate_id, act, &reason)?;
-                print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
+                match memory::reject_candidate(root, &candidate_id, act, &reason) {
+                    Ok(()) => {
+                        print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
+                    }
+                    Err(_) => {
+                        let mem = memory::reject_decision(root, &candidate_id, act, &reason)?;
+                        if force_json {
+                            print_json(&mem)?;
+                        } else {
+                            println!("✓ Rejected architectural decision '{}' by {}.", mem.id, act);
+                        }
+                    }
+                }
+            }
+            MemoryAction::Ratify {
+                decision_id,
+                by,
+                reason,
+                commit,
+            } => {
+                let mem = memory::ratify_decision(
+                    root,
+                    &decision_id,
+                    &by,
+                    &reason,
+                    commit.as_deref(),
+                )?;
+                if force_json {
+                    print_json(&mem)?;
+                } else {
+                    println!("✓ Ratified architectural decision '{}' by {}.", mem.id, by);
+                    println!("  Title:           {}", mem.title);
+                    println!("  State:           {:?}", mem.lifecycle_state);
+                    if let Some(ref c) = mem.ratified_at_commit {
+                        println!("  Ratified Commit: {c}");
+                    }
+                }
             }
             MemoryAction::ReRatify {
                 decision_id,
@@ -1123,6 +1172,7 @@ fn run() -> Result<()> {
             decision,
             since,
             staleness_threshold,
+            format,
         }) => {
             let opts = drift::DriftOptions {
                 module,
@@ -1131,7 +1181,8 @@ fn run() -> Result<()> {
                 staleness_threshold,
             };
             let rep = drift::analyze_drift(root, &opts)?;
-            if force_json {
+            let is_json = force_json || format.to_ascii_lowercase() == "json";
+            if is_json {
                 print_json(&rep)?;
             } else {
                 printer::print_drift_report(&rep);

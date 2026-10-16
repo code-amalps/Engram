@@ -22,11 +22,7 @@ fn normalize_for_containment(p: &Path) -> PathBuf {
     #[cfg(windows)]
     {
         let s = p.to_string_lossy();
-        let stripped = if s.starts_with(r"\\?\") {
-            &s[4..]
-        } else {
-            &s
-        };
+        let stripped = if s.starts_with(r"\\?\") { &s[4..] } else { &s };
         PathBuf::from(stripped.to_lowercase().replace('/', "\\"))
     }
     #[cfg(not(windows))]
@@ -52,7 +48,10 @@ pub fn validate_workspace_path(root: &Path, user_path: &str) -> Result<PathBuf> 
     // 1. Prohibit explicit parent traversal components ('..')
     for comp in path_obj.components() {
         if matches!(comp, std::path::Component::ParentDir) {
-            bail!("Path validation error: directory traversal ('..') is prohibited: {}", trimmed);
+            bail!(
+                "Path validation error: directory traversal ('..') is prohibited: {}",
+                trimmed
+            );
         }
     }
 
@@ -78,7 +77,8 @@ pub fn validate_workspace_path(root: &Path, user_path: &str) -> Result<PathBuf> 
 
     // 3. Component-aware containment check on actual target or nearest ancestor
     if candidate.exists() {
-        let canonical_candidate = candidate.canonicalize()
+        let canonical_candidate = candidate
+            .canonicalize()
             .map_err(|e| anyhow!("Failed to resolve path '{}': {}", candidate.display(), e))?;
         let norm_canonical = normalize_for_containment(&canonical_candidate);
         if !norm_canonical.starts_with(&norm_root) {
@@ -105,11 +105,19 @@ pub fn validate_workspace_path(root: &Path, user_path: &str) -> Result<PathBuf> 
         }
 
         if !existing_ancestor.exists() {
-            bail!("Path validation error: unable to locate valid workspace ancestor for '{}'", trimmed);
+            bail!(
+                "Path validation error: unable to locate valid workspace ancestor for '{}'",
+                trimmed
+            );
         }
 
-        let canonical_ancestor = existing_ancestor.canonicalize()
-            .map_err(|e| anyhow!("Failed to resolve ancestor path '{}': {}", existing_ancestor.display(), e))?;
+        let canonical_ancestor = existing_ancestor.canonicalize().map_err(|e| {
+            anyhow!(
+                "Failed to resolve ancestor path '{}': {}",
+                existing_ancestor.display(),
+                e
+            )
+        })?;
         let norm_ancestor = normalize_for_containment(&canonical_ancestor);
 
         if !norm_ancestor.starts_with(&norm_root) {
@@ -176,7 +184,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if budget == 0 {
                 bail!("Token budget must be greater than 0");
             }
-            Ok(json_result(serde_json::to_value(context(&root, task, budget)?)?))
+            Ok(json_result(serde_json::to_value(context(
+                &root, task, budget,
+            )?)?))
         }
         "engram_inspect_symbol" => {
             let target = args["target"]
@@ -196,12 +206,19 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let conn = db(&root)?;
             let cone = crate::impact::compute_impact_cone(&conn, &root, target, depth)?;
             let active_contract = crate::contract::get_active_contract(&root).ok().flatten();
-            let authorization = active_contract.as_ref().map(|c| {
-                crate::contract::evaluate_impact_against_contract(c, &cone)
-            });
+            let authorization = active_contract
+                .as_ref()
+                .map(|c| crate::contract::evaluate_impact_against_contract(c, &cone));
             let explanation = crate::impact::format_impact_explanation(&cone);
             let affected_paths = cone.all_affected_paths();
-            let audit_memories = crate::memory::query_scoped_memories(&root, target, &affected_paths, &[target.to_string()], true).unwrap_or_default();
+            let audit_memories = crate::memory::query_scoped_memories(
+                &root,
+                target,
+                &affected_paths,
+                &[target.to_string()],
+                true,
+            )
+            .unwrap_or_default();
             let memory_conflicts = crate::memory::detect_memory_conflicts(&audit_memories);
 
             Ok(json_result(json!({
@@ -251,7 +268,10 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 bail!("file_path must not be empty");
             }
             validate_workspace_path(&root, file_path)?;
-            let min_prob = args["min_probability"].as_f64().unwrap_or(0.25).clamp(0.0, 1.0);
+            let min_prob = args["min_probability"]
+                .as_f64()
+                .unwrap_or(0.25)
+                .clamp(0.0, 1.0);
             let signals = get_cochanges_for_file(&root, file_path, min_prob)?;
             Ok(json_result(serde_json::to_value(signals)?))
         }
@@ -259,7 +279,11 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let query = args["query"].as_str().unwrap_or("");
             let files: Vec<String> = args["files"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             for f in &files {
@@ -298,11 +322,19 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
 
             let modules: Vec<String> = args["modules"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
             let files: Vec<String> = args["files"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             for f in &files {
@@ -310,14 +342,18 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             }
 
             // Strictly assign PROVISIONAL lifecycle state: agent decisions require human CLI ratification
-            let memory = record_provisional_decision(&root, title, statement, reason, modules, files, None, actor)?;
+            let memory = record_provisional_decision(
+                &root, title, statement, reason, modules, files, None, actor,
+            )?;
             Ok(json_result(serde_json::to_value(memory)?))
         }
         "engram_check_constitution" => {
             let conn = db(&root)?;
-            let files_arg: Option<Vec<String>> = args["files"]
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            let files_arg: Option<Vec<String>> = args["files"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            });
 
             let changed_files = if let Some(files) = files_arg {
                 for f in &files {
@@ -345,9 +381,11 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 bail!("Task must not be empty for engram_preflight");
             }
             let budget = args["token_budget"].as_u64().unwrap_or(1200) as usize;
-            let forbidden_raw: Option<Vec<String>> = args["forbidden"]
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
+            let forbidden_raw: Option<Vec<String>> = args["forbidden"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            });
 
             let forbidden = if let Some(fb) = forbidden_raw {
                 for p in &fb {
@@ -390,7 +428,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let id = if contract_id.is_empty() {
                 crate::contract::get_active_contract(&root)?
                     .map(|c| c.contract_id)
-                    .ok_or_else(|| anyhow!("No contract_id specified and no active contract found"))?
+                    .ok_or_else(|| {
+                        anyhow!("No contract_id specified and no active contract found")
+                    })?
             } else {
                 contract_id.to_string()
             };
@@ -421,6 +461,19 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             };
             let rep = crate::drift::analyze_drift(&root, &opts)?;
             Ok(json_result(serde_json::to_value(rep)?))
+        }
+        "engram_ratify_decision" => {
+            let decision_id = args["decision_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing required 'decision_id'"))?;
+            let by = args["by"].as_str().unwrap_or("developer");
+            let reason = args["reason"]
+                .as_str()
+                .unwrap_or("Human ratified architectural decision");
+            let commit = args["commit"].as_str();
+
+            let mem = crate::memory::ratify_decision(&root, decision_id, by, reason, commit)?;
+            Ok(json_result(serde_json::to_value(mem)?))
         }
         _ => Err(anyhow!("Unknown tool: {name}")),
     }
@@ -586,6 +639,20 @@ pub fn tools_definitions() -> Value {
                     "staleness_threshold": { "type": "integer", "description": "Configured mutation threshold for STALE_REVIEW (default 5)" }
                 }
             }
+        },
+        {
+            "name": "engram_ratify_decision",
+            "description": "Explicitly ratify an architectural decision with human reviewer authorization and provenance tracking.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "decision_id": { "type": "string", "description": "The decision ID to ratify" },
+                    "by": { "type": "string", "description": "Reviewer identity or authorizing human" },
+                    "reason": { "type": "string", "description": "Ratification rationale or justification" },
+                    "commit": { "type": "string", "description": "Git commit SHA being ratified (defaults to HEAD)" }
+                },
+                "required": ["decision_id"]
+            }
         }
     ])
 }
@@ -691,8 +758,11 @@ fn mcp_read_resource(root: &Path, uri: &str) -> std::result::Result<Value, Value
         "engram://contract/active" => {
             let active = crate::contract::get_active_contract(root).ok().flatten();
             let text = match active {
-                Some(contract) => serde_json::to_string_pretty(&contract).unwrap_or_else(|_| "{}".to_string()),
-                None => serde_json::to_string_pretty(&json!({ "status": "NO_ACTIVE_CONTRACT" })).unwrap(),
+                Some(contract) => {
+                    serde_json::to_string_pretty(&contract).unwrap_or_else(|_| "{}".to_string())
+                }
+                None => serde_json::to_string_pretty(&json!({ "status": "NO_ACTIVE_CONTRACT" }))
+                    .unwrap(),
             };
             Ok(json!({
                 "contents": [{
@@ -739,7 +809,9 @@ fn mcp_get_prompt(name: &str, args: &Value) -> std::result::Result<Value, Value>
             }))
         }
         "engram_postflight_audit" => {
-            let contract_id = args["contract_id"].as_str().unwrap_or("<ACTIVE_CONTRACT_ID>");
+            let contract_id = args["contract_id"]
+                .as_str()
+                .unwrap_or("<ACTIVE_CONTRACT_ID>");
             Ok(json!({
                 "description": "Orchestrated Post-Flight Guard Check for Engram",
                 "messages": [{

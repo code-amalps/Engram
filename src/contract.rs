@@ -428,7 +428,9 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
         p.starts_with(prefix)
     } else if pat.contains('*') {
         let regex_pat = format!("^{}$", regex::escape(&pat).replace(r"\*", ".*"));
-        regex::Regex::new(&regex_pat).map(|r| r.is_match(&p)).unwrap_or(false)
+        regex::Regex::new(&regex_pat)
+            .map(|r| r.is_match(&p))
+            .unwrap_or(false)
     } else {
         p.starts_with(&pat) || p == pat
     }
@@ -438,7 +440,13 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
 pub fn extract_module(path: &str) -> String {
     let norm = normalize_rel_path(path);
     let parts: Vec<&str> = norm.split('/').collect();
-    let candidate = if parts.len() >= 2 && (parts[0] == "src" || parts[0] == "lib" || parts[0] == "packages" || parts[0] == "internal" || parts[0] == "pkg") {
+    let candidate = if parts.len() >= 2
+        && (parts[0] == "src"
+            || parts[0] == "lib"
+            || parts[0] == "packages"
+            || parts[0] == "internal"
+            || parts[0] == "pkg")
+    {
         parts[1]
     } else if !parts.is_empty() {
         parts[0]
@@ -467,51 +475,56 @@ pub fn create_contract(
     let task_id = format!("task_{}", Uuid::new_v4().simple());
     let now_ts = Utc::now();
 
-    let (final_files, final_modules, final_tests, constraints) = match (expected_files, expected_modules) {
-        (Some(files), Some(modules)) => {
-            let tests: Vec<String> = files
-                .iter()
-                .filter(|f| f.contains("test") || f.contains("spec"))
-                .cloned()
-                .collect();
-            (files, modules, tests, Vec::new())
-        }
-        (maybe_files, maybe_modules) => {
-            let ctx = context(&root, task_goal, 3000)?;
-            let mut derived_files: Vec<String> = ctx.files.iter().map(|f| normalize_rel_path(&f.path)).collect();
-            let mut derived_modules: HashSet<String> = HashSet::new();
-            let mut derived_tests: Vec<String> = Vec::new();
+    let (final_files, final_modules, final_tests, constraints) =
+        match (expected_files, expected_modules) {
+            (Some(files), Some(modules)) => {
+                let tests: Vec<String> = files
+                    .iter()
+                    .filter(|f| f.contains("test") || f.contains("spec"))
+                    .cloned()
+                    .collect();
+                (files, modules, tests, Vec::new())
+            }
+            (maybe_files, maybe_modules) => {
+                let ctx = context(&root, task_goal, 3000)?;
+                let mut derived_files: Vec<String> = ctx
+                    .files
+                    .iter()
+                    .map(|f| normalize_rel_path(&f.path))
+                    .collect();
+                let mut derived_modules: HashSet<String> = HashSet::new();
+                let mut derived_tests: Vec<String> = Vec::new();
 
-            if let Some(explicit) = maybe_files {
-                for f in explicit {
-                    let norm = normalize_rel_path(&f);
-                    if !derived_files.contains(&norm) {
-                        derived_files.push(norm);
+                if let Some(explicit) = maybe_files {
+                    for f in explicit {
+                        let norm = normalize_rel_path(&f);
+                        if !derived_files.contains(&norm) {
+                            derived_files.push(norm);
+                        }
                     }
                 }
-            }
 
-            for f in &derived_files {
-                derived_modules.insert(extract_module(f));
-                if f.contains("test") || f.contains("spec") {
-                    derived_tests.push(f.clone());
+                for f in &derived_files {
+                    derived_modules.insert(extract_module(f));
+                    if f.contains("test") || f.contains("spec") {
+                        derived_tests.push(f.clone());
+                    }
                 }
-            }
 
-            if let Some(explicit_mods) = maybe_modules {
-                for m in explicit_mods {
-                    derived_modules.insert(m);
+                if let Some(explicit_mods) = maybe_modules {
+                    for m in explicit_mods {
+                        derived_modules.insert(m);
+                    }
                 }
-            }
 
-            (
-                derived_files,
-                derived_modules.into_iter().collect(),
-                derived_tests,
-                ctx.constraints,
-            )
-        }
-    };
+                (
+                    derived_files,
+                    derived_modules.into_iter().collect(),
+                    derived_tests,
+                    ctx.constraints,
+                )
+            }
+        };
 
     let forbidden = forbidden_boundaries.unwrap_or_default();
     let targets: Vec<ExpectedTarget> = final_files
@@ -564,13 +577,51 @@ pub fn ratify_contract(
     ratified_by: &str,
     reason: &str,
 ) -> Result<ChangeContract> {
+    if ratified_by.trim().is_empty() {
+        return Err(anyhow!("Ratification rejected: reviewer ('by') must be non-empty"));
+    }
+    if reason.trim().is_empty() {
+        return Err(anyhow!("Ratification rejected: ratification reason must be non-empty"));
+    }
+
     let root = root_path(root)?;
     let mut contract = get_contract(&root, contract_id)?;
+    let original_contract = contract.clone();
+    let prev_status = contract.provenance.ratification_status;
+
     contract.provenance.ratification_status = RatificationStatus::Ratified;
-    contract.provenance.ratified_by = Some(ratified_by.to_string());
-    contract.provenance.ratification_reason = Some(reason.to_string());
+    contract.provenance.ratified_by = Some(ratified_by.trim().to_string());
+    contract.provenance.ratification_reason = Some(reason.trim().to_string());
     contract.updated_at = Utc::now();
     save_contract(&root, &contract)?;
+
+    let telemetry_res = crate::telemetry::record_event(
+        &root,
+        "CONTRACT_RATIFIED",
+        Some(contract_id),
+        ratified_by.trim(),
+        serde_json::json!({
+            "contract_id": contract_id,
+            "ratified_by": ratified_by.trim(),
+            "reason": reason.trim(),
+        }),
+    );
+
+    if let Err(telemetry_err) = telemetry_res {
+        match save_contract(&root, &original_contract) {
+            Ok(_) => {
+                return Err(anyhow!(
+                    "CONTRACT_RATIFICATION_FAILED: Telemetry recording failed ({telemetry_err}). Contract state was cleanly rolled back to {prev_status:?}. Resolve telemetry storage issue and retry."
+                ));
+            }
+            Err(rollback_err) => {
+                return Err(anyhow!(
+                    "CONTRACT_RATIFICATION_INDETERMINATE: Contract state updated to Ratified, but telemetry recording failed ({telemetry_err}) and state rollback failed ({rollback_err}). Run 'engram doctor' to reconcile."
+                ));
+            }
+        }
+    }
+
     Ok(contract)
 }
 
@@ -609,7 +660,13 @@ pub fn create_contract_with_symbols(
     expected_symbols: Option<Vec<String>>,
     forbidden_boundaries: Option<Vec<String>>,
 ) -> Result<ChangeContract> {
-    let mut contract = create_contract(root, task_goal, expected_modules, expected_files, forbidden_boundaries)?;
+    let mut contract = create_contract(
+        root,
+        task_goal,
+        expected_modules,
+        expected_files,
+        forbidden_boundaries,
+    )?;
     if let Some(syms) = expected_symbols {
         contract.boundary.expected_symbols = syms;
         save_contract(root, &contract)?;
@@ -808,7 +865,8 @@ pub fn validate_contract_diff_with_constitution_and_base(
 
         // Check for unratified policy modification in PR mode or when base_commit is specified
         if crate::constitution::is_policy_file(&norm_file) && base_commit.is_some() {
-            let is_contract_ratified = contract.provenance.ratification_status == RatificationStatus::Ratified;
+            let is_contract_ratified =
+                contract.provenance.ratification_status == RatificationStatus::Ratified;
             let is_in_expected = normalized_expected.contains(&norm_file);
 
             if !is_contract_ratified || !is_in_expected {
@@ -831,9 +889,11 @@ pub fn validate_contract_diff_with_constitution_and_base(
             let matches_rule = if let Some(ref f) = rule.forbidden {
                 matches_boundary(&norm_file, f)
             } else if let Some(ref t) = rule.target_files {
-                rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, t)
+                rule.severity == crate::model::RuleSeverity::Error
+                    && matches_boundary(&norm_file, t)
             } else if let Some(ref s) = rule.source {
-                rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, s)
+                rule.severity == crate::model::RuleSeverity::Error
+                    && matches_boundary(&norm_file, s)
             } else {
                 false
             };
@@ -887,11 +947,11 @@ pub fn validate_contract_diff_with_constitution_and_base(
 
         // 4. Check if belongs to expected module (EXPECTED_EXPANSION)
         let file_module = extract_module(&norm_file);
-        let is_module_expected = contract
-            .boundary
-            .expected_modules
-            .iter()
-            .any(|m| m.eq_ignore_ascii_case(&file_module) || norm_file.starts_with(&format!("{m}/")) || norm_file.contains(&format!("/{m}/")));
+        let is_module_expected = contract.boundary.expected_modules.iter().any(|m| {
+            m.eq_ignore_ascii_case(&file_module)
+                || norm_file.starts_with(&format!("{m}/"))
+                || norm_file.contains(&format!("/{m}/"))
+        });
 
         if is_module_expected {
             expansion_count += 1;
@@ -918,7 +978,10 @@ pub fn validate_contract_diff_with_constitution_and_base(
 
     for exp in &contract.boundary.expected_files {
         let norm_exp = normalize_rel_path(exp);
-        if !changed_files.iter().any(|c| normalize_rel_path(c) == norm_exp) {
+        if !changed_files
+            .iter()
+            .any(|c| normalize_rel_path(c) == norm_exp)
+        {
             let is_req = contract
                 .boundary
                 .targets
@@ -937,7 +1000,9 @@ pub fn validate_contract_diff_with_constitution_and_base(
 
     for test in &contract.boundary.expected_tests {
         let norm_test = normalize_rel_path(test);
-        if !changed_files.iter().any(|c| normalize_rel_path(c) == norm_test)
+        if !changed_files
+            .iter()
+            .any(|c| normalize_rel_path(c) == norm_test)
             && !missing_changes.iter().any(|m| m.path == *test)
         {
             missing_changes.push(MissingChange {
@@ -1011,7 +1076,12 @@ pub fn inspect_changed_files(
         "WORKING_TREE".to_string()
     };
 
-    match crate::git::extract_changed_paths(root, base_opt, options.staged, options.base_commit.as_deref())? {
+    match crate::git::extract_changed_paths(
+        root,
+        base_opt,
+        options.staged,
+        options.base_commit.as_deref(),
+    )? {
         Ok((files, snapshot)) => Ok((files, snapshot, None)),
         Err(err) => {
             if err == crate::git::SHALLOW_HISTORY_TRUNCATED
@@ -1020,9 +1090,17 @@ pub fn inspect_changed_files(
                 || err.contains("bad revision")
                 || err.contains("fatal:")
             {
-                Ok((Vec::new(), snapshot_name, Some(CheckExitCode::BaselineUnavailable)))
+                Ok((
+                    Vec::new(),
+                    snapshot_name,
+                    Some(CheckExitCode::BaselineUnavailable),
+                ))
             } else {
-                Ok((Vec::new(), snapshot_name, Some(CheckExitCode::InternalError)))
+                Ok((
+                    Vec::new(),
+                    snapshot_name,
+                    Some(CheckExitCode::InternalError),
+                ))
             }
         }
     }
@@ -1040,17 +1118,37 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
     // 1. Locate active, requested, or file-specified Change Contract
     let contract_opt = if let Some(ref file_path) = options.file {
         let p = Path::new(file_path);
-        let abs = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+        let abs = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            root.join(p)
+        };
         if !abs.exists() {
-            return make_error_result("file", CheckExitCode::ContractNotFound, format!("Specified contract file '{}' not found.", abs.display()));
+            return make_error_result(
+                "file",
+                CheckExitCode::ContractNotFound,
+                format!("Specified contract file '{}' not found.", abs.display()),
+            );
         }
         let data = match fs::read_to_string(&abs) {
             Ok(d) => d,
-            Err(e) => return make_error_result("file", CheckExitCode::ContractInvalid, format!("Failed to read contract file: {e}")),
+            Err(e) => {
+                return make_error_result(
+                    "file",
+                    CheckExitCode::ContractInvalid,
+                    format!("Failed to read contract file: {e}"),
+                );
+            }
         };
         match serde_json::from_str::<ChangeContract>(&data) {
             Ok(c) => Some(c),
-            Err(e) => return make_error_result("file", CheckExitCode::ContractInvalid, format!("Corrupt contract schema in file: {e}")),
+            Err(e) => {
+                return make_error_result(
+                    "file",
+                    CheckExitCode::ContractInvalid,
+                    format!("Corrupt contract schema in file: {e}"),
+                );
+            }
         }
     } else if let Some(ref id) = options.contract_id {
         match get_contract(&root, id) {
@@ -1058,9 +1156,17 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
             Err(e) => {
                 let err_msg = format!("{e}");
                 if err_msg.contains("not found") {
-                    return make_error_result(id, CheckExitCode::ContractNotFound, format!("Change Contract '{id}' not found."));
+                    return make_error_result(
+                        id,
+                        CheckExitCode::ContractNotFound,
+                        format!("Change Contract '{id}' not found."),
+                    );
                 }
-                return make_error_result(id, CheckExitCode::ContractInvalid, format!("Corrupt contract schema: {e}"));
+                return make_error_result(
+                    id,
+                    CheckExitCode::ContractInvalid,
+                    format!("Corrupt contract schema: {e}"),
+                );
             }
         }
     } else {
@@ -1070,11 +1176,19 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 if options.allow_no_contract {
                     None
                 } else {
-                    return make_error_result("none", CheckExitCode::ContractNotFound, "No active Change Contract found in repository.".to_string());
+                    return make_error_result(
+                        "none",
+                        CheckExitCode::ContractNotFound,
+                        "No active Change Contract found in repository.".to_string(),
+                    );
                 }
             }
             Err(e) => {
-                return make_error_result("active", CheckExitCode::ContractInvalid, format!("Failed reading active contract: {e}"));
+                return make_error_result(
+                    "active",
+                    CheckExitCode::ContractInvalid,
+                    format!("Failed reading active contract: {e}"),
+                );
             }
         }
     };
@@ -1085,20 +1199,29 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
             // CONSTITUTION-ONLY GUARD: When no contract is provided and require_contract is false,
             // enforce all Project Constitution rules against git changed files!
             let baseline_ref = options.base_commit.as_deref().unwrap_or("HEAD");
-            let (changed_files, snapshot_name, maybe_err) = match inspect_changed_files(&root, baseline_ref, options) {
-                Ok(r) => r,
-                Err(e) => {
-                    return make_error_result("none", CheckExitCode::InternalError, format!("Git inspection failed: {e}"));
-                }
-            };
+            let (changed_files, snapshot_name, maybe_err) =
+                match inspect_changed_files(&root, baseline_ref, options) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return make_error_result(
+                            "none",
+                            CheckExitCode::InternalError,
+                            format!("Git inspection failed: {e}"),
+                        );
+                    }
+                };
 
             if let Some(err_code) = maybe_err {
                 let msg = match err_code {
                     CheckExitCode::BaselineUnavailable => {
                         if crate::git::is_shallow_repository(&root) {
-                            format!("SHALLOW_HISTORY_TRUNCATED: Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow repository).")
+                            format!(
+                                "SHALLOW_HISTORY_TRUNCATED: Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow repository)."
+                            )
                         } else {
-                            format!("Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow clone or missing commit).")
+                            format!(
+                                "Baseline commit '{baseline_ref}' is unavailable in current Git history (shallow clone or missing commit)."
+                            )
                         }
                     }
                     _ => "Internal Git execution error.".to_string(),
@@ -1139,7 +1262,8 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 }
 
                 // In allow_no_contract mode, any modification or deletion to policy files in PR mode without a contract is forbidden
-                if crate::constitution::is_policy_file(&norm_file) && options.base_commit.is_some() {
+                if crate::constitution::is_policy_file(&norm_file) && options.base_commit.is_some()
+                {
                     violation_count += 1;
                     classifications.push(FileClassification {
                         path: file.clone(),
@@ -1157,9 +1281,11 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                     let matches_rule = if let Some(ref f) = rule.forbidden {
                         matches_boundary(&norm_file, f)
                     } else if let Some(ref t) = rule.target_files {
-                        rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, t)
+                        rule.severity == crate::model::RuleSeverity::Error
+                            && matches_boundary(&norm_file, t)
                     } else if let Some(ref s) = rule.source {
-                        rule.severity == crate::model::RuleSeverity::Error && matches_boundary(&norm_file, s)
+                        rule.severity == crate::model::RuleSeverity::Error
+                            && matches_boundary(&norm_file, s)
                     } else {
                         false
                     };
@@ -1184,12 +1310,16 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                     classifications.push(FileClassification {
                         path: file.clone(),
                         category: FileValidationCategory::Expected,
-                        reason: "Conforms to Project Constitution (No Change Contract specified)".to_string(),
+                        reason: "Conforms to Project Constitution (No Change Contract specified)"
+                            .to_string(),
                     });
                 }
             }
 
-            if classifications.iter().any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION")) {
+            if classifications
+                .iter()
+                .any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION"))
+            {
                 failure_reasons.push(
                     "CONSTITUTION_MODIFIED_IN_PR: Sovereign policy files were modified or deleted in PR diff without a ratified Change Contract.".to_string(),
                 );
@@ -1197,7 +1327,10 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
 
             let boundary_violation_count = classifications
                 .iter()
-                .filter(|c| c.category == FileValidationCategory::BoundaryViolation && !c.reason.contains("UNRATIFIED_POLICY_MUTATION"))
+                .filter(|c| {
+                    c.category == FileValidationCategory::BoundaryViolation
+                        && !c.reason.contains("UNRATIFIED_POLICY_MUTATION")
+                })
                 .count();
 
             if boundary_violation_count > 0 {
@@ -1231,7 +1364,11 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 task_goal: "Constitution Boundary Verification".to_string(),
                 baseline_commit: baseline_ref.to_string(),
                 target_snapshot: snapshot_name,
-                status: if is_passed { "PASSED".to_string() } else { "FAILED".to_string() },
+                status: if is_passed {
+                    "PASSED".to_string()
+                } else {
+                    "FAILED".to_string()
+                },
                 exit_code,
                 policy: "CONSTITUTION_ONLY".to_string(),
                 provenance: ContractProvenance::default(),
@@ -1240,7 +1377,8 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
                 missing_changes: Vec::new(),
                 failure_reasons,
                 advisory_warnings: vec![
-                    "No active Change Contract specified. Running in Constitution Guard mode.".to_string()
+                    "No active Change Contract specified. Running in Constitution Guard mode."
+                        .to_string(),
                 ],
             };
 
@@ -1262,12 +1400,17 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
     };
 
     // 2. Inspect changed files based on snapshot policy
-    let (changed_files, snapshot_name, maybe_err) = match inspect_changed_files(&root, &contract.baseline_revision, options) {
-        Ok(r) => r,
-        Err(e) => {
-            return make_error_result(&contract.contract_id, CheckExitCode::InternalError, format!("Git inspection failed: {e}"));
-        }
-    };
+    let (changed_files, snapshot_name, maybe_err) =
+        match inspect_changed_files(&root, &contract.baseline_revision, options) {
+            Ok(r) => r,
+            Err(e) => {
+                return make_error_result(
+                    &contract.contract_id,
+                    CheckExitCode::InternalError,
+                    format!("Git inspection failed: {e}"),
+                );
+            }
+        };
 
     if let Some(err_code) = maybe_err {
         let msg = match err_code {
@@ -1291,7 +1434,12 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
 
     // 3. Classify changes with Constitution precedence
     let (classifications, missing_changes, summary_counts) =
-        validate_contract_diff_with_constitution_and_base(&root, &contract, &changed_files, options.base_commit.as_deref());
+        validate_contract_diff_with_constitution_and_base(
+            &root,
+            &contract,
+            &changed_files,
+            options.base_commit.as_deref(),
+        );
 
     let mut failure_reasons = Vec::new();
     let mut advisory_warnings = Vec::new();
@@ -1304,7 +1452,10 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         ));
     }
 
-    if classifications.iter().any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION")) {
+    if classifications
+        .iter()
+        .any(|c| c.reason.contains("UNRATIFIED_POLICY_MUTATION"))
+    {
         failure_reasons.push(
             "CONSTITUTION_MODIFIED_IN_PR: Sovereign policy files were modified or deleted in PR diff without explicit human ratification.".to_string(),
         );
@@ -1381,9 +1532,17 @@ pub fn check_contract(root: &Path, options: &CheckOptions) -> CheckResult {
         task_goal: contract.task_goal,
         baseline_commit: contract.baseline_revision,
         target_snapshot: snapshot_name,
-        status: if is_passed { "PASSED".to_string() } else { "FAILED".to_string() },
+        status: if is_passed {
+            "PASSED".to_string()
+        } else {
+            "FAILED".to_string()
+        },
         exit_code,
-        policy: if options.strict { "STRICT".to_string() } else { "STANDARD".to_string() },
+        policy: if options.strict {
+            "STRICT".to_string()
+        } else {
+            "STANDARD".to_string()
+        },
         provenance: contract.provenance,
         summary: summary.clone(),
         changes: classifications,
@@ -1448,16 +1607,25 @@ pub fn format_check_report(result: &CheckResult, is_github_ci: bool) -> String {
                     out.push_str(&format!("  ✓ {}\n      EXPECTED ({})\n", c.path, c.reason));
                 }
                 FileValidationCategory::ExpectedExpansion => {
-                    out.push_str(&format!("  ✓ {}\n      EXPECTED_EXPANSION ({})\n", c.path, c.reason));
+                    out.push_str(&format!(
+                        "  ✓ {}\n      EXPECTED_EXPANSION ({})\n",
+                        c.path, c.reason
+                    ));
                 }
                 FileValidationCategory::Unexpected => {
-                    out.push_str(&format!("  ⚠ {}\n      UNEXPECTED ({})\n", c.path, c.reason));
+                    out.push_str(&format!(
+                        "  ⚠ {}\n      UNEXPECTED ({})\n",
+                        c.path, c.reason
+                    ));
                     if is_github_ci {
                         out.push_str(&format!("::warning file={}::{}\n", c.path, c.reason));
                     }
                 }
                 FileValidationCategory::BoundaryViolation => {
-                    out.push_str(&format!("  ✗ {}\n      BOUNDARY_VIOLATION: {}\n", c.path, c.reason));
+                    out.push_str(&format!(
+                        "  ✗ {}\n      BOUNDARY_VIOLATION: {}\n",
+                        c.path, c.reason
+                    ));
                     if is_github_ci {
                         out.push_str(&format!("::error file={}::{}\n", c.path, c.reason));
                     }
@@ -1471,7 +1639,11 @@ pub fn format_check_report(result: &CheckResult, is_github_ci: bool) -> String {
     if !result.missing_changes.is_empty() {
         out.push_str("\nMissing Expected Targets:\n");
         for m in &result.missing_changes {
-            let label = if m.required { "[REQUIRED]" } else { "[OPTIONAL]" };
+            let label = if m.required {
+                "[REQUIRED]"
+            } else {
+                "[OPTIONAL]"
+            };
             out.push_str(&format!("  - {} {}\n", m.path, label));
         }
     }
@@ -1506,7 +1678,10 @@ pub fn format_check_report(result: &CheckResult, is_github_ci: bool) -> String {
     if result.status == "PASSED" {
         out.push_str("Result: CONTRACT CHECK PASSED ✓\n");
     } else {
-        out.push_str(&format!("Result: CONTRACT CHECK FAILED (Exit Code: {})\n", result.exit_code));
+        out.push_str(&format!(
+            "Result: CONTRACT CHECK FAILED (Exit Code: {})\n",
+            result.exit_code
+        ));
     }
 
     out
@@ -1521,15 +1696,33 @@ pub fn format_check_markdown_summary(result: &CheckResult) -> String {
         "### 🛡️ Engram Change Guard: BLOCKED ❌"
     };
     out.push_str(&format!("{badge}\n\n"));
-    out.push_str(&format!("**Contract ID:** `{}` | **Policy:** `{}` | **Status:** `{}`\n\n", result.contract_id, result.policy, result.status));
+    out.push_str(&format!(
+        "**Contract ID:** `{}` | **Policy:** `{}` | **Status:** `{}`\n\n",
+        result.contract_id, result.policy, result.status
+    ));
     out.push_str(&format!("**Task Goal:** {}\n\n", result.task_goal));
 
     out.push_str("| Metric | Count |\n|---|---|\n");
-    out.push_str(&format!("| Total Inspected Files | {} |\n", result.summary.total_changed));
-    out.push_str(&format!("| Expected Changes | {} |\n", result.summary.expected));
-    out.push_str(&format!("| Expected Expansions | {} |\n", result.summary.expected_expansion));
-    out.push_str(&format!("| Unexpected Modifications | {} |\n", result.summary.unexpected));
-    out.push_str(&format!("| Boundary Violations | {} |\n\n", result.summary.boundary_violations));
+    out.push_str(&format!(
+        "| Total Inspected Files | {} |\n",
+        result.summary.total_changed
+    ));
+    out.push_str(&format!(
+        "| Expected Changes | {} |\n",
+        result.summary.expected
+    ));
+    out.push_str(&format!(
+        "| Expected Expansions | {} |\n",
+        result.summary.expected_expansion
+    ));
+    out.push_str(&format!(
+        "| Unexpected Modifications | {} |\n",
+        result.summary.unexpected
+    ));
+    out.push_str(&format!(
+        "| Boundary Violations | {} |\n\n",
+        result.summary.boundary_violations
+    ));
 
     if !result.failure_reasons.is_empty() {
         out.push_str("#### ❌ Violations & Failures\n\n");
@@ -1598,7 +1791,10 @@ pub fn install_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))?;
         }
-        return Ok(format!("Installed Engram pre-commit hook successfully at {}", hook_path.display()));
+        return Ok(format!(
+            "Installed Engram pre-commit hook successfully at {}",
+            hook_path.display()
+        ));
     }
 
     let existing = fs::read_to_string(&hook_path)?;
@@ -1609,7 +1805,10 @@ pub fn install_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
                 hook_path.display()
             ));
         }
-        return Ok(format!("Engram Change Guard hook is already installed in {}", hook_path.display()));
+        return Ok(format!(
+            "Engram Change Guard hook is already installed in {}",
+            hook_path.display()
+        ));
     }
 
     // Existing foreign hook (e.g. Husky, Lefthook)
@@ -1638,7 +1837,10 @@ pub fn install_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
 pub fn uninstall_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
     let hook_path = root.join(".git").join("hooks").join("pre-commit");
     if !hook_path.exists() {
-        return Ok(format!("No pre-commit hook exists at {}", hook_path.display()));
+        return Ok(format!(
+            "No pre-commit hook exists at {}",
+            hook_path.display()
+        ));
     }
 
     let content = fs::read_to_string(&hook_path)?;
@@ -1670,7 +1872,10 @@ pub fn uninstall_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
 
     if dry_run {
         if remaining.is_empty() || remaining == "#!/bin/sh" {
-            return Ok(format!("Dry-run: Engram would remove {}", hook_path.display()));
+            return Ok(format!(
+                "Dry-run: Engram would remove {}",
+                hook_path.display()
+            ));
         } else {
             return Ok(format!(
                 "Dry-run: Engram would remove Change Guard block from {} and preserve remaining lines.",
@@ -1681,7 +1886,10 @@ pub fn uninstall_pre_commit_hook(root: &Path, dry_run: bool) -> Result<String> {
 
     if remaining.is_empty() || remaining == "#!/bin/sh" {
         fs::remove_file(&hook_path)?;
-        Ok(format!("Removed Engram pre-commit hook from {}", hook_path.display()))
+        Ok(format!(
+            "Removed Engram pre-commit hook from {}",
+            hook_path.display()
+        ))
     } else {
         fs::write(&hook_path, format!("{}\n", remaining))?;
         Ok(format!(
@@ -1710,7 +1918,12 @@ pub fn reconcile_contract(
         if !contract.boundary.expected_files.contains(&norm) {
             contract.boundary.expected_files.push(norm.clone());
         }
-        if !contract.boundary.targets.iter().any(|t| normalize_rel_path(&t.path) == norm) {
+        if !contract
+            .boundary
+            .targets
+            .iter()
+            .any(|t| normalize_rel_path(&t.path) == norm)
+        {
             contract.boundary.targets.push(ExpectedTarget {
                 path: norm.clone(),
                 required: true,

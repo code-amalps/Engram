@@ -12,7 +12,7 @@ use std::process::Command;
 
 use crate::contract::{extract_module, list_all_contracts};
 use crate::memory::{
-    load_durable_memories, save_durable_memories, DurableMemory, MemoryLifecycleState,
+    DurableMemory, MemoryLifecycleState, load_durable_memories, save_durable_memories,
 };
 use crate::storage::{db, root_path};
 use crate::telemetry::load_events;
@@ -118,6 +118,47 @@ pub struct DeterministicDriftEvidence {
     pub details: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DriftCategory {
+    DecisionDrift,
+    BoundaryErosion,
+    ConstitutionalDrift,
+    StaleDecision,
+    ContractDrift,
+    IncompleteEvidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DriftSeverity {
+    Info,
+    Warn,
+    Block,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DriftConfidence {
+    Confirmed,
+    Potential,
+    IncompleteEvidence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DriftFinding {
+    pub id: String,
+    pub category: DriftCategory,
+    pub severity: DriftSeverity,
+    pub confidence: DriftConfidence,
+    pub reference_id: String,
+    #[serde(default)]
+    pub affected_paths: Vec<String>,
+    #[serde(default)]
+    pub affected_symbols: Vec<String>,
+    pub expected_state: String,
+    pub observed_state: String,
+    pub explanation: String,
+    pub suggested_action: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriftOptions {
     #[serde(default)]
@@ -156,6 +197,8 @@ pub struct DriftReport {
     pub stale_decisions: Vec<StaleDecisionEvidence>,
     pub repeated_contract_failures: Vec<ModuleContractFailureEvidence>,
     pub deterministic_evidence: Vec<DeterministicDriftEvidence>,
+    #[serde(default)]
+    pub findings: Vec<DriftFinding>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -209,10 +252,7 @@ pub fn extract_commits(
         args.push(format!("-n{n}"));
     }
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(root)
-        .output();
+    let output = Command::new("git").args(&args).current_dir(root).output();
 
     let output = match output {
         Ok(out) => {
@@ -275,16 +315,13 @@ pub fn extract_commits(
 }
 
 /// Match whether a changed file touches the governed surface of a durable memory.
-pub fn matches_governed_surface(
-    root: &Path,
-    memory: &DurableMemory,
-    changed_file: &str,
-) -> bool {
+pub fn matches_governed_surface(root: &Path, memory: &DurableMemory, changed_file: &str) -> bool {
     let norm_path = changed_file.replace('\\', "/").to_ascii_lowercase();
 
     // Global scope governs all codebase changes (and Repository scope when target is None)
     if memory.scope.level == crate::memory::ScopeLevel::Global
-        || (memory.scope.level == crate::memory::ScopeLevel::Repository && memory.scope.target.is_none())
+        || (memory.scope.level == crate::memory::ScopeLevel::Repository
+            && memory.scope.target.is_none())
     {
         return !crate::git_history::is_noise_file(changed_file);
     }
@@ -336,7 +373,16 @@ pub fn matches_governed_surface(
 
         if matches!(
             ext.as_str(),
-            "md" | "markdown" | "txt" | "rst" | "svg" | "png" | "jpg" | "toml" | "yaml" | "yml" | "json"
+            "md" | "markdown"
+                | "txt"
+                | "rst"
+                | "svg"
+                | "png"
+                | "jpg"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "json"
         ) {
             return false;
         }
@@ -503,7 +549,16 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
     let global_commits_analyzed = commits.len();
 
     // 1. Scoped Decision Drift & Staleness Analysis
-    let mut doc = load_durable_memories(&root)?;
+    let (mut doc, mem_load_err) = match load_durable_memories(&root) {
+        Ok(d) => (d, None),
+        Err(e) => {
+            warnings.push(format!("Memory database unavailable or corrupt: {e}"));
+            (
+                crate::memory::DurableMemoryDocument::default(),
+                Some(e.to_string()),
+            )
+        }
+    };
     let mut doc_modified = false;
 
     let mut decision_drift = Vec::new();
@@ -525,8 +580,16 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
         if let Some(ref m_filter) = options.module {
             let m_lower = m_filter.to_ascii_lowercase();
             let matches_mod = mem.scope.level == crate::memory::ScopeLevel::Global
-                || mem.scope.modules.iter().any(|m| m.to_ascii_lowercase() == m_lower)
-                || mem.scope.target.as_ref().is_some_and(|t| t.to_ascii_lowercase() == m_lower);
+                || mem
+                    .scope
+                    .modules
+                    .iter()
+                    .any(|m| m.to_ascii_lowercase() == m_lower)
+                || mem
+                    .scope
+                    .target
+                    .as_ref()
+                    .is_some_and(|t| t.to_ascii_lowercase() == m_lower);
             if !matches_mod {
                 continue;
             }
@@ -540,7 +603,9 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
             } else if sha.eq_ignore_ascii_case("WORKTREE") {
                 Some("WORKTREE".to_string())
             } else if sha.len() < 40 {
-                crate::git::resolve_baseline(&root, sha).ok().and_then(|r| r.ok())
+                crate::git::resolve_baseline(&root, sha)
+                    .ok()
+                    .and_then(|r| r.ok())
             } else {
                 Some(sha.to_string())
             }
@@ -552,7 +617,10 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
         let commits_since_ratification: &[GitCommitRecord] = if let Some(sha) = target_sha {
             if sha.eq_ignore_ascii_case("WORKTREE") {
                 &[]
-            } else if let Some(pos) = commits.iter().position(|c| c.hash.starts_with(sha) || sha.starts_with(&c.hash)) {
+            } else if let Some(pos) = commits
+                .iter()
+                .position(|c| c.hash.starts_with(sha) || sha.starts_with(&c.hash))
+            {
                 // commits are chronological; take everything after pos
                 &commits[pos + 1..]
             } else {
@@ -913,14 +981,248 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
         });
     }
 
+    // Construct structured findings
+    let mut findings = Vec::new();
+
+    if let Some(ref err_msg) = mem_load_err {
+        findings.push(DriftFinding {
+            id: "DRIFT-ANALYSIS-MEMORY-UNAVAILABLE".to_string(),
+            category: DriftCategory::IncompleteEvidence,
+            severity: DriftSeverity::Info,
+            confidence: DriftConfidence::IncompleteEvidence,
+            reference_id: "MEMORY_STORE".to_string(),
+            affected_paths: Vec::new(),
+            affected_symbols: Vec::new(),
+            expected_state: "Durable memory store readable and well-formed".to_string(),
+            observed_state: format!("Failed reading memory store: {err_msg}"),
+            explanation: "Could not evaluate decision drift due to unavailable or corrupt memory store.".to_string(),
+            suggested_action: "Inspect .engram/memory.json or reinitialize with 'engram init'".to_string(),
+        });
+    }
+
+    if is_shallow {
+        findings.push(DriftFinding {
+            id: "DRIFT-INCOMPLETE-SHALLOW-HISTORY".to_string(),
+            category: DriftCategory::IncompleteEvidence,
+            severity: DriftSeverity::Info,
+            confidence: DriftConfidence::IncompleteEvidence,
+            reference_id: "GIT_HISTORY".to_string(),
+            affected_paths: Vec::new(),
+            affected_symbols: Vec::new(),
+            expected_state: "Complete Git commit history available for audit".to_string(),
+            observed_state: "Shallow Git clone detected (commit history truncated)".to_string(),
+            explanation: "Shallow Git history limits mutation distance calculation.".to_string(),
+            suggested_action: "Run 'git fetch --unshallow' to enable complete historical drift analysis".to_string(),
+        });
+    }
+
+    if db(&root).is_err() {
+        findings.push(DriftFinding {
+            id: "DRIFT-INCOMPLETE-INDEX".to_string(),
+            category: DriftCategory::IncompleteEvidence,
+            severity: DriftSeverity::Info,
+            confidence: DriftConfidence::IncompleteEvidence,
+            reference_id: "SQLITE_INDEX".to_string(),
+            affected_paths: Vec::new(),
+            affected_symbols: Vec::new(),
+            expected_state: "SQLite symbol index and entity relationship graph initialized".to_string(),
+            observed_state: "SQLite index is unavailable or uninitialized".to_string(),
+            explanation: "AST entity relationships could not be queried; relying on commit diff analysis.".to_string(),
+            suggested_action: "Run 'engram analyze' to build code intelligence database".to_string(),
+        });
+    }
+
+    // Check Project Constitution rules for boundary violations
+    if let Ok(constitution_rules) = crate::constitution::load_constitution(&root) {
+        for rule in &constitution_rules {
+            if let Some(ref forbidden) = rule.forbidden {
+                let mut violated_files = HashSet::new();
+                for commit in &commits {
+                    for file in &commit.changed_files {
+                        if matches_boundary_or_module(file, forbidden) {
+                            violated_files.insert(file.clone());
+                        }
+                    }
+                }
+                if !violated_files.is_empty() {
+                    let mut sorted_files: Vec<String> = violated_files.into_iter().collect();
+                    sorted_files.sort();
+                    findings.push(DriftFinding {
+                        id: format!("DRIFT-CONST-{}", rule.id),
+                        category: DriftCategory::ConstitutionalDrift,
+                        severity: DriftSeverity::Block,
+                        confidence: DriftConfidence::Confirmed,
+                        reference_id: rule.id.clone(),
+                        affected_paths: sorted_files.clone(),
+                        affected_symbols: Vec::new(),
+                        expected_state: format!(
+                            "Constitution rule '{}' strictly forbids modifications in '{}'",
+                            rule.name, forbidden
+                        ),
+                        observed_state: format!(
+                            "Code modified in forbidden boundary: {}",
+                            sorted_files.join(", ")
+                        ),
+                        explanation: format!(
+                            "Constitution rule '{}' ({}) was breached across analyzed commits.",
+                            rule.name, rule.id
+                        ),
+                        suggested_action:
+                            "Revert forbidden modifications or request human constitutional amendment"
+                                .to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Check for Provisional decisions
+    for mem in &doc.memories {
+        if mem.lifecycle_state == MemoryLifecycleState::Provisional {
+            if options.decision.as_ref().is_some_and(|d| &mem.id != d) {
+                continue;
+            }
+            if let Some(ref m_filter) = options.module {
+                let m_lower = m_filter.to_ascii_lowercase();
+                let matches_mod = mem.scope.level == crate::memory::ScopeLevel::Global
+                    || mem
+                        .scope
+                        .modules
+                        .iter()
+                        .any(|m| m.to_ascii_lowercase() == m_lower)
+                    || mem
+                        .scope
+                        .target
+                        .as_ref()
+                        .is_some_and(|t| t.to_ascii_lowercase() == m_lower);
+                if !matches_mod {
+                    continue;
+                }
+            }
+            let mut paths = mem.scope.files.clone();
+            paths.sort();
+            let mut symbols = mem.scope.symbols.clone();
+            symbols.sort();
+            findings.push(DriftFinding {
+                id: format!("DRIFT-DEC-PROVISIONAL-{}", mem.id),
+                category: DriftCategory::DecisionDrift,
+                severity: DriftSeverity::Info,
+                confidence: DriftConfidence::Potential,
+                reference_id: mem.id.clone(),
+                affected_paths: paths,
+                affected_symbols: symbols,
+                expected_state: "Architectural decision is ratified by human authority".to_string(),
+                observed_state: "Decision is PROVISIONAL (proposed automatically or by agent without human ratification)".to_string(),
+                explanation: format!(
+                    "Provisional decision '{}' (\"{}\") is unratified and pending human review.",
+                    mem.id, mem.title
+                ),
+                suggested_action: format!(
+                    "Run 'engram memory ratify {} --by <name> --reason <reason>' to ratify, or 'engram memory reject {}' to reject.",
+                    mem.id, mem.id
+                ),
+            });
+        }
+    }
+
+    // Stale Decisions
+    for sd in &stale_decisions {
+        let (paths, symbols) =
+            if let Some(mem) = doc.memories.iter().find(|m| m.id == sd.decision_id) {
+                let mut p = mem.scope.files.clone();
+                p.sort();
+                let mut s = mem.scope.symbols.clone();
+                s.sort();
+                (p, s)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
+        findings.push(DriftFinding {
+            id: format!("DRIFT-DEC-STALE-{}", sd.decision_id),
+            category: DriftCategory::StaleDecision,
+            severity: DriftSeverity::Warn,
+            confidence: DriftConfidence::Confirmed,
+            reference_id: sd.decision_id.clone(),
+            affected_paths: paths,
+            affected_symbols: symbols,
+            expected_state: format!(
+                "Decision '{}' expected re-ratification before reaching {} mutations",
+                sd.decision_id, sd.threshold
+            ),
+            observed_state: format!(
+                "Governed surface mutated {} times without re-ratification",
+                sd.governed_mutations
+            ),
+            explanation: format!(
+                "Decision '{}' (\"{}\") entered STALE_REVIEW after {} governed mutations.",
+                sd.decision_id, sd.title, sd.governed_mutations
+            ),
+            suggested_action: sd.recommended_action.clone(),
+        });
+    }
+
+    // Boundary Erosion
+    for bv in &boundary_violations {
+        let clean_target = bv
+            .target_boundary
+            .replace(['/', '*', '.', ' '], "-")
+            .trim_matches('-')
+            .to_string();
+        findings.push(DriftFinding {
+            id: format!("DRIFT-BOUNDARY-EROSION-{}-{}", bv.source_module, clean_target),
+            category: DriftCategory::BoundaryErosion,
+            severity: DriftSeverity::Warn,
+            confidence: DriftConfidence::Confirmed,
+            reference_id: format!("{}->{}", bv.source_module, bv.target_boundary),
+            affected_paths: bv.files.clone(),
+            affected_symbols: Vec::new(),
+            expected_state: format!(
+                "Module '{}' must not breach forbidden boundary '{}'",
+                bv.source_module, bv.target_boundary
+            ),
+            observed_state: format!(
+                "Observed {} cross-boundary violation(s) (trend: {})",
+                bv.violation_count, bv.trend
+            ),
+            explanation: bv.details.clone(),
+            suggested_action:
+                "Review cross-boundary coupling or formally ratify an expanded boundary contract"
+                    .to_string(),
+        });
+    }
+
+    findings.sort_by(|a, b| a.id.cmp(&b.id));
+
     // Determine final status
     if status != crate::git::SHALLOW_HISTORY_TRUNCATED {
-        if !stale_decisions.is_empty() || !boundary_violations.is_empty() || !repeated_contract_failures.is_empty() {
+        let has_confirmed_drift = findings.iter().any(|f| {
+            (f.severity == DriftSeverity::Warn || f.severity == DriftSeverity::Block)
+                && f.confidence == DriftConfidence::Confirmed
+        });
+        if has_confirmed_drift
+            || !stale_decisions.is_empty()
+            || !boundary_violations.is_empty()
+            || !repeated_contract_failures.is_empty()
+        {
             status = "DRIFT_DETECTED".to_string();
         } else {
             status = "OK".to_string();
         }
     }
+
+    let _ = crate::telemetry::record_event(
+        &root,
+        "DRIFT_EVALUATION",
+        None,
+        "drift_analyzer",
+        serde_json::json!({
+            "status": &status,
+            "findings_count": findings.len(),
+            "stale_decisions_count": stale_decisions.len(),
+            "boundary_violations_count": boundary_violations.len(),
+        }),
+    );
 
     Ok(DriftReport {
         protocol_version: PROTOCOL_VERSION.to_string(),
@@ -932,6 +1234,7 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
         stale_decisions,
         repeated_contract_failures,
         deterministic_evidence,
+        findings,
         warnings,
     })
 }
@@ -941,10 +1244,19 @@ pub fn format_drift_report(report: &DriftReport) -> String {
     let mut out = String::new();
     out.push_str("🌊 Engram Architectural Drift & Boundary Analysis\n");
     out.push_str("──────────────────────────────────────────\n");
-    out.push_str(&format!("  Protocol:          {}\n", report.protocol_version));
+    out.push_str(&format!(
+        "  Protocol:          {}\n",
+        report.protocol_version
+    ));
     out.push_str(&format!("  Status:            {}\n", report.status));
-    out.push_str(&format!("  Repository:        {}\n", report.repository_status));
-    out.push_str(&format!("  Commits Analyzed:  {}\n", report.global_commits_analyzed));
+    out.push_str(&format!(
+        "  Repository:        {}\n",
+        report.repository_status
+    ));
+    out.push_str(&format!(
+        "  Commits Analyzed:  {}\n",
+        report.global_commits_analyzed
+    ));
     out.push_str("──────────────────────────────────────────\n");
 
     if !report.warnings.is_empty() {
@@ -964,7 +1276,35 @@ pub fn format_drift_report(report: &DriftReport) -> String {
                 s.governed_mutations, s.threshold
             ));
             out.push_str(&format!("      Trend:            {}\n", s.trend));
-            out.push_str(&format!("      Action:           {}\n", s.recommended_action));
+            out.push_str(&format!(
+                "      Action:           {}\n",
+                s.recommended_action
+            ));
+        }
+    }
+
+    if !report.findings.is_empty() {
+        out.push_str("\nStructured Architectural Findings:\n");
+        for f in &report.findings {
+            let icon = match f.severity {
+                DriftSeverity::Block => "❌ BLOCK",
+                DriftSeverity::Warn => "⚠️  WARN ",
+                DriftSeverity::Info => "ℹ️  INFO ",
+            };
+            out.push_str(&format!(
+                "  {} [{}] ({:?}) {}\n",
+                icon, f.id, f.confidence, f.explanation
+            ));
+            if !f.affected_paths.is_empty() {
+                out.push_str(&format!("      Paths:    {}\n", f.affected_paths.join(", ")));
+            }
+            if !f.affected_symbols.is_empty() {
+                out.push_str(&format!(
+                    "      Symbols:  {}\n",
+                    f.affected_symbols.join(", ")
+                ));
+            }
+            out.push_str(&format!("      Action:   {}\n", f.suggested_action));
         }
     }
 
@@ -977,7 +1317,7 @@ pub fn format_drift_report(report: &DriftReport) -> String {
             ));
             out.push_str(&format!("      → {}\n", e.details));
         }
-    } else {
+    } else if report.findings.is_empty() {
         out.push_str("\n  ✓ No architectural drift or boundary erosion detected.\n");
     }
 

@@ -28,11 +28,11 @@ pub enum MemoryLifecycleState {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScopeLevel {
-    Global,       // Applies across entire repository/project
-    Repository,   // Monorepo sub-repository / workspace root
-    Module,       // Specific module or architectural layer (e.g. orders, payment)
-    Package,      // Exact package path (e.g. internal/orders/export)
-    Symbol,       // Exact symbol (e.g. OrderService.ExportCSV)
+    Global,     // Applies across entire repository/project
+    Repository, // Monorepo sub-repository / workspace root
+    Module,     // Specific module or architectural layer (e.g. orders, payment)
+    Package,    // Exact package path (e.g. internal/orders/export)
+    Symbol,     // Exact symbol (e.g. OrderService.ExportCSV)
 }
 
 fn default_scope_level() -> ScopeLevel {
@@ -181,9 +181,11 @@ pub struct DurableMemory {
 
 impl DurableMemory {
     pub fn ratified_commit(&self) -> Option<&str> {
-        self.ratified_at_commit
-            .as_deref()
-            .or_else(|| self.provenance.as_ref().and_then(|p| p.source_commit.as_deref()))
+        self.ratified_at_commit.as_deref().or_else(|| {
+            self.provenance
+                .as_ref()
+                .and_then(|p| p.source_commit.as_deref())
+        })
     }
 }
 
@@ -218,9 +220,9 @@ pub struct MemoryCandidate {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConflictType {
-    DirectContradiction,   // Same scope, contradictory rules without supersedes link
-    ScopeShadowing,        // Specialized scoped exception shadowing broader rule
-    UnresolvedPrecedence,  // Divergent rules without clear ordering
+    DirectContradiction,  // Same scope, contradictory rules without supersedes link
+    ScopeShadowing,       // Specialized scoped exception shadowing broader rule
+    UnresolvedPrecedence, // Divergent rules without clear ordering
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,7 +281,27 @@ pub fn save_durable_memories(root: &Path, doc: &DurableMemoryDocument) -> Result
     }
     let path = memory_yaml_path(root);
     let serialized = serde_yaml::to_string(doc)?;
-    fs::write(&path, serialized)?;
+    let tmp_path = dir.join(format!("memory.yaml.{}.tmp", Uuid::new_v4().simple()));
+    fs::write(&tmp_path, serialized.as_bytes())?;
+
+    if path.exists() {
+        let bak_path = dir.join("memory.yaml.bak");
+        let _ = fs::remove_file(&bak_path);
+        if fs::rename(&path, &bak_path).is_ok() {
+            if let Err(e) = fs::rename(&tmp_path, &path) {
+                let _ = fs::rename(&bak_path, &path);
+                let _ = fs::remove_file(&tmp_path);
+                return Err(anyhow!("Failed to atomic rename temporary memory file: {e}"));
+            }
+            let _ = fs::remove_file(&bak_path);
+        } else {
+            fs::write(&path, serialized.as_bytes())?;
+            let _ = fs::remove_file(&tmp_path);
+        }
+    } else if let Err(_) = fs::rename(&tmp_path, &path) {
+        fs::write(&path, serialized.as_bytes())?;
+        let _ = fs::remove_file(&tmp_path);
+    }
     Ok(())
 }
 
@@ -374,7 +396,16 @@ pub fn record_decision(
         files,
         symbols: Vec::new(),
     };
-    record_scoped_decision(root, None, title, statement, reason, scope, source_ref, accepted_by)
+    record_scoped_decision(
+        root,
+        None,
+        title,
+        statement,
+        reason,
+        scope,
+        source_ref,
+        accepted_by,
+    )
 }
 
 /// Record a provisional architectural decision proposed via MCP or automated agents.
@@ -632,7 +663,9 @@ pub fn promote_candidate(
     let content = fs::read_to_string(&file_path)?;
     let mut candidate: MemoryCandidate = serde_json::from_str(&content)?;
 
-    let reason = reason_override.unwrap_or(&candidate.provisional_reason).to_string();
+    let reason = reason_override
+        .unwrap_or(&candidate.provisional_reason)
+        .to_string();
 
     let mut doc = load_durable_memories(&root)?;
     let durable = DurableMemory {
@@ -662,7 +695,9 @@ pub fn promote_candidate(
         superseded_by: None,
         tags: Vec::new(),
         ratified_at_commit: if crate::git::is_git_repo(&root) {
-            crate::git::current_revision(&root).ok().filter(|s| s != "WORKTREE" && !s.is_empty())
+            crate::git::current_revision(&root)
+                .ok()
+                .filter(|s| s != "WORKTREE" && !s.is_empty())
         } else {
             None
         },
@@ -948,7 +983,9 @@ pub fn query_scoped_memories(
                 if let Some(target) = &mem.scope.target {
                     let target_l = target.to_ascii_lowercase();
                     if task_lower.contains(&target_l)
-                        || files.iter().any(|f| f.to_ascii_lowercase().contains(&target_l))
+                        || files
+                            .iter()
+                            .any(|f| f.to_ascii_lowercase().contains(&target_l))
                     {
                         matches = true;
                     }
@@ -973,7 +1010,9 @@ pub fn query_scoped_memories(
                                 || fl.starts_with(&format!("{m_l}/"))
                                 || fl.contains(&m_l)
                         })
-                        || symbols.iter().any(|s| s.to_ascii_lowercase().contains(&m_l))
+                        || symbols
+                            .iter()
+                            .any(|s| s.to_ascii_lowercase().contains(&m_l))
                     {
                         matches = true;
                         break;
@@ -1002,7 +1041,9 @@ pub fn query_scoped_memories(
             ScopeLevel::Symbol => {
                 for s in &mem.scope.symbols {
                     let sl = s.to_ascii_lowercase();
-                    if symbols.iter().any(|sym| sym.to_ascii_lowercase().contains(&sl))
+                    if symbols
+                        .iter()
+                        .any(|sym| sym.to_ascii_lowercase().contains(&sl))
                         || task_lower.contains(&sl)
                         || files.iter().any(|f| f.to_ascii_lowercase().contains(&sl))
                     {
@@ -1012,7 +1053,9 @@ pub fn query_scoped_memories(
                 }
                 if let Some(t) = &mem.scope.target {
                     let tl = t.to_ascii_lowercase();
-                    if symbols.iter().any(|sym| sym.to_ascii_lowercase().contains(&tl))
+                    if symbols
+                        .iter()
+                        .any(|sym| sym.to_ascii_lowercase().contains(&tl))
                         || task_lower.contains(&tl)
                         || files.iter().any(|f| f.to_ascii_lowercase().contains(&tl))
                     {
@@ -1058,7 +1101,9 @@ pub fn query_scoped_memories(
 
     // Sort order: Symbol > Package > Module > Repository > Global, then most recent first
     candidates.sort_by(|a, b| {
-        b.scope.level.cmp(&a.scope.level)
+        b.scope
+            .level
+            .cmp(&a.scope.level)
             .then_with(|| b.accepted_at.cmp(&a.accepted_at))
     });
 
@@ -1074,6 +1119,312 @@ pub fn query_relevant_memories(
     query_scoped_memories(root, task, files, &[], false)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LifecycleError {
+    NotFound(String),
+    InvalidTransition {
+        id: String,
+        from: MemoryLifecycleState,
+        to: MemoryLifecycleState,
+        reason: String,
+    },
+    MissingReviewer,
+    MissingReason,
+    ConsistencyError {
+        id: String,
+        action: String,
+        state_persisted: bool,
+        telemetry_recorded: bool,
+        recovery_hint: String,
+        details: String,
+    },
+}
+
+impl std::fmt::Display for LifecycleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "Decision '{id}' not found"),
+            Self::InvalidTransition {
+                id,
+                from,
+                to,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Invalid lifecycle transition for decision '{id}': cannot transition from {from:?} to {to:?} ({reason})"
+                )
+            }
+            Self::MissingReviewer => {
+                write!(f, "Ratification rejected: reviewer ('by') must be non-empty")
+            }
+            Self::MissingReason => {
+                write!(f, "Ratification rejected: ratification reason must be non-empty")
+            }
+            Self::ConsistencyError {
+                id,
+                action,
+                state_persisted,
+                telemetry_recorded,
+                recovery_hint,
+                details,
+            } => {
+                write!(
+                    f,
+                    "Governance consistency error for decision '{id}' during '{action}': state_persisted={state_persisted}, telemetry_recorded={telemetry_recorded}. Recovery procedure: {recovery_hint}. Details: {details}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for LifecycleError {}
+
+/// Explicit human ratification of an architectural decision (provisional or existing).
+/// Transitions PROVISIONAL or STALE_REVIEW decisions to DURABLE with explicit human provenance.
+pub fn ratify_decision(
+    root: &Path,
+    decision_id: &str,
+    by: &str,
+    reason: &str,
+    commit: Option<&str>,
+) -> Result<DurableMemory> {
+    if by.trim().is_empty() {
+        return Err(LifecycleError::MissingReviewer.into());
+    }
+    if reason.trim().is_empty() {
+        return Err(LifecycleError::MissingReason.into());
+    }
+
+    let root = root_path(root)?;
+    let mut doc = load_durable_memories(&root)?;
+
+    let idx = doc
+        .memories
+        .iter()
+        .position(|m| m.id == decision_id)
+        .ok_or_else(|| LifecycleError::NotFound(decision_id.to_string()))?;
+
+    let original_doc = doc.clone();
+    let prev_state = doc.memories[idx].lifecycle_state;
+    let mem = &mut doc.memories[idx];
+
+    match mem.lifecycle_state {
+        MemoryLifecycleState::Superseded => {
+            return Err(LifecycleError::InvalidTransition {
+                id: decision_id.to_string(),
+                from: MemoryLifecycleState::Superseded,
+                to: MemoryLifecycleState::Durable,
+                reason: "Superseded decisions cannot be ratified".to_string(),
+            }
+            .into());
+        }
+        MemoryLifecycleState::Rejected => {
+            return Err(LifecycleError::InvalidTransition {
+                id: decision_id.to_string(),
+                from: MemoryLifecycleState::Rejected,
+                to: MemoryLifecycleState::Durable,
+                reason: "Rejected decisions cannot be ratified".to_string(),
+            }
+            .into());
+        }
+        _ => {}
+    }
+
+    let target_commit = match commit {
+        Some(c) if !c.trim().is_empty() => {
+            let c_trimmed = c.trim();
+            if crate::git::is_git_repo(&root) {
+                match crate::git::resolve_baseline(&root, c_trimmed)? {
+                    Ok(full_sha) => full_sha,
+                    Err(err) => return Err(anyhow!("Cannot ratify: {err}")),
+                }
+            } else {
+                c_trimmed.to_string()
+            }
+        }
+        _ => {
+            if crate::git::is_git_repo(&root) {
+                crate::git::current_revision(&root).unwrap_or_else(|_| "HEAD".to_string())
+            } else {
+                "HEAD".to_string()
+            }
+        }
+    };
+
+    mem.lifecycle_state = MemoryLifecycleState::Durable;
+    mem.ratified_at_commit = Some(target_commit.clone());
+    mem.ratified_by = Some(by.trim().to_string());
+    mem.ratified_at = Some(Utc::now());
+
+    if let Some(ref mut prov) = mem.provenance {
+        prov.source_commit = Some(target_commit.clone());
+        prov.ratified_by = Some(by.trim().to_string());
+        prov.ratified_at = Some(Utc::now());
+        prov.source_type = "human_ratification".to_string();
+    } else {
+        mem.provenance = Some(MemoryProvenance {
+            source_type: "human_ratification".to_string(),
+            source_id: Some(decision_id.to_string()),
+            source_commit: Some(target_commit.clone()),
+            source_contract: None,
+            source_decision: Some(decision_id.to_string()),
+            ratified_by: Some(by.trim().to_string()),
+            ratified_at: Some(Utc::now()),
+        });
+    }
+
+    let updated = mem.clone();
+    save_durable_memories(&root, &doc)?;
+
+    let telemetry_res = crate::telemetry::record_event(
+        &root,
+        "DECISION_RATIFIED",
+        None,
+        by.trim(),
+        serde_json::json!({
+            "decision_id": decision_id,
+            "previous_state": format!("{:?}", prev_state),
+            "new_state": "DURABLE",
+            "ratified_at_commit": target_commit,
+            "ratified_by": by.trim(),
+            "reason": reason.trim(),
+        }),
+    );
+
+    if let Err(telemetry_err) = telemetry_res {
+        match save_durable_memories(&root, &original_doc) {
+            Ok(_) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "ratify_decision".to_string(),
+                    state_persisted: false,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "Telemetry write failed ({telemetry_err}). State was cleanly rolled back to {prev_state:?}. Resolve telemetry storage issue and retry."
+                    ),
+                    details: telemetry_err.to_string(),
+                }
+                .into());
+            }
+            Err(rollback_err) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "ratify_decision".to_string(),
+                    state_persisted: true,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "INDETERMINATE_STATE: State persisted as DURABLE but telemetry failed ({telemetry_err}) and state rollback failed ({rollback_err}). Run 'engram doctor' to reconcile."
+                    ),
+                    details: format!("telemetry error: {telemetry_err}; rollback error: {rollback_err}"),
+                }
+                .into());
+            }
+        }
+    }
+
+    Ok(updated)
+}
+
+/// Explicit human rejection of an architectural decision proposal or provisional decision.
+pub fn reject_decision(
+    root: &Path,
+    decision_id: &str,
+    by: &str,
+    reason: &str,
+) -> Result<DurableMemory> {
+    if by.trim().is_empty() {
+        return Err(LifecycleError::MissingReviewer.into());
+    }
+    if reason.trim().is_empty() {
+        return Err(LifecycleError::MissingReason.into());
+    }
+
+    let root = root_path(root)?;
+    let mut doc = load_durable_memories(&root)?;
+
+    let idx = doc
+        .memories
+        .iter()
+        .position(|m| m.id == decision_id)
+        .ok_or_else(|| LifecycleError::NotFound(decision_id.to_string()))?;
+
+    let original_doc = doc.clone();
+    let prev_state = doc.memories[idx].lifecycle_state;
+    let mem = &mut doc.memories[idx];
+
+    if mem.lifecycle_state == MemoryLifecycleState::Durable {
+        return Err(LifecycleError::InvalidTransition {
+            id: decision_id.to_string(),
+            from: MemoryLifecycleState::Durable,
+            to: MemoryLifecycleState::Rejected,
+            reason: "Durable decisions must be superseded via 'engram memory supersede', not rejected".to_string(),
+        }
+        .into());
+    }
+    if mem.lifecycle_state == MemoryLifecycleState::Superseded {
+        return Err(LifecycleError::InvalidTransition {
+            id: decision_id.to_string(),
+            from: MemoryLifecycleState::Superseded,
+            to: MemoryLifecycleState::Rejected,
+            reason: "Superseded decisions cannot be rejected".to_string(),
+        }
+        .into());
+    }
+
+    mem.lifecycle_state = MemoryLifecycleState::Rejected;
+
+    let updated = mem.clone();
+    save_durable_memories(&root, &doc)?;
+
+    let telemetry_res = crate::telemetry::record_event(
+        &root,
+        "DECISION_REJECTED",
+        None,
+        by.trim(),
+        serde_json::json!({
+            "decision_id": decision_id,
+            "previous_state": format!("{:?}", prev_state),
+            "new_state": "REJECTED",
+            "rejected_by": by.trim(),
+            "reason": reason.trim(),
+        }),
+    );
+
+    if let Err(telemetry_err) = telemetry_res {
+        match save_durable_memories(&root, &original_doc) {
+            Ok(_) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "reject_decision".to_string(),
+                    state_persisted: false,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "Telemetry write failed ({telemetry_err}). State was cleanly rolled back to {prev_state:?}. Resolve telemetry storage issue and retry."
+                    ),
+                    details: telemetry_err.to_string(),
+                }
+                .into());
+            }
+            Err(rollback_err) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "reject_decision".to_string(),
+                    state_persisted: true,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "INDETERMINATE_STATE: State persisted as REJECTED but telemetry failed ({telemetry_err}) and state rollback failed ({rollback_err}). Run 'engram doctor' to reconcile."
+                    ),
+                    details: format!("telemetry error: {telemetry_err}; rollback error: {rollback_err}"),
+                }
+                .into());
+            }
+        }
+    }
+
+    Ok(updated)
+}
+
 /// Re-ratify an architectural decision with current or specified commit and reviewer name.
 /// Resets governed mutation count and clears STALE_REVIEW back to Durable.
 pub fn re_ratify_decision(
@@ -1082,8 +1433,53 @@ pub fn re_ratify_decision(
     commit: Option<&str>,
     by: &str,
 ) -> Result<DurableMemory> {
+    if by.trim().is_empty() {
+        return Err(LifecycleError::MissingReviewer.into());
+    }
+
     let root = root_path(root)?;
     let mut doc = load_durable_memories(&root)?;
+
+    let idx = doc
+        .memories
+        .iter()
+        .position(|m| m.id == decision_id)
+        .ok_or_else(|| LifecycleError::NotFound(decision_id.to_string()))?;
+
+    let original_doc = doc.clone();
+    let prev_state = doc.memories[idx].lifecycle_state;
+    let mem = &mut doc.memories[idx];
+
+    // Provisional decisions cannot be re-ratified; they must be explicitly ratified first
+    if mem.lifecycle_state == MemoryLifecycleState::Provisional {
+        return Err(LifecycleError::InvalidTransition {
+            id: decision_id.to_string(),
+            from: MemoryLifecycleState::Provisional,
+            to: MemoryLifecycleState::Durable,
+            reason: "Provisional decisions require explicit human ratification ('engram memory ratify'), not re-ratification".to_string(),
+        }
+        .into());
+    }
+
+    if mem.lifecycle_state == MemoryLifecycleState::Rejected {
+        return Err(LifecycleError::InvalidTransition {
+            id: decision_id.to_string(),
+            from: MemoryLifecycleState::Rejected,
+            to: MemoryLifecycleState::Durable,
+            reason: "Rejected decisions cannot be re-ratified".to_string(),
+        }
+        .into());
+    }
+
+    if mem.lifecycle_state == MemoryLifecycleState::Superseded {
+        return Err(LifecycleError::InvalidTransition {
+            id: decision_id.to_string(),
+            from: MemoryLifecycleState::Superseded,
+            to: MemoryLifecycleState::Durable,
+            reason: "Superseded decisions cannot be re-ratified".to_string(),
+        }
+        .into());
+    }
 
     let target_commit = match commit {
         Some(c) if !c.trim().is_empty() => {
@@ -1106,13 +1502,6 @@ pub fn re_ratify_decision(
         }
     };
 
-    let idx = doc
-        .memories
-        .iter()
-        .position(|m| m.id == decision_id)
-        .ok_or_else(|| anyhow!("Memory decision '{decision_id}' not found"))?;
-
-    let mem = &mut doc.memories[idx];
     mem.ratified_at_commit = Some(target_commit.clone());
     mem.ratified_by = Some(by.to_string());
     mem.ratified_at = Some(Utc::now());
@@ -1130,7 +1519,7 @@ pub fn re_ratify_decision(
     let updated = mem.clone();
     save_durable_memories(&root, &doc)?;
 
-    let _ = crate::telemetry::record_event(
+    let telemetry_res = crate::telemetry::record_event(
         &root,
         "DECISION_RE_RATIFIED",
         None,
@@ -1142,6 +1531,36 @@ pub fn re_ratify_decision(
         }),
     );
 
+    if let Err(telemetry_err) = telemetry_res {
+        match save_durable_memories(&root, &original_doc) {
+            Ok(_) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "re_ratify_decision".to_string(),
+                    state_persisted: false,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "Telemetry write failed ({telemetry_err}). State was cleanly rolled back to {prev_state:?}. Resolve telemetry storage issue and retry."
+                    ),
+                    details: telemetry_err.to_string(),
+                }
+                .into());
+            }
+            Err(rollback_err) => {
+                return Err(LifecycleError::ConsistencyError {
+                    id: decision_id.to_string(),
+                    action: "re_ratify_decision".to_string(),
+                    state_persisted: true,
+                    telemetry_recorded: false,
+                    recovery_hint: format!(
+                        "INDETERMINATE_STATE: State persisted as DURABLE but telemetry failed ({telemetry_err}) and state rollback failed ({rollback_err}). Run 'engram doctor' to reconcile."
+                    ),
+                    details: format!("telemetry error: {telemetry_err}; rollback error: {rollback_err}"),
+                }
+                .into());
+            }
+        }
+    }
+
     Ok(updated)
 }
-

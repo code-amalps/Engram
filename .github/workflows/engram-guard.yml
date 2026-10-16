@@ -1,48 +1,99 @@
-name: Engram Change Guard
+name: "Engram CI Change Guard"
 
 on:
   pull_request:
-    branches: [ main, Development ]
-  workflow_dispatch:
+    branches: ["main", "Development"]
+  workflow_call:
+    inputs:
+      strict:
+        description: "Enforce strict policy (treat unexpected expansions as blocking)"
+        required: false
+        type: boolean
+        default: false
+      policy_path:
+        description: "Custom path to change-guard.toml policy"
+        required: false
+        type: string
+        default: ".engram/change-guard.toml"
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   change-guard:
-    name: Enforce Change Boundaries & Constitution
+    name: "Enforce Change Guard Policies"
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR Code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Full history recommended for baseline diff
+          fetch-depth: 0 # Full history required for base commit comparison
 
-      - name: Checkout Trusted Action Definition
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.base_ref || github.ref_name }}
-          path: .trusted-action
-
-      - name: Set up Rust toolchain
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Trusted Engram Binary
-        shell: bash
-        run: |
-          cargo build --release --manifest-path .trusted-action/Cargo.toml
-          mkdir -p "$HOME/.local/bin"
-          cp .trusted-action/target/release/engram "$HOME/.local/bin/engram"
-          chmod +x "$HOME/.local/bin/engram"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build Engram binary
+        run: cargo build --release --bin engram
 
       - name: Run Engram Change Guard
-        uses: ./.trusted-action
+        id: guard
+        shell: bash
+        run: |
+          set +e
+          STRICT_FLAG=""
+          if [ "${{ inputs.strict }}" = "true" ]; then
+            STRICT_FLAG="--strict"
+          fi
+
+          POLICY_FLAG=""
+          if [ -n "${{ inputs.policy_path }}" ] && [ -f "${{ inputs.policy_path }}" ]; then
+            POLICY_FLAG="--policy ${{ inputs.policy_path }}"
+          fi
+
+          BASE_REF="origin/${{ github.base_ref }}"
+
+          echo "Running Engram Change Guard against base: $BASE_REF"
+
+          # 1. Human-readable terminal output and diagnostic evaluation
+          target/release/engram guard \
+            --base "$BASE_REF" \
+            $STRICT_FLAG \
+            $POLICY_FLAG \
+            --diagnostic
+
+          EXIT_CODE=$?
+
+          # 2. Structured JSON generation for reporting and artifacts
+          target/release/engram guard \
+            --base "$BASE_REF" \
+            $STRICT_FLAG \
+            $POLICY_FLAG \
+            --format json > guard-result.json
+
+          # 3. Publish markdown summary if running in GitHub Actions environment
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🛡️ Engram Change Guard Report
+          EOF
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat guard-result.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error title=Change Guard Blocked::Engram Change Guard rejected pull request with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Upload Guard JSON Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          base-ref: ${{ github.base_ref || 'main' }}
-          strict: false
-          allow-no-contract: true
-          check-provenance: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: engram-guard-report
+          path: guard-result.json
+          if-no-files-found: ignore

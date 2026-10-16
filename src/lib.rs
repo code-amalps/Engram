@@ -3,6 +3,7 @@
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
+pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;

@@ -1,6 +1,7 @@
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
+pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;
@@ -11,18 +12,18 @@ pub mod gc;
 pub mod git;
 pub mod git_history;
 pub mod go_parser;
-pub mod java_parser;
 pub mod graph;
 pub mod guard;
 pub mod impact;
 pub mod incremental;
+pub mod instructions;
+pub mod java_parser;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
 pub mod memory_graph;
 pub mod model;
 pub mod printer;
-pub mod instructions;
 pub mod prompt;
 pub mod recovery;
 pub mod setup;
@@ -106,9 +107,7 @@ enum CommandLine {
         action: HistoryAction,
     },
     /// Calculate change impact or query reverse dependencies for a symbol
-    Impact {
-        target: String,
-    },
+    Impact { target: String },
     /// Deeply inspect symbol change impact, causal provenance, active contract status, and memories
     Inspect {
         target: String,
@@ -116,9 +115,7 @@ enum CommandLine {
         depth: usize,
     },
     /// Validate working-tree changes against architectural rules
-    Validate {
-        task_id: String,
-    },
+    Validate { task_id: String },
     /// Record a developer decision or rule override with rationale
     Decision {
         task_id: String,
@@ -130,9 +127,7 @@ enum CommandLine {
         violation_id: Option<String>,
     },
     /// Promote accepted task knowledge into local engineering memory
-    UpdateMemory {
-        task_id: String,
-    },
+    UpdateMemory { task_id: String },
     /// Inspect declared and resolved ecosystem packages and scripts
     Ecosystem,
     /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf)
@@ -175,9 +170,7 @@ enum CommandLine {
         external: Option<std::path::PathBuf>,
     },
     /// Answer why code was designed this way, with active policy, historical evolution, and provenance
-    Why {
-        target: String,
-    },
+    Why { target: String },
     /// Inspect memory liveness, scope resolution, and knowledge health without mutating state
     Doctor,
     /// Controlled garbage collection with dry-run inspection and explicit operational flags
@@ -231,6 +224,39 @@ enum CommandLine {
         /// Configured mutation threshold for STALE_REVIEW (default 5)
         #[arg(long, default_value_t = drift::DEFAULT_STALENESS_THRESHOLD, alias = "threshold")]
         staleness_threshold: usize,
+    },
+    /// Policy-driven Change Guard for local Git and CI pull-request workflows
+    Guard {
+        /// Path to custom policy configuration file (.toml)
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Base commit or ref to compare against (e.g. origin/main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Explicit Change Contract JSON file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Check staged index changes only (pre-commit mode)
+        #[arg(long)]
+        staged: bool,
+        /// Enforce strict policy (treat unexpected expansions as blocking)
+        #[arg(long)]
+        strict: bool,
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Detailed diagnostic mode explaining checks executed and skipped
+        #[arg(long, alias = "explain")]
+        diagnostic: bool,
+        /// Install opt-in Git pre-commit hook
+        #[arg(long)]
+        install_hook: bool,
+        /// Uninstall opt-in Git pre-commit hook
+        #[arg(long)]
+        uninstall_hook: bool,
+        /// Dry run for hook operations
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -443,172 +469,224 @@ fn run() -> Result<()> {
             let (id, ctx) = analyze_task(root, &task, token_budget)?;
             print_json(json!({ "task_id": id, "context": ctx }))?;
         }
-        Some(CommandLine::Contract { action, task_id }) => {
-            match action {
-                Some(ContractAction::Create { task, modules, files, forbidden }) => {
-                    let c = contract::create_contract(root, &task, modules, files, forbidden)?;
-                    print_json(c)?;
-                }
-                Some(ContractAction::Check {
+        Some(CommandLine::Contract { action, task_id }) => match action {
+            Some(ContractAction::Create {
+                task,
+                modules,
+                files,
+                forbidden,
+            }) => {
+                let c = contract::create_contract(root, &task, modules, files, forbidden)?;
+                print_json(c)?;
+            }
+            Some(ContractAction::Check {
+                contract_id,
+                file,
+                strict,
+                staged,
+                base,
+                check_provenance,
+                allow_no_contract,
+            }) => {
+                let options = contract::CheckOptions {
                     contract_id,
                     file,
                     strict,
                     staged,
-                    base,
+                    base_commit: base,
                     check_provenance,
                     allow_no_contract,
-                }) => {
-                    let options = contract::CheckOptions {
-                        contract_id,
-                        file,
-                        strict,
-                        staged,
-                        base_commit: base,
-                        check_provenance,
-                        allow_no_contract,
-                    };
-                    let result = contract::check_contract(root, &options);
-                    if force_json {
-                        print_json(&result)?;
-                    } else {
-                        let is_github_ci = std::env::var("GITHUB_ACTIONS").is_ok()
-                            || std::env::var("CI").is_ok();
-                        print!("{}", contract::format_check_report(&result, is_github_ci));
-                    }
-                    if let Ok(summary_file) = std::env::var("GITHUB_STEP_SUMMARY") {
-                        if !summary_file.is_empty() {
-                            use std::io::Write;
-                            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&summary_file) {
-                                let _ = writeln!(f, "{}", contract::format_check_markdown_summary(&result));
-                            }
+                };
+                let result = contract::check_contract(root, &options);
+                if force_json {
+                    print_json(&result)?;
+                } else {
+                    let is_github_ci =
+                        std::env::var("GITHUB_ACTIONS").is_ok() || std::env::var("CI").is_ok();
+                    print!("{}", contract::format_check_report(&result, is_github_ci));
+                }
+                if let Ok(summary_file) = std::env::var("GITHUB_STEP_SUMMARY") {
+                    if !summary_file.is_empty() {
+                        use std::io::Write;
+                        if let Ok(mut f) = fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&summary_file)
+                        {
+                            let _ =
+                                writeln!(f, "{}", contract::format_check_markdown_summary(&result));
                         }
                     }
-                    if result.exit_code != 0 {
-                        std::process::exit(result.exit_code);
-                    }
                 }
-                Some(ContractAction::Ratify {
-                    contract_id,
-                    by,
-                    reason,
-                }) => {
-                    let c = contract::ratify_contract(root, &contract_id, &by, &reason)?;
-                    if force_json {
-                        print_json(&c)?;
-                    } else {
-                        println!("✓ Ratified Change Contract '{}' by {}", c.contract_id, by);
-                    }
-                }
-                Some(ContractAction::Reconcile { contract_id, reason, actor, add_files, add_modules }) => {
-                    let act = actor.as_deref().unwrap_or("developer");
-                    let c = contract::reconcile_contract(root, &contract_id, &reason, act, add_files, add_modules)?;
-                    print_json(c)?;
-                }
-                Some(ContractAction::InstallHook { dry_run }) => {
-                    let msg = contract::install_pre_commit_hook(root, dry_run)?;
-                    println!("{msg}");
-                }
-                Some(ContractAction::UninstallHook { dry_run }) => {
-                    let msg = contract::uninstall_pre_commit_hook(root, dry_run)?;
-                    println!("{msg}");
-                }
-                None => {
-                    if let Some(id) = task_id {
-                        print_json(make_contract(root, &id)?)?;
-                    } else if let Ok(Some(active)) = contract::get_active_contract(root) {
-                        print_json(active)?;
-                    } else {
-                        println!("No active contract found. Create one with: engram contract create \"<goal>\"");
-                    }
+                if result.exit_code != 0 {
+                    std::process::exit(result.exit_code);
                 }
             }
-        }
-        Some(CommandLine::Memory { action }) => {
-            match action {
-                MemoryAction::List => {
-                    let doc = memory::load_durable_memories(root)?;
-                    if force_json {
-                        print_json(doc)?;
-                    } else {
-                        println!("🧠 Durable Engineering Memory (.engram/memory.yaml)");
-                        println!("──────────────────────────────────────────");
-                        if doc.memories.is_empty() {
-                            println!("  No durable memories recorded yet.");
-                        }
-                        for m in doc.memories {
-                            println!("  ✓ [{}] {}", m.id, m.title);
-                            println!("    Statement: {}", m.statement);
-                            println!("    Reason:    {}", m.reason);
-                            println!("    Accepted:  {} by {}", m.accepted_at.format("%Y-%m-%d"), m.accepted_by);
-                            println!();
-                        }
+            Some(ContractAction::Ratify {
+                contract_id,
+                by,
+                reason,
+            }) => {
+                let c = contract::ratify_contract(root, &contract_id, &by, &reason)?;
+                if force_json {
+                    print_json(&c)?;
+                } else {
+                    println!("✓ Ratified Change Contract '{}' by {}", c.contract_id, by);
+                }
+            }
+            Some(ContractAction::Reconcile {
+                contract_id,
+                reason,
+                actor,
+                add_files,
+                add_modules,
+            }) => {
+                let act = actor.as_deref().unwrap_or("developer");
+                let c = contract::reconcile_contract(
+                    root,
+                    &contract_id,
+                    &reason,
+                    act,
+                    add_files,
+                    add_modules,
+                )?;
+                print_json(c)?;
+            }
+            Some(ContractAction::InstallHook { dry_run }) => {
+                let msg = contract::install_pre_commit_hook(root, dry_run)?;
+                println!("{msg}");
+            }
+            Some(ContractAction::UninstallHook { dry_run }) => {
+                let msg = contract::uninstall_pre_commit_hook(root, dry_run)?;
+                println!("{msg}");
+            }
+            None => {
+                if let Some(id) = task_id {
+                    print_json(make_contract(root, &id)?)?;
+                } else if let Ok(Some(active)) = contract::get_active_contract(root) {
+                    print_json(active)?;
+                } else {
+                    println!(
+                        "No active contract found. Create one with: engram contract create \"<goal>\""
+                    );
+                }
+            }
+        },
+        Some(CommandLine::Memory { action }) => match action {
+            MemoryAction::List => {
+                let doc = memory::load_durable_memories(root)?;
+                if force_json {
+                    print_json(doc)?;
+                } else {
+                    println!("🧠 Durable Engineering Memory (.engram/memory.yaml)");
+                    println!("──────────────────────────────────────────");
+                    if doc.memories.is_empty() {
+                        println!("  No durable memories recorded yet.");
                     }
-                }
-                MemoryAction::Record { title, statement, reason, modules, files, accepted_by } => {
-                    let act = accepted_by.as_deref().unwrap_or("developer");
-                    let m = memory::record_decision(root, &title, &statement, &reason, modules, files, None, act)?;
-                    print_json(m)?;
-                }
-                MemoryAction::Candidates => {
-                    let cands = memory::list_candidates(root)?;
-                    print_json(cands)?;
-                }
-                MemoryAction::Promote { candidate_id, accepted_by, reason } => {
-                    let act = accepted_by.as_deref().unwrap_or("developer");
-                    let m = memory::promote_candidate(root, &candidate_id, act, reason.as_deref())?;
-                    print_json(m)?;
-                }
-                MemoryAction::Reject { candidate_id, reason, rejected_by } => {
-                    let act = rejected_by.as_deref().unwrap_or("developer");
-                    memory::reject_candidate(root, &candidate_id, act, &reason)?;
-                    print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
-                }
-                MemoryAction::ReRatify { decision_id, commit, by } => {
-                    let mem = memory::re_ratify_decision(root, &decision_id, commit.as_deref(), &by)?;
-                    if force_json {
-                        print_json(&mem)?;
-                    } else {
-                        println!("✓ Decision '{}' successfully re-ratified.", mem.id);
+                    for m in doc.memories {
+                        println!("  ✓ [{}] {}", m.id, m.title);
+                        println!("    Statement: {}", m.statement);
+                        println!("    Reason:    {}", m.reason);
                         println!(
-                            "  Ratified at commit: {}",
-                            mem.ratified_at_commit.as_deref().unwrap_or("WORKTREE")
+                            "    Accepted:  {} by {}",
+                            m.accepted_at.format("%Y-%m-%d"),
+                            m.accepted_by
                         );
+                        println!();
+                    }
+                }
+            }
+            MemoryAction::Record {
+                title,
+                statement,
+                reason,
+                modules,
+                files,
+                accepted_by,
+            } => {
+                let act = accepted_by.as_deref().unwrap_or("developer");
+                let m = memory::record_decision(
+                    root, &title, &statement, &reason, modules, files, None, act,
+                )?;
+                print_json(m)?;
+            }
+            MemoryAction::Candidates => {
+                let cands = memory::list_candidates(root)?;
+                print_json(cands)?;
+            }
+            MemoryAction::Promote {
+                candidate_id,
+                accepted_by,
+                reason,
+            } => {
+                let act = accepted_by.as_deref().unwrap_or("developer");
+                let m = memory::promote_candidate(root, &candidate_id, act, reason.as_deref())?;
+                print_json(m)?;
+            }
+            MemoryAction::Reject {
+                candidate_id,
+                reason,
+                rejected_by,
+            } => {
+                let act = rejected_by.as_deref().unwrap_or("developer");
+                memory::reject_candidate(root, &candidate_id, act, &reason)?;
+                print_json(json!({"rejected": true, "candidate_id": candidate_id}))?;
+            }
+            MemoryAction::ReRatify {
+                decision_id,
+                commit,
+                by,
+            } => {
+                let mem = memory::re_ratify_decision(root, &decision_id, commit.as_deref(), &by)?;
+                if force_json {
+                    print_json(&mem)?;
+                } else {
+                    println!("✓ Decision '{}' successfully re-ratified.", mem.id);
+                    println!(
+                        "  Ratified at commit: {}",
+                        mem.ratified_at_commit.as_deref().unwrap_or("WORKTREE")
+                    );
+                    println!(
+                        "  Ratified by:        {}",
+                        mem.ratified_by.as_deref().unwrap_or(&by)
+                    );
+                    println!("  Lifecycle State:    {:?}", mem.lifecycle_state);
+                }
+            }
+        },
+        Some(CommandLine::History { action }) => match action {
+            HistoryAction::Cochanges {
+                file,
+                min_probability,
+            } => {
+                let sigs = git_history::get_cochanges_for_file(root, &file, min_probability)?;
+                if force_json {
+                    print_json(sigs)?;
+                } else {
+                    println!("⚡ Historical Co-Change Signals for: {file}");
+                    println!("──────────────────────────────────────────");
+                    if sigs.is_empty() {
                         println!(
-                            "  Ratified by:        {}",
-                            mem.ratified_by.as_deref().unwrap_or(&by)
+                            "  No significant co-changes detected in historical commit window."
                         );
-                        println!("  Lifecycle State:    {:?}", mem.lifecycle_state);
+                    }
+                    for s in sigs {
+                        println!("  • {}", s.advisory_message);
                     }
                 }
             }
-        }
-        Some(CommandLine::History { action }) => {
-            match action {
-                HistoryAction::Cochanges { file, min_probability } => {
-                    let sigs = git_history::get_cochanges_for_file(root, &file, min_probability)?;
-                    if force_json {
-                        print_json(sigs)?;
-                    } else {
-                        println!("⚡ Historical Co-Change Signals for: {file}");
-                        println!("──────────────────────────────────────────");
-                        if sigs.is_empty() {
-                            println!("  No significant co-changes detected in historical commit window.");
-                        }
-                        for s in sigs {
-                            println!("  • {}", s.advisory_message);
-                        }
-                    }
-                }
-                HistoryAction::Mine { window } => {
-                    let count = git_history::mine_and_persist_cochanges(root, window)?;
-                    if force_json {
-                        print_json(json!({"cochange_edges_mined": count, "window": window}))?;
-                    } else {
-                        println!("✓ Mined and cached {} co-change relationships from the last {} commits.", count, window);
-                    }
+            HistoryAction::Mine { window } => {
+                let count = git_history::mine_and_persist_cochanges(root, window)?;
+                if force_json {
+                    print_json(json!({"cochange_edges_mined": count, "window": window}))?;
+                } else {
+                    println!(
+                        "✓ Mined and cached {} co-change relationships from the last {} commits.",
+                        count, window
+                    );
                 }
             }
-        }
+        },
         Some(CommandLine::Impact { target }) => {
             let res = impact(root, &target)?;
             if force_json {
@@ -622,11 +700,18 @@ fn run() -> Result<()> {
             let conn = storage::db(root)?;
             let cone = impact::compute_impact_cone(&conn, root, &target, depth)?;
             let active_contract = contract::get_active_contract(root).ok().flatten();
-            let authorization = active_contract.as_ref().map(|c| {
-                contract::evaluate_impact_against_contract(c, &cone)
-            });
+            let authorization = active_contract
+                .as_ref()
+                .map(|c| contract::evaluate_impact_against_contract(c, &cone));
             let affected_paths = cone.all_affected_paths();
-            let audit_memories = memory::query_scoped_memories(root, &target, &affected_paths, std::slice::from_ref(&target), true).unwrap_or_default();
+            let audit_memories = memory::query_scoped_memories(
+                root,
+                &target,
+                &affected_paths,
+                std::slice::from_ref(&target),
+                true,
+            )
+            .unwrap_or_default();
             let memory_conflicts = memory::detect_memory_conflicts(&audit_memories);
 
             if force_json {
@@ -643,7 +728,10 @@ fn run() -> Result<()> {
                 print!("{}", impact::format_impact_explanation(&cone));
                 if let Some(ref c) = active_contract {
                     println!("\n📜 CONTRACT STATUS");
-                    println!("  Active Contract: {} (v{}, Status: {:?})", c.contract_id, c.version, c.status);
+                    println!(
+                        "  Active Contract: {} (v{}, Status: {:?})",
+                        c.contract_id, c.version, c.status
+                    );
                     if let Some(ref auth) = authorization {
                         if !auth.authorized_targets.is_empty() {
                             println!("  Authorized Targets (Expected):");
@@ -658,7 +746,9 @@ fn run() -> Result<()> {
                             }
                         }
                         if !auth.unauthorized_relevant.is_empty() {
-                            println!("  ⚠️ UNAUTHORIZED RELEVANT (Predicted in cone, but outside contract):");
+                            println!(
+                                "  ⚠️ UNAUTHORIZED RELEVANT (Predicted in cone, but outside contract):"
+                            );
                             for u in &auth.unauthorized_relevant {
                                 println!("    • {}", u);
                             }
@@ -681,16 +771,18 @@ fn run() -> Result<()> {
                         let is_last = idx == audit_memories.len() - 1;
                         let branch = if is_last { "└──" } else { "├──" };
                         let pipe = if is_last { "    " } else { "│   " };
-                        let target_desc = m.scope.target.as_deref().unwrap_or(match m.scope.level {
-                            memory::ScopeLevel::Global => "Global",
-                            memory::ScopeLevel::Repository => "Repo",
-                            _ => "Project",
-                        });
+                        let target_desc =
+                            m.scope.target.as_deref().unwrap_or(match m.scope.level {
+                                memory::ScopeLevel::Global => "Global",
+                                memory::ScopeLevel::Repository => "Repo",
+                                _ => "Project",
+                            });
                         println!("  {} {} ({})", branch, m.id, target_desc);
                         println!("  {}  Scope:     {:?}", pipe, m.scope.level);
                         match m.lifecycle_state {
                             memory::MemoryLifecycleState::Superseded => {
-                                let superseding = m.superseded_by.as_deref().unwrap_or("newer policy");
+                                let superseding =
+                                    m.superseded_by.as_deref().unwrap_or("newer policy");
                                 println!("  {}  Status:    SUPERSEDED (by {})", pipe, superseding);
                             }
                             memory::MemoryLifecycleState::Durable => {
@@ -701,7 +793,10 @@ fn run() -> Result<()> {
                                 }
                             }
                             memory::MemoryLifecycleState::StaleReview => {
-                                println!("  {}  Status:    STALE_REVIEW (re-ratification required)", pipe);
+                                println!(
+                                    "  {}  Status:    STALE_REVIEW (re-ratification required)",
+                                    pipe
+                                );
                             }
                             _ => {
                                 println!("  {}  Status:    {:?}", pipe, m.lifecycle_state);
@@ -782,16 +877,26 @@ fn run() -> Result<()> {
                 } else {
                     println!("🧠 Engram Supported Integrations:");
                     println!("  ✓ Cursor:   .cursor/mcp.json               | .cursorrules");
-                    println!("  ✓ VS Code:  .vscode/mcp.json               | .github/copilot-instructions.md");
+                    println!(
+                        "  ✓ VS Code:  .vscode/mcp.json               | .github/copilot-instructions.md"
+                    );
                     println!("  ✓ Claude:   claude_desktop_config.json     | CLAUDE.md");
                     println!("  ✓ Windsurf: mcp_config.json                | .windsurfrules");
                     println!("\nCommands:");
-                    println!("  engram setup                   # Read-only auto-detection and dry-run plan");
-                    println!("  engram setup --check           # Verify health of configured integrations");
+                    println!(
+                        "  engram setup                   # Read-only auto-detection and dry-run plan"
+                    );
+                    println!(
+                        "  engram setup --check           # Verify health of configured integrations"
+                    );
                     println!("  engram setup --apply           # Apply proposed changes safely");
                     println!("  engram setup <target> --apply  # Configure specific editor");
-                    println!("  engram setup --remove          # Dry-run preview of removing Engram from editors");
-                    println!("  engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks");
+                    println!(
+                        "  engram setup --remove          # Dry-run preview of removing Engram from editors"
+                    );
+                    println!(
+                        "  engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks"
+                    );
                 }
             } else {
                 let is_dry_run = dry_run || (!apply && !check && !status);
@@ -826,7 +931,10 @@ fn run() -> Result<()> {
                             _ => "○",
                         };
                         println!("  {} {} ({:?})", icon, item.display_name, item.detection);
-                        println!("     Config:      {} [{}]", item.config_path, item.config_status);
+                        println!(
+                            "     Config:      {} [{}]",
+                            item.config_path, item.config_status
+                        );
                         if let Some(ref ip) = item.instruction_path {
                             let istat = item.instruction_status.as_deref().unwrap_or("none");
                             println!("     Instruction: {} [{}]", ip, istat);
@@ -839,16 +947,26 @@ fn run() -> Result<()> {
                     if is_dry_run && !apply {
                         if remove {
                             println!("  ℹ️ DRY-RUN REMOVAL. No files were modified.");
-                            println!("  Run `engram setup --remove --apply` to execute this removal plan.");
+                            println!(
+                                "  Run `engram setup --remove --apply` to execute this removal plan."
+                            );
                         } else {
                             println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
-                            println!("  Run `engram setup --apply` to execute this integration plan.");
+                            println!(
+                                "  Run `engram setup --apply` to execute this integration plan."
+                            );
                         }
                     } else if apply {
                         if remove {
-                            println!("  ✓ Safely removed {} integration changes (0 data loss).", report.changes_applied);
+                            println!(
+                                "  ✓ Safely removed {} integration changes (0 data loss).",
+                                report.changes_applied
+                            );
                         } else {
-                            println!("  ✓ Applied {} integration changes (0 data loss).", report.changes_applied);
+                            println!(
+                                "  ✓ Applied {} integration changes (0 data loss).",
+                                report.changes_applied
+                            );
                         }
                     }
                 }
@@ -874,9 +992,14 @@ fn run() -> Result<()> {
                     println!("{}", res.content);
                 }
                 if res.clipboard_copied {
-                    eprintln!("✓ Copied ~{} tokens of structured AST context to clipboard.", res.estimated_tokens);
+                    eprintln!(
+                        "✓ Copied ~{} tokens of structured AST context to clipboard.",
+                        res.estimated_tokens
+                    );
                     eprintln!("  Status: {}", res.completeness_status);
-                    eprintln!("  Paste directly into your AI chat box (Cursor, Copilot, Visual Studio, ChatGPT).");
+                    eprintln!(
+                        "  Paste directly into your AI chat box (Cursor, Copilot, Visual Studio, ChatGPT)."
+                    );
                 }
             }
         }
@@ -895,7 +1018,10 @@ fn run() -> Result<()> {
                 if force_json {
                     print_json(results)?;
                 } else {
-                    print!("{}", bench::format_human_benchmark_report(&results, verbose));
+                    print!(
+                        "{}",
+                        bench::format_human_benchmark_report(&results, verbose)
+                    );
                 }
             }
         }
@@ -935,7 +1061,11 @@ fn run() -> Result<()> {
                 print!("{}", gc::format_gc_plan(&result));
             }
         }
-        Some(CommandLine::Preflight { task, token_budget, forbidden }) => {
+        Some(CommandLine::Preflight {
+            task,
+            token_budget,
+            forbidden,
+        }) => {
             let opts = flywheel::PreflightOptions {
                 task,
                 token_budget,
@@ -948,7 +1078,13 @@ fn run() -> Result<()> {
                 print!("{}", flywheel::format_preflight_report(&res));
             }
         }
-        Some(CommandLine::Postflight { contract_id, strict, staged, base, ci }) => {
+        Some(CommandLine::Postflight {
+            contract_id,
+            strict,
+            staged,
+            base,
+            ci,
+        }) => {
             let opts = flywheel::PostflightOptions {
                 contract_id,
                 strict,
@@ -1001,6 +1137,51 @@ fn run() -> Result<()> {
                 printer::print_drift_report(&rep);
             }
         }
+        Some(CommandLine::Guard {
+            policy,
+            base,
+            file,
+            staged,
+            strict,
+            format,
+            diagnostic,
+            install_hook,
+            uninstall_hook,
+            dry_run,
+        }) => {
+            if install_hook {
+                let msg = ci_guard::install_guard_hook(root, dry_run)?;
+                println!("{msg}");
+                return Ok(());
+            }
+            if uninstall_hook {
+                let msg = ci_guard::uninstall_guard_hook(root, dry_run)?;
+                println!("{msg}");
+                return Ok(());
+            }
+
+            let opts = ci_guard::GuardOptions {
+                policy_path: policy,
+                base_commit: base,
+                contract_file: file,
+                staged,
+                strict,
+                diagnostic,
+            };
+
+            let res = ci_guard::run_guard(root, &opts);
+            let is_json = force_json || format.to_ascii_lowercase() == "json";
+
+            if is_json {
+                print_json(&res)?;
+            } else {
+                print!("{}", ci_guard::format_guard_terminal(&res, diagnostic));
+            }
+
+            if res.exit_code != 0 {
+                std::process::exit(res.exit_code);
+            }
+        }
     }
     Ok(())
 }
@@ -1015,14 +1196,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use analyzer::{
-        estimate_tokens, language, matches_pattern, parse_file, redact, tokens,
-    };
+    use analyzer::{estimate_tokens, language, matches_pattern, parse_file, redact, tokens};
     use model::{Evidence, EvidenceTier, analysis_key};
 
     #[test]
     fn test_secret_redaction() {
-        let input = "export API_KEY='sk-1234567890abcdef1234567890' and password='mysecretpassword'";
+        let input =
+            "export API_KEY='sk-1234567890abcdef1234567890' and password='mysecretpassword'";
         let redacted = redact(input);
         assert!(!redacted.contains("sk-1234567890abcdef1234567890"));
         assert!(!redacted.contains("mysecretpassword"));
@@ -1031,9 +1211,27 @@ mod tests {
 
     #[test]
     fn test_analysis_key_composition() {
-        let key1 = analysis_key("hash_a", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
-        let key2 = analysis_key("hash_a", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
-        let key3 = analysis_key("hash_b", env!("CARGO_PKG_VERSION"), "ts-0.25", "python", "cfg_1");
+        let key1 = analysis_key(
+            "hash_a",
+            env!("CARGO_PKG_VERSION"),
+            "ts-0.25",
+            "python",
+            "cfg_1",
+        );
+        let key2 = analysis_key(
+            "hash_a",
+            env!("CARGO_PKG_VERSION"),
+            "ts-0.25",
+            "python",
+            "cfg_1",
+        );
+        let key3 = analysis_key(
+            "hash_b",
+            env!("CARGO_PKG_VERSION"),
+            "ts-0.25",
+            "python",
+            "cfg_1",
+        );
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
     }
@@ -1098,8 +1296,16 @@ mod tests {
         let code = b"class OrderProcessor:\n    def process_order(self, order_id):\n        pass\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.py", code, "rev1").unwrap();
         assert_eq!(record.language, "python");
-        assert!(symbols.iter().any(|s| s.name == "OrderProcessor" && s.kind == "CLASS"));
-        assert!(symbols.iter().any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
     }
 
     #[test]
@@ -1107,18 +1313,39 @@ mod tests {
         let code = b"export interface IOrder { id: string; }\nexport class OrderService implements IOrder {\n  getOrder(id: string) { return id; }\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.ts", code, "rev1").unwrap();
         assert_eq!(record.language, "typescript");
-        assert!(symbols.iter().any(|s| s.name == "IOrder" && s.kind == "INTERFACE"));
-        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "CLASS"));
-        assert!(symbols.iter().any(|s| s.name == "getOrder" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "IOrder" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "getOrder" && s.kind == "METHOD")
+        );
     }
 
     #[test]
     fn test_tree_sitter_csharp_extraction() {
         let code = b"namespace Shop {\n    public class CartService {\n        public void Checkout() {}\n    }\n}\n";
-        let (record, symbols, _) = parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
+        let (record, symbols, _) =
+            parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
         assert_eq!(record.language, "csharp");
-        assert!(symbols.iter().any(|s| s.name == "CartService" && s.kind == "CLASS"));
-        assert!(symbols.iter().any(|s| s.name == "Checkout" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "CartService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Checkout" && s.kind == "METHOD")
+        );
     }
 
     #[test]
@@ -1126,9 +1353,21 @@ mod tests {
         let code = b"pub struct OrderService;\nimpl OrderService {\n    pub fn process_order(&self) {}\n}\npub trait OrderRepository {}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.rs", code, "rev1").unwrap();
         assert_eq!(record.language, "rust");
-        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols.iter().any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
-        assert!(symbols.iter().any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT")
+        );
     }
 
     #[test]
@@ -1136,9 +1375,25 @@ mod tests {
         let code = b"package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV() error { return nil }\n\ntype Exporter interface {\n    Export() error\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.go", code, "rev1").unwrap();
         assert_eq!(record.language, "go");
-        assert!(symbols.iter().any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols.iter().any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD"));
-        assert!(symbols.iter().any(|s| s.name == "Exporter" && s.kind == "INTERFACE"));
-        assert!(symbols.iter().any(|s| s.name == "orders" && s.kind == "MODULE"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Exporter" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "orders" && s.kind == "MODULE")
+        );
     }
 }

@@ -9,6 +9,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use uuid::Uuid;
 
@@ -18,6 +19,8 @@ pub const PROTOCOL_VERSION: &str = "1.1";
 
 /// SHA-256 hash of empty byte slice: standard cryptographic genesis anchor.
 pub const GENESIS_HASH: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+static TELEMETRY_MUTEX: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventChainStatus {
@@ -130,6 +133,7 @@ pub fn record_event(
     actor: &str,
     payload: serde_json::Value,
 ) -> Result<TelemetryEvent> {
+    let _guard = TELEMETRY_MUTEX.lock().unwrap();
     let root = root_path(root)?;
     let dir = events_dir(&root)?;
 
@@ -169,10 +173,21 @@ pub fn record_event(
         event_hash,
     };
 
-    // 1. Write individual JSON file
+    // 1. Write individual JSON file via atomic .tmp rename
     let file_path = dir.join(format!("{:06}_{}.json", next_seq, event_id));
+    let tmp_path = dir.join(format!(
+        "{:06}_{}.json.{}.tmp",
+        next_seq,
+        event_id,
+        Uuid::new_v4().simple()
+    ));
     let json_text = serde_json::to_string_pretty(&event)?;
-    fs::write(&file_path, json_text)?;
+    {
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(json_text.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp_path, &file_path)?;
 
     // 2. Append to events.jsonl
     let jsonl_path = dir.join("events.jsonl");
@@ -182,6 +197,7 @@ pub fn record_event(
         .open(&jsonl_path)?;
     let line = serde_json::to_string(&event)?;
     writeln!(f, "{line}")?;
+    f.sync_all()?;
 
     Ok(event)
 }
@@ -193,16 +209,74 @@ pub fn record_event(
 /// - (EVENT_MISSING, explanation) if sequence numbers have gaps
 pub fn verify_event_chain(root: &Path) -> Result<(EventChainStatus, String)> {
     let root = root_path(root)?;
-    let events = load_events(&root)?;
-
-    if events.is_empty() {
+    let dir = root.join(".engram").join("events");
+    if !dir.exists() {
         return Ok((
             EventChainStatus::Valid,
             "EVENT_CHAIN_VALID: 0 events recorded (empty chain pristine)".to_string(),
         ));
     }
 
-    // Verify first event
+    // 1. Check for malformed individual event JSON files
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path)?;
+            if let Err(e) = serde_json::from_str::<TelemetryEvent>(&content) {
+                return Ok((
+                    EventChainStatus::Broken,
+                    format!(
+                        "EVENT_CHAIN_BROKEN: Malformed telemetry event file '{}': {}",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                        e
+                    ),
+                ));
+            }
+        }
+    }
+
+    // 2. Check for malformed lines in events.jsonl
+    let jsonl_path = dir.join("events.jsonl");
+    let mut jsonl_events = Vec::new();
+    if jsonl_path.exists() {
+        let content = fs::read_to_string(&jsonl_path)?;
+        for (line_num, line) in content.lines().enumerate() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                match serde_json::from_str::<TelemetryEvent>(trimmed) {
+                    Ok(ev) => jsonl_events.push(ev),
+                    Err(e) => {
+                        return Ok((
+                            EventChainStatus::Broken,
+                            format!(
+                                "EVENT_CHAIN_BROKEN: Malformed line in events.jsonl at line {}: {}",
+                                line_num + 1,
+                                e
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let events = load_events(&root)?;
+
+    if events.is_empty() {
+        if !jsonl_events.is_empty() {
+            return Ok((
+                EventChainStatus::Broken,
+                "EVENT_CHAIN_BROKEN: events.jsonl contains records but individual event files are missing".to_string(),
+            ));
+        }
+        return Ok((
+            EventChainStatus::Valid,
+            "EVENT_CHAIN_VALID: 0 events recorded (empty chain pristine)".to_string(),
+        ));
+    }
+
+    // 3. Verify sequence continuity and missing events
     let first = &events[0];
     if first.sequence_number != 1 {
         return Ok((
@@ -213,6 +287,49 @@ pub fn verify_event_chain(root: &Path) -> Result<(EventChainStatus, String)> {
             ),
         ));
     }
+    for (i, ev) in events.iter().enumerate() {
+        if i > 0 {
+            let prev = &events[i - 1];
+            if ev.sequence_number > prev.sequence_number + 1 {
+                return Ok((
+                    EventChainStatus::Missing,
+                    format!(
+                        "EVENT_MISSING: Sequence gap detected between event {} and {}",
+                        prev.sequence_number, ev.sequence_number
+                    ),
+                ));
+            }
+        }
+    }
+
+    // 4. Dual-store consistency check
+    if !jsonl_events.is_empty() {
+        if jsonl_events.len() != events.len() {
+            return Ok((
+                EventChainStatus::Broken,
+                format!(
+                    "EVENT_CHAIN_BROKEN: Record count mismatch between events.jsonl ({}) and event files ({})",
+                    jsonl_events.len(),
+                    events.len()
+                ),
+            ));
+        }
+        for (file_ev, jsonl_ev) in events.iter().zip(jsonl_events.iter()) {
+            if file_ev.event_hash != jsonl_ev.event_hash
+                || file_ev.sequence_number != jsonl_ev.sequence_number
+            {
+                return Ok((
+                    EventChainStatus::Broken,
+                    format!(
+                        "EVENT_CHAIN_BROKEN: Dual-store hash mismatch at sequence {}: file hash {} != jsonl hash {}",
+                        file_ev.sequence_number, file_ev.event_hash, jsonl_ev.event_hash
+                    ),
+                ));
+            }
+        }
+    }
+
+    // 5. Genesis anchor check
     if first.previous_event_hash != GENESIS_HASH {
         return Ok((
             EventChainStatus::Broken,
@@ -223,6 +340,7 @@ pub fn verify_event_chain(root: &Path) -> Result<(EventChainStatus, String)> {
         ));
     }
 
+    // 5. Cryptographic hash chain verification
     for (i, ev) in events.iter().enumerate() {
         // Verify individual event hash integrity
         let computed = compute_event_hash(

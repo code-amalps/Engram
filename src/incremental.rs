@@ -1,12 +1,13 @@
 //! Incremental Analysis Engine:
 //! Two-tier invalidation pipeline:
 //! - Tier 1 (Syntactic): Content/blob hash is authoritative (mtime/size as fast-path hint)
-//!   to identify modified files. Re-parse only those files.
+//!   to identify modified, added, deleted, or renamed files. Re-parse only those files.
 //! - Tier 2 (Relational): Query SQLite for entities that import, call, or implement symbols
 //!   defined in Tier 1 files, and re-link their graph edges.
+//! - Fallback: Safe full-analysis fallback when incremental correctness cannot be established.
 
-use anyhow::{Result, Context};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{Context, Result};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -17,9 +18,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::analyzer::{
-    excluded, ignore_patterns, language, parse_file, reconcile_symbol_ids,
-};
+use crate::analyzer::{excluded, ignore_patterns, language, parse_file, reconcile_symbol_ids};
 use crate::model;
 use crate::storage::{config_hash, db, hash, now, revision, root_path};
 
@@ -31,6 +30,21 @@ fn default_protocol_version() -> String {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Debug, Clone)]
+pub struct IncrementalOptions {
+    pub force_content_hashing: bool,
+    pub fallback_on_error: bool,
+}
+
+impl Default for IncrementalOptions {
+    fn default() -> Self {
+        Self {
+            force_content_hashing: true,
+            fallback_on_error: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncrementalAnalysisResult {
     #[serde(default = "default_protocol_version")]
@@ -39,10 +53,16 @@ pub struct IncrementalAnalysisResult {
     pub total_files: usize,
     pub tier1_reparsed_files: Vec<String>,
     pub tier1_deleted_files: Vec<String>,
+    #[serde(default)]
+    pub tier1_renamed_files: Vec<(String, String)>,
     pub tier2_relinked_files: Vec<String>,
     pub tier2_relinked_entities: usize,
     pub unchanged_files_count: usize,
     pub fast_path_hits: usize,
+    #[serde(default)]
+    pub fallback_full_analysis: bool,
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
     pub duration_ms: f64,
     pub status: String,
 }
@@ -63,13 +83,27 @@ pub fn init_meta_cache(conn: &Connection) -> Result<()> {
 }
 
 /// Fast-path file hash hint lookup:
-/// Authoritative content hash is returned.
-/// If mtime and file size match cached metadata, the content hash is returned immediately (fast path hint).
-/// Otherwise, file bytes are read, SHA-256 computed, and cache is refreshed.
+/// Returns `(content_hash, bytes, is_fast_path)`.
+/// - If `mtime` and `size_bytes` match cached metadata and `untrusted_mtime` is false,
+///   the cached content hash is returned as an optimization hint (`is_fast_path = true`, empty bytes).
+/// - Otherwise, file bytes are read directly, SHA-256 computed authoritatively, and metadata cache is refreshed (`is_fast_path = false`).
+///
+/// NOTE: Modification time and file size are optimization hints, never proof that content is unchanged.
+/// A cached hash must not be described as authoritative if the underlying bytes were not verified.
+/// For authoritative freshness guarantees, actual bytes are read and hashed via SHA-256.
 pub fn get_authoritative_content_hash(
     abs_path: &Path,
     rel_path: &str,
     conn: &Connection,
+) -> Result<(String, Vec<u8>, bool)> {
+    get_authoritative_content_hash_internal(abs_path, rel_path, conn, false)
+}
+
+pub fn get_authoritative_content_hash_internal(
+    abs_path: &Path,
+    rel_path: &str,
+    conn: &Connection,
+    untrusted_mtime: bool,
 ) -> Result<(String, Vec<u8>, bool)> {
     let metadata = fs::metadata(abs_path)
         .with_context(|| format!("Failed to read metadata for {}", abs_path.display()))?;
@@ -83,21 +117,22 @@ pub fn get_authoritative_content_hash(
         Err(_) => 0,
     };
 
-    // Fast-path hint check
-    let cached: Option<String> = conn
-        .query_row(
-            "SELECT content_hash FROM file_meta_cache WHERE path = ?1 AND mtime_ns = ?2 AND size_bytes = ?3",
-            params![rel_path, mtime_ns, size_bytes as i64],
-            |r| r.get(0),
-        )
-        .optional()?;
+    // Fast-path hint check (only if mtime is trusted)
+    if !untrusted_mtime {
+        let cached: Option<String> = conn
+            .query_row(
+                "SELECT content_hash FROM file_meta_cache WHERE path = ?1 AND mtime_ns = ?2 AND size_bytes = ?3",
+                params![rel_path, mtime_ns, size_bytes as i64],
+                |r| r.get(0),
+            )
+            .optional()?;
 
-    if let Some(h) = cached {
-        // Fast path hit: short-circuit disk read, return cached authoritative hash
-        return Ok((h, Vec::new(), true));
+        if let Some(h) = cached {
+            return Ok((h, Vec::new(), true));
+        }
     }
 
-    // Fast path miss: read bytes and compute authoritative hash
+    // Fast path miss or untrusted: read bytes and compute authoritative hash
     let bytes = fs::read(abs_path)
         .with_context(|| format!("Failed to read content of {}", abs_path.display()))?;
     let content_hash = hash(&bytes);
@@ -143,7 +178,9 @@ pub fn find_tier2_relational_dependents(
              WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3) 
                AND invalidated_at_revision IS NULL",
         )?;
-        let rows = stmt.query_map(params![t1_file, pattern_full, pattern_stem], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![t1_file, pattern_full, pattern_stem], |r| {
+            r.get::<_, String>(0)
+        })?;
         for r in rows {
             let p = r?;
             if !tier1_files.contains(&p) {
@@ -161,7 +198,9 @@ pub fn find_tier2_relational_dependents(
              WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3) 
                AND invalidated_at_revision IS NULL",
         )?;
-        let rows = stmt.query_map(params![sym, pattern_sym_scope, pattern_sym_any], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![sym, pattern_sym_scope, pattern_sym_any], |r| {
+            r.get::<_, String>(0)
+        })?;
         for r in rows {
             let p = r?;
             if !tier1_files.contains(&p) {
@@ -173,10 +212,67 @@ pub fn find_tier2_relational_dependents(
     Ok(dependent_files.into_iter().collect())
 }
 
-/// Execute two-tier incremental analysis over a repository.
-/// - Tier 1: Syntactic invalidation (authoritative content hash + fast path mtime/size hint).
-/// - Tier 2: Relational graph re-linking (callers, implementors, importers of Tier 1 symbols).
+/// Execute two-tier incremental analysis over a repository using default options.
 pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
+    incremental_analyze_with_options(root, &IncrementalOptions::default())
+}
+
+/// Execute two-tier incremental analysis over a repository with explicit options.
+pub fn incremental_analyze_with_options(
+    root: &Path,
+    options: &IncrementalOptions,
+) -> Result<IncrementalAnalysisResult> {
+    match incremental_analyze_internal(root, options) {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            if options.fallback_on_error {
+                let mut diagnostics = vec![format!("FALLBACK_FULL_ANALYSIS: {}", e)];
+                // If database itself is corrupted, quarantine it so a fresh clean analysis can rebuild it
+                if let Ok(dir) = crate::storage::cache_dir(root) {
+                    let db_path = dir.join("derived_symbols.db");
+                    if db_path.exists() {
+                        let corrupt_path = dir.join(format!(
+                            "derived_symbols.db.corrupt.{}",
+                            Uuid::new_v4().simple()
+                        ));
+                        let _ = fs::rename(&db_path, &corrupt_path);
+                    }
+                }
+                let full_summary = crate::analyzer::analyze(root)?;
+                diagnostics.push(format!(
+                    "Full analysis indexed {} files, {} symbols in revision {}",
+                    full_summary.indexed_files, full_summary.symbols, full_summary.revision
+                ));
+                if let Ok(conn) = db(root) {
+                    let _ = init_meta_cache(&conn);
+                }
+                Ok(IncrementalAnalysisResult {
+                    protocol_version: PROTOCOL_VERSION.to_string(),
+                    revision: full_summary.revision,
+                    total_files: full_summary.indexed_files,
+                    tier1_reparsed_files: Vec::new(),
+                    tier1_deleted_files: Vec::new(),
+                    tier1_renamed_files: Vec::new(),
+                    tier2_relinked_files: Vec::new(),
+                    tier2_relinked_entities: 0,
+                    unchanged_files_count: full_summary.indexed_files,
+                    fast_path_hits: 0,
+                    fallback_full_analysis: true,
+                    diagnostics,
+                    duration_ms: 0.0,
+                    status: "FALLBACK_FULL_ANALYSIS_COMPLETE".to_string(),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+fn incremental_analyze_internal(
+    root: &Path,
+    options: &IncrementalOptions,
+) -> Result<IncrementalAnalysisResult> {
     let start_time = Instant::now();
     let root = root_path(root)?;
     let rev = revision(&root);
@@ -216,6 +312,9 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
     let total_files = candidate_files.len();
     let current_paths: HashSet<String> = candidate_files.iter().map(|(_, p)| p.clone()).collect();
 
+    // Query Git dirty files (files modified in working tree or staged in index)
+    let git_dirty: HashSet<String> = crate::storage::git_changed(&root).into_iter().collect();
+
     // Check which files previously existed in database
     let mut previously_analyzed: HashMap<String, (String, String)> = HashMap::new();
     {
@@ -230,14 +329,20 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
     let mut tier1_reparsed_files = Vec::new();
     let mut tier1_symbol_names = Vec::new();
     let mut tier1_parsed_data = Vec::new();
+    let mut computed_hashes: HashMap<String, String> = HashMap::new();
     let mut fast_path_hits = 0;
     let mut unchanged_count = 0;
+    let mut diagnostics = Vec::new();
 
     // TIER 1: Syntactic invalidation
     for (abs, rel) in &candidate_files {
         let file_lang = language(abs).expect("language checked");
+        let is_untrusted = options.force_content_hashing || git_dirty.contains(rel);
+
         let (content_hash, bytes, is_fast_path) =
-            get_authoritative_content_hash(abs, rel, &conn)?;
+            get_authoritative_content_hash_internal(abs, rel, &conn, is_untrusted)?;
+
+        computed_hashes.insert(rel.clone(), content_hash.clone());
 
         if is_fast_path {
             fast_path_hits += 1;
@@ -274,20 +379,32 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         tier1_parsed_data.push((rec, symbols, rels, file_analysis_key));
     }
 
-    // Detect deleted files
+    // Detect deleted and renamed files
     let mut tier1_deleted_files = Vec::new();
-    for prev_path in previously_analyzed.keys() {
+    let mut tier1_renamed_files = Vec::new();
+
+    // Candidate additions: newly computed files not in previously_analyzed
+    let mut candidate_additions: HashMap<String, String> = HashMap::new();
+    for (rel, content_hash) in &computed_hashes {
+        if !previously_analyzed.contains_key(rel) {
+            candidate_additions.insert(content_hash.clone(), rel.clone());
+        }
+    }
+
+    for (prev_path, (prev_hash, _)) in &previously_analyzed {
         if !current_paths.contains(prev_path) {
-            tier1_deleted_files.push(prev_path.clone());
+            // Check if this deleted file matches the content hash of a newly added file (rename!)
+            if let Some(new_path) = candidate_additions.remove(prev_hash) {
+                tier1_renamed_files.push((prev_path.clone(), new_path));
+            } else {
+                tier1_deleted_files.push(prev_path.clone());
+            }
         }
     }
 
     // TIER 2: Relational graph invalidation and re-linking
-    let tier2_relinked_files = find_tier2_relational_dependents(
-        &conn,
-        &tier1_reparsed_files,
-        &tier1_symbol_names,
-    )?;
+    let tier2_relinked_files =
+        find_tier2_relational_dependents(&conn, &tier1_reparsed_files, &tier1_symbol_names)?;
 
     let mut tier2_relinked_entities = 0;
 
@@ -304,7 +421,7 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         &rev,
         VERSION,
         "tree-sitter-0.25.10",
-        "typescript,javascript,python,csharp,rust,go",
+        "typescript,javascript,python,csharp,rust,go,java",
         &project_config_hash,
     );
 
@@ -315,6 +432,32 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         params![rev, commit_hash, branch, dirty, if parent.is_empty(){None}else{Some(parent)}, project_analysis_key, now()],
     )?;
 
+    // Handle renames: update entities and relationships to new path
+    for (old_path, new_path) in &tier1_renamed_files {
+        tx.execute("DELETE FROM files WHERE path = ?1", params![old_path])?;
+        tx.execute(
+            "DELETE FROM file_meta_cache WHERE path = ?1",
+            params![old_path],
+        )?;
+        tx.execute(
+            "UPDATE entities SET path = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
+            params![new_path, old_path],
+        )?;
+        tx.execute(
+            "UPDATE entity_versions SET path = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
+            params![new_path, old_path],
+        )?;
+        tx.execute(
+            "UPDATE relationships SET path = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
+            params![new_path, old_path],
+        )?;
+        tx.execute(
+            "UPDATE relationships SET target = ?1 WHERE target = ?2 AND invalidated_at_revision IS NULL",
+            params![new_path, old_path],
+        )?;
+        diagnostics.push(format!("RENAME_DETECTED: '{}' -> '{}'", old_path, new_path));
+    }
+
     // Invalidate deleted files
     for del in &tier1_deleted_files {
         tx.execute("DELETE FROM files WHERE path = ?1", params![del])?;
@@ -322,6 +465,7 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         tx.execute("UPDATE entities SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
         tx.execute("UPDATE entity_versions SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
         tx.execute("UPDATE relationships SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
+        diagnostics.push(format!("DELETED_FILE: '{}'", del));
     }
 
     let mut assigned_ids = HashSet::new();
@@ -362,7 +506,11 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         }
 
         for r in rels {
-            let rel_id = format!("rel_{}", &hash(format!("{}\0{}\0{}\0{}", rec.path, r.kind, r.target, r.line).as_bytes())[..24]);
+            let rel_id = format!(
+                "rel_{}",
+                &hash(format!("{}\0{}\0{}\0{}", rec.path, r.kind, r.target, r.line).as_bytes())
+                    [..24]
+            );
             tx.execute(
                 "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision)
                  VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -376,25 +524,54 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         }
     }
 
-    // Re-link Tier 2 dependent entities
+    // Re-link Tier 2 dependent entities: re-extract relationships for affected dependants
     for t2_file in &tier2_relinked_files {
-        // Count affected entities in dependent file
-        let ent_count: usize = tx.query_row(
-            "SELECT COUNT(*) FROM entities WHERE path = ?1 AND invalidated_at_revision IS NULL",
-            params![t2_file],
-            |r| r.get(0),
-        ).unwrap_or(0);
-        tier2_relinked_entities += ent_count;
+        let abs_t2 = root.join(t2_file);
+        if let Ok(bytes) = fs::read(&abs_t2) {
+            if let Ok((rec, _symbols, rels)) = parse_file(&root, t2_file, &bytes, &rev) {
+                // Count affected entities in dependent file
+                let ent_count: usize = tx.query_row(
+                    "SELECT COUNT(*) FROM entities WHERE path = ?1 AND invalidated_at_revision IS NULL",
+                    params![t2_file],
+                    |r| r.get(0),
+                ).unwrap_or(0);
+                tier2_relinked_entities += ent_count;
 
-        // Refresh edges for this dependent file to point cleanly to updated symbols
-        tx.execute(
-            "UPDATE relationships SET created_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
-            params![rev, t2_file],
-        )?;
+                // Invalidate old relationships for this dependent file
+                tx.execute(
+                    "UPDATE relationships SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",
+                    params![rev, t2_file],
+                )?;
+
+                // Re-insert fresh relationships
+                for r in rels {
+                    let rel_id = format!(
+                        "rel_{}",
+                        &hash(
+                            format!("{}\0{}\0{}\0{}", rec.path, r.kind, r.target, r.line)
+                                .as_bytes()
+                        )[..24]
+                    );
+                    tx.execute(
+                        "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision)
+                         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![r.source, r.target, r.kind, r.evidence, r.confidence, rec.path, r.line as i64, rev],
+                    )?;
+                    tx.execute(
+                        "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, details_json)
+                         VALUES(?1, ?2, 'RELATIONSHIP', 'EXTRACTED', ?3, 'TREE_SITTER', ?4, ?5, ?6, ?7)",
+                        params![rel_id, r.confidence, rec.path, r.line as i64, now(), json!({"edge_type": &r.kind}).to_string()],
+                    ).ok();
+                }
+            }
+        }
     }
 
     // Cross-file Go structural interface matching if Go files affected
-    let has_go = tier1_reparsed_files.iter().chain(tier2_relinked_files.iter()).any(|p| p.ends_with(".go"));
+    let has_go = tier1_reparsed_files
+        .iter()
+        .chain(tier2_relinked_files.iter())
+        .any(|p| p.ends_with(".go"));
     if has_go {
         let mut go_file_asts = Vec::new();
         for (abs, rel) in &candidate_files {
@@ -407,16 +584,15 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
             }
         }
         if !go_file_asts.is_empty() {
-            let go_refs: Vec<(&str, &crate::go_parser::GoFileAst)> = go_file_asts
-                .iter()
-                .map(|(p, a)| (p.as_str(), a))
-                .collect();
+            let go_refs: Vec<(&str, &crate::go_parser::GoFileAst)> =
+                go_file_asts.iter().map(|(p, a)| (p.as_str(), a)).collect();
             let cross_iface_rels = crate::go_parser::infer_cross_file_go_interfaces(&go_refs);
             for r in cross_iface_rels {
                 let path = r.source.split("::").next().unwrap_or(&r.source);
                 let rel_id = format!(
                     "rel_{}",
-                    &hash(format!("{}\0{}\0{}\0{}", path, r.kind, r.target, r.line).as_bytes())[..24]
+                    &hash(format!("{}\0{}\0{}\0{}", path, r.kind, r.target, r.line).as_bytes())
+                        [..24]
                 );
                 tx.execute(
                     "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision) 
@@ -442,10 +618,13 @@ pub fn incremental_analyze(root: &Path) -> Result<IncrementalAnalysisResult> {
         total_files,
         tier1_reparsed_files,
         tier1_deleted_files,
+        tier1_renamed_files,
         tier2_relinked_files,
         tier2_relinked_entities,
         unchanged_files_count: unchanged_count,
         fast_path_hits,
+        fallback_full_analysis: false,
+        diagnostics,
         duration_ms,
         status: "INCREMENTAL_ANALYSIS_COMPLETE".to_string(),
     })

@@ -3,10 +3,11 @@
 //! formulates structured repair plans without modifying source code, and enforces a strict
 //! 2-attempt exhaustion gate that blocks on the 3rd attempt awaiting human intervention.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -107,8 +108,14 @@ pub struct RecoveryPlan {
     pub plan_id: String,
     pub contract_id: String,
     pub attempt: u32,
+    #[serde(default)]
+    pub failure: String,
+    #[serde(default)]
+    pub evidence: Vec<String>,
     pub actions: Vec<RecoveryAction>,
     pub instructions: Vec<String>,
+    #[serde(default)]
+    pub human_approval_required: bool,
     pub summary: String,
 }
 
@@ -128,6 +135,8 @@ pub struct RecoverySession {
     pub status: RecoveryStatus,
     pub last_violation: Option<RecoveryViolationDetails>,
     pub last_recovery_plan: Option<RecoveryPlan>,
+    #[serde(default)]
+    pub holder_pid: Option<u32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -177,6 +186,7 @@ pub fn create_recovery_session(contract_id: &str) -> RecoverySession {
         status: RecoveryStatus::InProgress,
         last_violation: None,
         last_recovery_plan: None,
+        holder_pid: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -215,7 +225,11 @@ pub fn acquire_file_lock(root: &Path, contract_id: &str) -> Result<FileLockGuard
             Err(_) => {
                 let is_stale = fs::metadata(&lock_path)
                     .and_then(|m| m.modified())
-                    .map(|t| t.elapsed().map(|d| d > std::time::Duration::from_secs(5)).unwrap_or(false))
+                    .map(|t| {
+                        t.elapsed()
+                            .map(|d| d > std::time::Duration::from_secs(5))
+                            .unwrap_or(false)
+                    })
                     .unwrap_or(false);
                 if is_stale {
                     let _ = fs::remove_file(&lock_path);
@@ -238,14 +252,73 @@ pub fn load_session(root: &Path, contract_id: &str) -> Result<Option<RecoverySes
     load_session_internal(root, contract_id)
 }
 
+#[cfg(windows)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    if let Ok(output) = std::process::Command::new("cmd")
+        .args(["/c", &format!("tasklist /FI \"PID eq {}\" /NH", pid)])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        return text.contains(&pid.to_string()) && !text.contains("No tasks");
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn is_pid_alive(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(true)
+}
+
 fn load_session_internal(root: &Path, contract_id: &str) -> Result<Option<RecoverySession>> {
+    let dir = recovery_cache_dir(root);
     let path = recovery_session_path(root, contract_id);
+    let bak_path = dir.join(format!("{}.bak", contract_id));
+
+    // Recovery from interrupted rename: if primary file is missing but .bak exists, self-heal
+    if !path.exists() && bak_path.exists() {
+        let _ = fs::rename(&bak_path, &path);
+    }
+
     if !path.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(&path)?;
-    let session: RecoverySession = serde_json::from_str(&content)?;
-    Ok(Some(session))
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(anyhow!(
+                "Failed to read recovery session at '{}': {}",
+                path.display(),
+                e
+            ));
+        }
+    };
+    match serde_json::from_str::<RecoverySession>(&content) {
+        Ok(session) => Ok(Some(session)),
+        Err(e) => {
+            let quarantine_path = dir.join(format!(
+                "{}.corrupt.{}",
+                contract_id,
+                Uuid::new_v4().simple()
+            ));
+            let _ = fs::rename(&path, &quarantine_path);
+            Err(anyhow!(
+                "MALFORMED_RECOVERY_SESSION: Recovery session for '{}' was corrupted and quarantined to '{}': {}",
+                contract_id,
+                quarantine_path.display(),
+                e
+            ))
+        }
+    }
 }
 
 pub fn get_recovery_session(root: &Path, contract_id: &str) -> Result<Option<RecoverySession>> {
@@ -265,19 +338,49 @@ fn save_session_internal(root: &Path, session: &RecoverySession) -> Result<()> {
     }
     let path = recovery_session_path(root, &session.contract_id);
     let json = serde_json::to_string_pretty(session)?;
-    let tmp_path = dir.join(format!("{}.{}.tmp", session.contract_id, Uuid::new_v4().simple()));
-    fs::write(&tmp_path, &json)?;
-    if fs::rename(&tmp_path, &path).is_err() {
-        let _ = fs::remove_file(&path);
-        if fs::rename(&tmp_path, &path).is_err() {
-            fs::write(&path, &json)?;
+    let tmp_path = dir.join(format!(
+        "{}.{}.tmp",
+        session.contract_id,
+        Uuid::new_v4().simple()
+    ));
+    {
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(json.as_bytes())?;
+        f.sync_all()?;
+    }
+
+    let bak_path = dir.join(format!("{}.bak", session.contract_id));
+    if path.exists() {
+        let _ = fs::remove_file(&bak_path);
+        if fs::rename(&path, &bak_path).is_ok() {
+            if let Err(e) = fs::rename(&tmp_path, &path) {
+                let _ = fs::rename(&bak_path, &path);
+                let _ = fs::remove_file(&tmp_path);
+                return Err(anyhow!(
+                    "Failed to atomic rename temporary session file to '{}': {}",
+                    path.display(),
+                    e
+                ));
+            }
+            let _ = fs::remove_file(&bak_path);
+        } else {
+            fs::write(&path, json.as_bytes())?;
+            let _ = fs::remove_file(&tmp_path);
+        }
+    } else {
+        if let Err(_e) = fs::rename(&tmp_path, &path) {
+            fs::write(&path, json.as_bytes())?;
             let _ = fs::remove_file(&tmp_path);
         }
     }
     Ok(())
 }
 
-pub fn acquire_lock(root: &Path, contract_id: &str, expected_version: u64) -> Result<RecoverySession> {
+pub fn acquire_lock(
+    root: &Path,
+    contract_id: &str,
+    expected_version: u64,
+) -> Result<RecoverySession> {
     let _guard = SESSION_MUTEX.lock().unwrap();
     let _file_guard = acquire_file_lock(root, contract_id)?;
     let mut session = load_session_internal(root, contract_id)?
@@ -299,13 +402,18 @@ pub fn acquire_lock(root: &Path, contract_id: &str, expected_version: u64) -> Re
     }
 
     session.lock_state = LockState::Locked;
+    session.holder_pid = Some(std::process::id());
     session.session_version += 1;
     session.updated_at = Utc::now();
     save_session_internal(root, &session)?;
     Ok(session)
 }
 
-pub fn release_lock(root: &Path, contract_id: &str, expected_version: u64) -> Result<RecoverySession> {
+pub fn release_lock(
+    root: &Path,
+    contract_id: &str,
+    expected_version: u64,
+) -> Result<RecoverySession> {
     let _guard = SESSION_MUTEX.lock().unwrap();
     let _file_guard = acquire_file_lock(root, contract_id)?;
     let mut session = load_session_internal(root, contract_id)?
@@ -320,9 +428,66 @@ pub fn release_lock(root: &Path, contract_id: &str, expected_version: u64) -> Re
     }
 
     session.lock_state = LockState::Unlocked;
+    session.holder_pid = None;
     session.session_version += 1;
     session.updated_at = Utc::now();
     save_session_internal(root, &session)?;
+    Ok(session)
+}
+
+pub fn break_stale_lock(
+    root: &Path,
+    contract_id: &str,
+    max_age: std::time::Duration,
+) -> Result<RecoverySession> {
+    let _guard = SESSION_MUTEX.lock().unwrap();
+    let _file_guard = acquire_file_lock(root, contract_id)?;
+    let mut session = load_session_internal(root, contract_id)?
+        .ok_or_else(|| anyhow!("Recovery session for contract '{}' not found", contract_id))?;
+
+    if session.lock_state != LockState::Locked {
+        return Ok(session);
+    }
+
+    let elapsed = Utc::now().signed_duration_since(session.updated_at);
+    let elapsed_std = elapsed.to_std().unwrap_or(std::time::Duration::ZERO);
+    if elapsed_std < max_age {
+        return Err(anyhow!(
+            "LOCK_ACTIVE: lock for contract '{}' is still active (held for {:?}, max_age {:?})",
+            contract_id,
+            elapsed_std,
+            max_age
+        ));
+    }
+
+    // Safety check: ensure lock is NOT held by an active running process
+    if let Some(pid) = session.holder_pid.filter(|&p| is_pid_alive(p)) {
+        return Err(anyhow!(
+            "PROCESS_ALIVE: lock for contract '{}' is held by active live process PID {} (session updated {:?} ago). Stale lock reclamation refused.",
+            contract_id,
+            pid,
+            elapsed_std
+        ));
+    }
+
+    session.lock_state = LockState::Unlocked;
+    session.holder_pid = None;
+    session.session_version += 1;
+    session.updated_at = Utc::now();
+    save_session_internal(root, &session)?;
+
+    let _ = crate::telemetry::record_event(
+        root,
+        "RECOVERY_STALE_LOCK_BROKEN",
+        Some(contract_id),
+        "recovery_engine",
+        serde_json::json!({
+            "session_id": session.session_id,
+            "session_version": session.session_version,
+            "elapsed_secs": elapsed.num_seconds(),
+        }),
+    );
+
     Ok(session)
 }
 
@@ -418,6 +583,8 @@ pub fn formulate_recovery_plan(
 ) -> RecoveryPlan {
     let mut actions = Vec::new();
     let mut instructions = Vec::new();
+    let mut failure_categories = Vec::new();
+    let mut evidence = Vec::new();
 
     // Invariant: Never modifies source files directly.
     // Invariant: Never expands contract boundaries silently.
@@ -425,8 +592,15 @@ pub fn formulate_recovery_plan(
     // Invariant: Never auto-promotes memory.
 
     // 1. Revert boundary violations
+    if !violations.boundary_violations.is_empty() {
+        failure_categories.push("BOUNDARY_VIOLATION");
+    }
     for v in &violations.boundary_violations {
         actions.push(RecoveryAction::revert_mutation(v.clone()));
+        evidence.push(format!(
+            "Boundary violation: unauthorized change to `{}`",
+            v
+        ));
         instructions.push(format!(
             "Revert changes to `{}`. This path is outside authorized contract boundaries.",
             v
@@ -434,8 +608,15 @@ pub fn formulate_recovery_plan(
     }
 
     // 2. Revert unexpected files
+    if !violations.unexpected_files.is_empty() {
+        failure_categories.push("UNEXPECTED_FILE");
+    }
     for u in &violations.unexpected_files {
         actions.push(RecoveryAction::revert_mutation(u.clone()));
+        evidence.push(format!(
+            "Unexpected file: modified `{}` not in contract boundary",
+            u
+        ));
         instructions.push(format!(
             "Revert unexpected changes to `{}` or request human contract reconciliation.",
             u
@@ -443,7 +624,11 @@ pub fn formulate_recovery_plan(
     }
 
     // 3. Address constitution rule violations
+    if !violations.constitution_violations.is_empty() {
+        failure_categories.push("CONSTITUTION_RULE_ERROR");
+    }
     for c in &violations.constitution_violations {
+        evidence.push(format!("Constitution violation: {}", c));
         instructions.push(format!(
             "Address Constitution rule error: {}. (Constitution rules are immutable by automated recovery)",
             c
@@ -465,7 +650,18 @@ pub fn formulate_recovery_plan(
 
     // 5. Verification rerun
     actions.push(RecoveryAction::rerun("engram postflight"));
-    instructions.push("Rerun `engram postflight` to verify compliance with Change Contract.".to_string());
+    instructions
+        .push("Rerun `engram postflight` to verify compliance with Change Contract.".to_string());
+
+    let failure = if failure_categories.is_empty() {
+        "NONE".to_string()
+    } else {
+        failure_categories.join(" | ")
+    };
+
+    let human_approval_required = attempt >= 2
+        || !violations.constitution_violations.is_empty()
+        || contract.status == ContractStatus::BlockedAwaitingHuman;
 
     let summary = format!(
         "Recovery Plan (Attempt {}): {} revert action(s), {} preserve action(s), rerun check required.",
@@ -482,8 +678,11 @@ pub fn formulate_recovery_plan(
         plan_id: format!("plan_{}", Uuid::new_v4().simple()),
         contract_id: contract.contract_id.clone(),
         attempt,
+        failure,
+        evidence,
         actions,
         instructions,
+        human_approval_required,
         summary,
     }
 }
@@ -492,12 +691,6 @@ pub fn recover_contract(root: &Path, contract_id: &str) -> Result<RecoveryReport
     let root = root_path(root)?;
     let contract = contract::get_contract(&root, contract_id)?;
 
-    if contract.status == ContractStatus::BlockedAwaitingHuman {
-        return Err(anyhow!(
-            "RECOVERY_EXHAUSTED: Contract '{}' is BLOCKED_AWAITING_HUMAN. Automated recovery cannot proceed without human intervention.",
-            contract_id
-        ));
-    }
     if contract.status == ContractStatus::Completed {
         return Err(anyhow!(
             "CONTRACT_COMPLETED: Contract '{}' is already COMPLETED. Recovery is not applicable.",
@@ -524,6 +717,25 @@ pub fn recover_contract(root: &Path, contract_id: &str) -> Result<RecoveryReport
         }
     };
 
+    // State Consistency Check: ensure contract and recovery session never contradict
+    if contract.status == ContractStatus::BlockedAwaitingHuman {
+        if session.status != RecoveryStatus::BlockedAwaitingHuman {
+            session.status = RecoveryStatus::BlockedAwaitingHuman;
+            session.session_version += 1;
+            session.updated_at = Utc::now();
+            save_session_internal(&root, &session)?;
+        }
+        return Err(anyhow!(
+            "RECOVERY_EXHAUSTED: Contract '{}' is BLOCKED_AWAITING_HUMAN. Automated recovery cannot proceed without human intervention.",
+            contract_id
+        ));
+    } else if session.is_exhausted() && contract.status != ContractStatus::BlockedAwaitingHuman {
+        let mut updated_contract = contract.clone();
+        updated_contract.status = ContractStatus::BlockedAwaitingHuman;
+        updated_contract.updated_at = Utc::now();
+        contract::save_contract(&root, &updated_contract)?;
+    }
+
     if session.lock_state == LockState::Locked {
         return Err(anyhow!(
             "SESSION_LOCKED: recovery session for contract '{}' is currently LOCKED",
@@ -548,12 +760,22 @@ pub fn recover_contract(root: &Path, contract_id: &str) -> Result<RecoveryReport
         session.status = RecoveryStatus::RecoveryExhausted;
         session.session_version = expected_version + 1;
         session.updated_at = Utc::now();
-        save_session_internal(&root, &session)?;
 
+        // Transactional update: save contract first, rollback contract if session persistence fails
         let mut updated_contract = contract.clone();
         updated_contract.status = ContractStatus::BlockedAwaitingHuman;
         updated_contract.updated_at = Utc::now();
         contract::save_contract(&root, &updated_contract)?;
+
+        if let Err(e) = save_session_internal(&root, &session) {
+            let mut rollback_contract = contract.clone();
+            rollback_contract.updated_at = Utc::now();
+            let _ = contract::save_contract(&root, &rollback_contract);
+            return Err(anyhow!(
+                "PERSISTENCE_TRANSACTION_FAILED: Failed to save recovery session: {}",
+                e
+            ));
+        }
 
         return Err(anyhow!(
             "RECOVERY_EXHAUSTED: Maximum recovery attempts ({}) reached for contract '{}'. Transitioned to BLOCKED_AWAITING_HUMAN.",
@@ -607,8 +829,13 @@ pub fn recover_contract(root: &Path, contract_id: &str) -> Result<RecoveryReport
             plan_id: format!("plan_{}", Uuid::new_v4().simple()),
             contract_id: contract_id.to_string(),
             attempt: session.attempt_count,
+            failure: "NONE".to_string(),
+            evidence: Vec::new(),
             actions: vec![RecoveryAction::rerun("engram postflight")],
-            instructions: vec!["No violations detected. Working tree conforms to Change Contract.".to_string()],
+            instructions: vec![
+                "No violations detected. Working tree conforms to Change Contract.".to_string(),
+            ],
+            human_approval_required: false,
             summary: "Working tree conforms to Change Contract. No repair required.".to_string(),
         };
 
@@ -620,7 +847,10 @@ pub fn recover_contract(root: &Path, contract_id: &str) -> Result<RecoveryReport
             max_attempts: session.max_attempts,
             status: session.status,
             plan,
-            summary: format!("Contract '{}' has no violations. Recovery session is RESOLVED.", contract_id),
+            summary: format!(
+                "Contract '{}' has no violations. Recovery session is RESOLVED.",
+                contract_id
+            ),
         });
     }
 
@@ -691,7 +921,24 @@ pub fn format_recovery_report(rep: &RecoveryReport) -> String {
         "Attempt:         {}/{} \n",
         rep.attempt_count, rep.max_attempts
     ));
-    out.push_str(&format!("Status:          {:?}\n\n", rep.status));
+    out.push_str(&format!("Status:          {:?}\n", rep.status));
+    out.push_str(&format!("Failure:         {}\n", rep.plan.failure));
+    out.push_str(&format!(
+        "Human Approval:  {}\n\n",
+        if rep.plan.human_approval_required {
+            "REQUIRED"
+        } else {
+            "AUTOMATED_PERMITTED"
+        }
+    ));
+
+    if !rep.plan.evidence.is_empty() {
+        out.push_str("EVIDENCE:\n");
+        for ev in &rep.plan.evidence {
+            out.push_str(&format!("  • {}\n", ev));
+        }
+        out.push('\n');
+    }
 
     out.push_str("REPAIR ACTIONS:\n");
     for (i, action) in rep.plan.actions.iter().enumerate() {

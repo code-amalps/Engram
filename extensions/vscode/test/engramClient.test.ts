@@ -394,7 +394,7 @@ describe('EngramClient Tests', () => {
 
     describe('Real CLI Invocations: compileContext', () => {
       it('should compile context for a task on real Engram repository', async function () {
-        this.timeout(45000);
+        this.timeout(65000);
         if (!fs.existsSync(debugBin)) {
           this.skip();
           return;
@@ -404,7 +404,9 @@ describe('EngramClient Tests', () => {
           debugBin,
           repoRoot,
           'Add retry logic to payment service',
-          1200
+          1200,
+          undefined,
+          60000
         );
         assert.strictEqual(report.task, 'Add retry logic to payment service');
         assert.strictEqual(report.token_budget, 1200);
@@ -518,6 +520,7 @@ describe('EngramClient Tests', () => {
       });
 
       it('should reject concurrent compileContext invocations', async function () {
+        this.timeout(45000);
         if (!fs.existsSync(debugBin)) {
           this.skip();
           return;

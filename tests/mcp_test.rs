@@ -76,7 +76,7 @@ fn test_mcp_protocol_handshake_and_tools() {
     let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(resp["id"], 2);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 14);
+    assert_eq!(tools.len(), 15);
     assert!(tools.iter().any(|t| t["name"] == "engram_get_context"));
     assert!(tools.iter().any(|t| t["name"] == "engram_preflight"));
     assert!(tools.iter().any(|t| t["name"] == "engram_postflight"));

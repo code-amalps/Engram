@@ -6,6 +6,7 @@ use engram::setup::{
     all_providers, get_provider, inspect_mcp_config, list_targets, orchestrate_setup,
     setup_client, verify_mcp_health, verify_mcp_health_with_timeout,
     SetupOptions, SetupScope,
+    GOVERNED_TOOL_NAMES,
 };
 use engram::instructions::{START_MARKER, END_MARKER};
 
@@ -360,11 +361,13 @@ fn test_verify_mcp_health_validation_and_clean_termination() {
         .expect("failed to run engram init");
     assert!(init_status.success());
 
-    // Health check on real binary: must succeed and verify all 14 governed tools
+    // Health check on real binary: must succeed and verify all 15 governed tools
     let health = verify_mcp_health(bin, &ws);
     assert!(health.is_ok(), "Health check must succeed on real binary: {:?}", health.err());
     let tool_count = health.unwrap();
-    assert_eq!(tool_count, 14, "Must verify exactly 14 governed tools");
+    assert_eq!(tool_count, 15, "Must verify exactly 15 governed tools");
+    assert_eq!(tool_count, GOVERNED_TOOL_NAMES.len());
+    assert!(GOVERNED_TOOL_NAMES.contains(&"engram_ratify_decision"), "engram_ratify_decision must be included in governed tools");
 }
 
 #[test]
@@ -397,5 +400,5 @@ fn test_verify_mcp_health_bounded_timeout() {
 
     let health = verify_mcp_health_with_timeout(bin, &ws, 10);
     assert!(health.is_ok());
-    assert_eq!(health.unwrap(), 14);
+    assert_eq!(health.unwrap(), 15);
 }

@@ -27,6 +27,7 @@ pub const GOVERNED_TOOL_NAMES: &[&str] = &[
     "engram_inspect_symbol",
     "engram_postflight",
     "engram_preflight",
+    "engram_ratify_decision",
     "engram_record_decision",
     "engram_recover",
     "engram_why",
@@ -786,7 +787,7 @@ fn write_atomic_json(dest: &Path, value: &Value) -> Result<()> {
 
 /// Spawns engram mcp over stdio, sends initialize + tools/list, and verifies protocol handshake.
 /// Enforces a bounded 5-second timeout, validates server identity ("engram"), protocol ("2024-11-05"),
-/// capabilities ({tools, resources, prompts}), and exact 14 tool surface with zero duplicates.
+/// capabilities ({tools, resources, prompts}), and exact 15 tool surface with zero duplicates.
 pub fn verify_mcp_health(binary: &str, root: &Path) -> Result<usize> {
     verify_mcp_health_with_timeout(binary, root, 5)
 }
@@ -906,8 +907,8 @@ pub fn verify_mcp_health_with_timeout(binary: &str, root: &Path, timeout_secs: u
                 }
             }
 
-            if raw_count != 14 {
-                return Err(anyhow!("Expected exactly 14 governed tools, server returned {}", raw_count));
+            if raw_count != GOVERNED_TOOL_NAMES.len() {
+                return Err(anyhow!("Expected exactly {} governed tools, server returned {}", GOVERNED_TOOL_NAMES.len(), raw_count));
             }
 
             Ok(raw_count)

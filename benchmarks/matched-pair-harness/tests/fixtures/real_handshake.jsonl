@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"01a14f0e-1734-7810-aa92-5bfcb7f7d97b"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_2","type":"mcp_tool_call","server":"engram","tool":"engram_doctor","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"engram","tool":"engram_doctor","arguments":{},"result":{"content":[{"type":"text","text":"{\n  \"archival_candidate_count\": 0,\n  \"dormant_count\": 0,\n  \"event_chain_details\": \"EVENT_CHAIN_VALID: 0 events recorded (empty chain pristine)\",\n  \"event_chain_status\": \"EVENT_CHAIN_VALID\",\n  \"items\": [],\n  \"live_count\": 0,\n  \"protocol_version\": \"1.1\",\n  \"stale_count\": 0,\n  \"superseded_count\": 0,\n  \"total_memories\": 0\n}"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Overall status: healthy."}}
+{"type":"turn.completed","usage":{"input_tokens":47541,"cached_input_tokens":39296,"cache_write_input_tokens":0,"output_tokens":83,"reasoning_output_tokens":9}}

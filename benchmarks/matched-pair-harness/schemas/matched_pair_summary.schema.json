@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engram.dev/schemas/matched_pair_summary.v2.json",
+  "title": "Engram Benchmark Matched Pair Summary Schema v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "pair_id",
+    "task_id",
+    "seed",
+    "order",
+    "model",
+    "reasoning_effort",
+    "golden_dependency_fingerprint_verified",
+    "acceptance",
+    "comparative_analysis",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0.0" },
+    "pair_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "seed": { "type": "integer" },
+    "order": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["control_A", "treatment_B"] }
+    },
+    "model": { "type": "string" },
+    "reasoning_effort": { "type": "string" },
+    "golden_dependency_fingerprint_verified": { "type": "boolean" },
+    "acceptance": {
+      "type": "object",
+      "required": ["control_A_accepted", "treatment_B_accepted", "pair_acceptance_parity"],
+      "properties": {
+        "control_A_accepted": { "type": "boolean" },
+        "treatment_B_accepted": { "type": "boolean" },
+        "pair_acceptance_parity": { "type": "boolean" }
+      }
+    },
+    "comparative_analysis": {
+      "type": "object",
+      "required": ["savings_claim_eligible", "savings_claim_status", "verdict", "explanation", "metrics"],
+      "properties": {
+        "savings_claim_eligible": { "type": "boolean" },
+        "savings_claim_status": {
+          "type": "string",
+          "enum": ["VALID", "INVALIDATED_BY_ACCEPTANCE_FAILURE", "INVALIDATED_BY_TELEMETRY_INVALID"]
+        },
+        "verdict": { "type": "string" },
+        "explanation": { "type": "string" },
+        "metrics": {
+          "type": "object",
+          "required": [
+            "total_model_tokens",
+            "prompt_tokens_total",
+            "completion_tokens",
+            "peak_single_request_context",
+            "quality_adjusted_cost"
+          ],
+          "properties": {
+            "total_model_tokens": {
+              "type": "object",
+              "required": ["control_A", "treatment_B", "delta", "savings_pct", "status"],
+              "properties": {
+                "control_A": { "type": ["integer", "null"] },
+                "treatment_B": { "type": ["integer", "null"] },
+                "delta": { "type": ["integer", "null"] },
+                "savings_pct": { "type": ["number", "null"] },
+                "status": { "type": "string", "enum": ["VALID", "INVALIDATED_UNACCEPTED", "INVALIDATED_TELEMETRY"] }
+              }
+            },
+            "prompt_tokens_total": {
+              "type": "object",
+              "required": ["control_A", "treatment_B", "delta", "savings_pct", "status"],
+              "properties": {
+                "control_A": { "type": ["integer", "null"] },
+                "treatment_B": { "type": ["integer", "null"] },
+                "delta": { "type": ["integer", "null"] },
+                "savings_pct": { "type": ["number", "null"] },
+                "status": { "type": "string", "enum": ["VALID", "INVALIDATED_UNACCEPTED", "INVALIDATED_TELEMETRY"] }
+              }
+            },
+            "completion_tokens": {
+              "type": "object",
+              "required": ["control_A", "treatment_B", "delta", "savings_pct", "status"],
+              "properties": {
+                "control_A": { "type": ["integer", "null"] },
+                "treatment_B": { "type": ["integer", "null"] },
+                "delta": { "type": ["integer", "null"] },
+                "savings_pct": { "type": ["number", "null"] },
+                "status": { "type": "string", "enum": ["VALID", "INVALIDATED_UNACCEPTED", "INVALIDATED_TELEMETRY"] }
+              }
+            },
+            "peak_single_request_context": {
+              "type": "object",
+              "required": ["control_A", "treatment_B", "delta", "savings_pct", "status"],
+              "properties": {
+                "control_A": { "type": ["integer", "null"] },
+                "treatment_B": { "type": ["integer", "null"] },
+                "delta": { "type": ["integer", "null"] },
+                "savings_pct": { "type": ["number", "null"] },
+                "status": { "type": "string", "enum": ["VALID", "INVALIDATED_UNACCEPTED", "INVALIDATED_TELEMETRY", "UNAVAILABLE"] }
+              }
+            },
+            "quality_adjusted_cost": {
+              "type": "object",
+              "required": ["control_A", "treatment_B", "delta", "savings_pct", "status"],
+              "properties": {
+                "control_A": { "type": ["number", "null"] },
+                "treatment_B": { "type": ["number", "null"] },
+                "delta": { "type": ["number", "null"] },
+                "savings_pct": { "type": ["number", "null"] },
+                "status": { "type": "string", "enum": ["VALID", "INVALIDATED_UNACCEPTED", "INVALIDATED_TELEMETRY"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "runs": {
+      "type": "object"
+    }
+  }
+}

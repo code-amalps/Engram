@@ -6,3 +6,7 @@ target/
 graphify-out/
 /.trusted-action/
 
+# Matched-pair benchmark harness generated artifacts
+benchmarks/matched-pair-harness/reports/runs/
+benchmarks/matched-pair-harness/**/__pycache__/
+

@@ -1,0 +1,90 @@
+{
+  "schema_version": "2.0.0",
+  "task_id": "task_c_theme_toggle",
+  "title": "Dark-Light Theme Toggle in Application Header",
+  "description": "Add an accessible light/dark theme toggle button to the main navigation header in the angular-ngrx-material-starter application. Ensure theme state persists across browser reloads, light theme is default, FontAwesome icons are properly registered in FaIconLibrary, and autoNightMode interactions are handled without modifying unrelated files.",
+  "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+  "allowed_file_patterns": [
+    "projects/angular-ngrx-material-starter/src/app/app/app.component.html",
+    "projects/angular-ngrx-material-starter/src/app/app/app.component.ts",
+    "projects/angular-ngrx-material-starter/src/app/core/core.module.ts",
+    "projects/angular-ngrx-material-starter/src/app/settings/components/settings-container.component.ts",
+    "projects/angular-ngrx-material-starter/src/app/core/settings/settings.reducer.ts"
+  ],
+  "forbidden_file_patterns": [
+    "package.json",
+    "package-lock.json",
+    "node_modules/**",
+    "projects/angular-ngrx-material-starter/src/app/features/**"
+  ],
+  "prompt": "Implement an accessible dark/light theme toggle button in the application navigation bar. The toggle must switch between LIGHT-THEME and DEFAULT-THEME / DARK-THEME, persist the user preference via the existing settings state/localStorageService, ensure default theme remains light when unconfigured, register any used FontAwesome icons in FaIconLibrary, and avoid modifying unrelated business modules. CRITICAL SAFETY INSTRUCTION: Do NOT run npm install, yarn add, or modify package.json or node_modules under any circumstances.",
+  "gates": {
+    "L0_typecheck": {
+      "enabled": true,
+      "command": "npx ng build --configuration=development --no-watch"
+    },
+    "L1_lint": {
+      "enabled": true,
+      "command": "npm run lint"
+    },
+    "L2_unit_tests": {
+      "enabled": false,
+      "command": "npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox"
+    },
+    "L3_production_build": {
+      "enabled": true,
+      "command": "npm run build"
+    }
+  },
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "description": "User-Accessible Toggle UI button in header navigation",
+      "weight": 0.20,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Toggle element present with role or button tag and aria-label in app.component.html"
+    },
+    {
+      "id": "REQ-2",
+      "description": "Consistent Theme Application dispatches change to theme wrapper / CDK overlay",
+      "weight": 0.20,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Dispatches actionThemeChange or updates theme in settings state"
+    },
+    {
+      "id": "REQ-3",
+      "description": "Reload Preference Persistence via settings store or localStorageService",
+      "weight": 0.20,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Theme preference saved under SETTINGS key in localStorage"
+    },
+    {
+      "id": "REQ-4",
+      "description": "Default Theme Preservation when no preference is saved",
+      "weight": 0.10,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Initial state defaults to light/DEFAULT-THEME"
+    },
+    {
+      "id": "REQ-5",
+      "description": "Runtime Asset Validity (FontAwesome icons imported and registered in FaIconLibrary)",
+      "weight": 0.15,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Any icons used (e.g. faSun, faMoon) registered in core.module.ts or faIconLibrary"
+    },
+    {
+      "id": "REQ-6",
+      "description": "Feature Override Resilience (handling autoNightMode gracefully)",
+      "weight": 0.05,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "Does not break or get immediately overridden by autoNightMode"
+    },
+    {
+      "id": "REQ-7",
+      "description": "Boundary & Blast Radius (zero edits to forbidden files)",
+      "weight": 0.10,
+      "evaluation_type": "AUTOMATED_DIFF",
+      "criteria": "Only allowed files modified, zero changes in forbidden_file_patterns"
+    }
+  ]
+}

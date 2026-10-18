@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engram.dev/schemas/run_telemetry.v2.json",
+  "title": "Engram Benchmark Run Telemetry v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "pair_id",
+    "task_id",
+    "arm",
+    "execution_order_in_pair",
+    "timestamps",
+    "model",
+    "isolation",
+    "telemetry",
+    "git_impact",
+    "correctness"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0.0" },
+    "run_id": { "type": "string" },
+    "pair_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "arm": { "type": "string", "enum": ["control_A", "treatment_B"] },
+    "execution_order_in_pair": { "type": "integer", "enum": [1, 2] },
+    "timestamps": {
+      "type": "object",
+      "required": ["started_at", "completed_at", "elapsed_seconds"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "elapsed_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "name", "mode", "reasoning_effort", "harness_executable"],
+      "properties": {
+        "provider": { "type": "string" },
+        "name": { "type": "string" },
+        "mode": { "type": "string" },
+        "reasoning_effort": { "type": "string" },
+        "harness_executable": { "type": "string" },
+        "harness_version": { "type": "string" }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": [
+        "baseline_commit",
+        "sandbox_path",
+        "cold_start_verified",
+        "engram_enabled",
+        "engram_binary_sha256",
+        "dependency_fingerprint_verified",
+        "path_sanitized"
+      ],
+      "properties": {
+        "baseline_commit": { "type": "string" },
+        "sandbox_path": { "type": "string" },
+        "cold_start_verified": { "type": "boolean" },
+        "engram_enabled": { "type": "boolean" },
+        "engram_binary_sha256": { "type": "string" },
+        "mcp_server_status": { "type": "string" },
+        "dependency_fingerprint_verified": { "type": "boolean" },
+        "path_sanitized": { "type": "boolean" }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "required": [
+        "provenance",
+        "prompt_tokens_total",
+        "prompt_tokens_cached",
+        "prompt_tokens_cached_inferred",
+        "prompt_tokens_uncached",
+        "prompt_tokens_uncached_inferred",
+        "completion_tokens",
+        "reasoning_tokens",
+        "total_model_tokens",
+        "turns_count",
+        "mcp_tool_calls_count",
+        "auxiliary_tool_payload_bytes"
+      ],
+      "properties": {
+        "provenance": { "type": "string", "enum": ["DIRECT_API", "HARNESS_LOG", "UI_COUNTER", "SYNTHETIC_TEST", "SESSION_ROLLOUT"] },
+        "prompt_tokens_total": { "type": "integer", "minimum": 0 },
+        "prompt_tokens_cached": { "type": "integer", "minimum": 0 },
+        "prompt_tokens_cached_inferred": { "type": "boolean" },
+        "prompt_tokens_uncached": { "type": "integer", "minimum": 0 },
+        "prompt_tokens_uncached_inferred": { "type": "boolean" },
+        "completion_tokens": { "type": "integer", "minimum": 0 },
+        "reasoning_tokens": { "type": "integer", "minimum": 0 },
+        "total_model_tokens": { "type": "integer", "minimum": 0 },
+        "peak_single_request_context": { "type": ["integer", "null"] },
+        "peak_turn_context": { "type": ["integer", "null"] },
+        "final_turn_context": { "type": ["integer", "null"] },
+        "model_requests_count": { "type": ["integer", "null"] },
+        "turns_count": { "type": "integer", "minimum": 0 },
+        "mcp_tool_calls_count": { "type": "integer", "minimum": 0 },
+        "auxiliary_tool_payload_bytes": { "type": "integer", "minimum": 0 },
+        "account_usage_reading_start_pct": { "type": ["integer", "null"] },
+        "account_usage_reading_end_pct": { "type": ["integer", "null"] }
+      }
+    },
+    "git_impact": {
+      "type": "object",
+      "required": ["files_changed_count", "files_changed", "insertions", "deletions", "unrelated_files_count"],
+      "properties": {
+        "files_changed_count": { "type": "integer", "minimum": 0 },
+        "files_changed": { "type": "array", "items": { "type": "string" } },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "unrelated_files_count": { "type": "integer", "minimum": 0 },
+        "diff_patch_path": { "type": "string" }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "required": ["score", "quality_adjusted_cost", "passed_all_requirements", "gates", "requirements"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "quality_adjusted_cost": { "type": "number", "minimum": 0 },
+        "passed_all_requirements": { "type": "boolean" },
+        "gates": {
+          "type": "object",
+          "properties": {
+            "L0_typecheck": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] },
+            "L1_lint_prettier": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] },
+            "L2_unit_tests": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] },
+            "L3_production_build": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] }
+          }
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "enum": ["PASS", "FAIL", "PARTIAL", "NOT_EVALUATED"] }
+        }
+      }
+    }
+  }
+}

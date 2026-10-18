@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engram.dev/schemas/correctness_checklist.v2.json",
+  "title": "Engram Benchmark Correctness Checklist Schema v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "title",
+    "description",
+    "baseline_commit",
+    "allowed_file_patterns",
+    "forbidden_file_patterns",
+    "gates",
+    "requirements"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0.0" },
+    "task_id": { "type": "string" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "baseline_commit": { "type": "string" },
+    "allowed_file_patterns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "forbidden_file_patterns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "gates": {
+      "type": "object",
+      "required": ["L0_typecheck", "L1_lint", "L2_unit_tests", "L3_production_build"],
+      "properties": {
+        "L0_typecheck": {
+          "type": "object",
+          "required": ["enabled", "command"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "command": { "type": "string" }
+          }
+        },
+        "L1_lint": {
+          "type": "object",
+          "required": ["enabled", "command"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "command": { "type": "string" }
+          }
+        },
+        "L2_unit_tests": {
+          "type": "object",
+          "required": ["enabled", "command"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "command": { "type": "string" }
+          }
+        },
+        "L3_production_build": {
+          "type": "object",
+          "required": ["enabled", "command"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "command": { "type": "string" }
+          }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "weight", "evaluation_type"],
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" },
+          "weight": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "evaluation_type": {
+            "type": "string",
+            "enum": ["AUTOMATED_DIFF", "UNIT_TEST", "STATIC_CHECK", "MANUAL_INSPECTION"]
+          },
+          "criteria": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -20,19 +20,130 @@ pub const HOOK_END_MARKER: &str = "# --- END ENGRAM CHANGE GUARD ---";
 
 pub const HOOK_SCRIPT_BODY: &str = r#"# --- BEGIN ENGRAM CHANGE GUARD ---
 # Engram Pre-Commit Hook: Asynchronous Change Guard verification
-ENGRAM_BIN="engram"
-if ! command -v "$ENGRAM_BIN" >/dev/null 2>&1; then
-  if [ -x "./target/release/engram" ]; then
-    ENGRAM_BIN="./target/release/engram"
-  elif [ -x "./target/debug/engram" ]; then
-    ENGRAM_BIN="./target/debug/engram"
+# Hardened binary resolution: supports explicit ENGRAM_PATH, installer executable,
+# repository-relative target builds, and validates capability before execution.
+
+engram_check_candidate() {
+  cand="$1"
+  [ -z "$cand" ] && return 1
+  if [ -x "$cand" ] 2>/dev/null; then
+    if "$cand" hook --help >/dev/null 2>&1; then
+      ENGRAM_RESOLVED="$cand"
+      return 0
+    fi
+  fi
+  if [ -x "${cand}.exe" ] 2>/dev/null; then
+    if "${cand}.exe" hook --help >/dev/null 2>&1; then
+      ENGRAM_RESOLVED="${cand}.exe"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+engram_check_path() {
+  cmd_name="$1"
+  [ -z "$cmd_name" ] && return 1
+  if command -v "$cmd_name" >/dev/null 2>&1; then
+    resolved="$(command -v "$cmd_name")"
+    if "$resolved" hook --help >/dev/null 2>&1; then
+      ENGRAM_RESOLVED="$resolved"
+      return 0
+    fi
+    if [ -z "$OUTDATED_CANDIDATE" ]; then
+      OUTDATED_CANDIDATE="$resolved"
+    fi
+  fi
+  return 1
+}
+
+ENGRAM_RESOLVED=""
+OUTDATED_CANDIDATE=""
+
+# 1. Explicit ENGRAM_PATH environment override (never silently falls back)
+if [ -n "$ENGRAM_PATH" ]; then
+  if engram_check_candidate "$ENGRAM_PATH" || engram_check_path "$ENGRAM_PATH"; then
+    "$ENGRAM_RESOLVED" hook run || exit $?
+    exit 0
+  else
+    echo "[engram] Pre-commit hook error: Configured ENGRAM_PATH='$ENGRAM_PATH' is missing, non-executable, or does not support the required 'hook' command." >&2
+    echo "[engram] Please ensure ENGRAM_PATH points to a compatible Engram binary." >&2
+    echo "[engram] (Emergency bypass: use 'git commit --no-verify' to skip this hook)" >&2
+    exit 1
   fi
 fi
 
-if command -v "$ENGRAM_BIN" >/dev/null 2>&1 || [ -x "$ENGRAM_BIN" ]; then
-  "$ENGRAM_BIN" hook run || exit 1
+# 2. Recorded installer binary path (if available)
+INSTALLER_BIN=""
+if [ -n "$INSTALLER_BIN" ]; then
+  if engram_check_candidate "$INSTALLER_BIN"; then
+    : # Found compatible installer binary
+  elif [ -z "$OUTDATED_CANDIDATE" ] && ([ -x "$INSTALLER_BIN" ] 2>/dev/null || [ -x "${INSTALLER_BIN}.exe" ] 2>/dev/null); then
+    OUTDATED_CANDIDATE="$INSTALLER_BIN"
+  fi
+fi
+
+# 3. Repository-root target builds (supports subfolder commits and worktrees)
+if [ -z "$ENGRAM_RESOLVED" ]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  engram_check_candidate "$REPO_ROOT/target/release/engram" || \
+  engram_check_candidate "$REPO_ROOT/target/debug/engram" || \
+  true
+fi
+
+# 4. System PATH candidates
+if [ -z "$ENGRAM_RESOLVED" ]; then
+  engram_check_path "engram" || true
+fi
+
+# 5. Standard installation directories
+if [ -z "$ENGRAM_RESOLVED" ]; then
+  if [ -n "$LOCALAPPDATA" ]; then
+    engram_check_candidate "$LOCALAPPDATA/Programs/Engram/bin/engram" || true
+  fi
+  if [ -n "$USERPROFILE" ]; then
+    engram_check_candidate "$USERPROFILE/.cargo/bin/engram" || true
+  fi
+  if [ -n "$HOME" ]; then
+    engram_check_candidate "$HOME/.cargo/bin/engram" || \
+    engram_check_candidate "$HOME/.local/bin/engram" || \
+    engram_check_candidate "/usr/local/bin/engram" || \
+    engram_check_candidate "/opt/homebrew/bin/engram" || \
+    true
+  fi
+fi
+
+# Execution or actionable diagnostic failure
+if [ -n "$ENGRAM_RESOLVED" ]; then
+  "$ENGRAM_RESOLVED" hook run || exit $?
+else
+  if [ -n "$OUTDATED_CANDIDATE" ]; then
+    cand_version="$("$OUTDATED_CANDIDATE" --version 2>/dev/null || echo "unknown")"
+    echo "[engram] Pre-commit hook error: Engram binary at '$OUTDATED_CANDIDATE' ($cand_version) does not support the required 'hook' command." >&2
+    echo "[engram] Please upgrade your Engram installation or set ENGRAM_PATH to a compatible binary." >&2
+    echo "[engram] (Emergency bypass: use 'git commit --no-verify' to skip this hook)" >&2
+  else
+    echo "[engram] Pre-commit hook error: No compatible 'engram' executable found on PATH or in repository target/." >&2
+    echo "[engram] Please install Engram with change-guard support or set ENGRAM_PATH." >&2
+    echo "[engram] (Emergency bypass: use 'git commit --no-verify' to skip this hook)" >&2
+  fi
+  exit 1
 fi
 # --- END ENGRAM CHANGE GUARD ---"#;
+
+/// Generates the pre-commit hook script body, optionally embedding the recorded
+/// installer executable path.
+pub fn generate_hook_script(installer_bin: Option<&Path>) -> String {
+    if let Some(bin) = installer_bin {
+        let bin_str = bin.to_string_lossy().replace('\\', "/");
+        HOOK_SCRIPT_BODY.replace(
+            "INSTALLER_BIN=\"\"",
+            &format!("INSTALLER_BIN=\"{bin_str}\""),
+        )
+    } else {
+        HOOK_SCRIPT_BODY.to_string()
+    }
+}
 
 /// Resolve the Git hooks directory, supporting standard repositories,
 /// git worktrees (where `.git` is a file pointing to a gitdir), and submodules.
@@ -103,6 +214,23 @@ pub fn resolve_hooks_dir(root: &Path) -> Result<PathBuf> {
 /// Installs Engram's pre-commit hook into .git/hooks/pre-commit with dry-run support.
 /// Preserves any existing foreign pre-commit hooks (Husky, Lefthook, custom shell scripts).
 pub fn install_hook(root: &Path, dry_run: bool) -> Result<String> {
+    let current_exe = std::env::current_exe().ok().and_then(|p| {
+        let stem = p.file_stem()?.to_string_lossy().to_string();
+        if stem.eq_ignore_ascii_case("engram") {
+            fs::canonicalize(&p).ok().or(Some(p))
+        } else {
+            None
+        }
+    });
+    install_hook_with_bin(root, dry_run, current_exe.as_deref())
+}
+
+/// Installs Engram's pre-commit hook with an explicitly specified installer executable path.
+pub fn install_hook_with_bin(
+    root: &Path,
+    dry_run: bool,
+    installer_bin: Option<&Path>,
+) -> Result<String> {
     let root = root_path(root)?;
     let hooks_dir = resolve_hooks_dir(&root)?;
     if !hooks_dir.exists() && !dry_run {
@@ -110,9 +238,10 @@ pub fn install_hook(root: &Path, dry_run: bool) -> Result<String> {
     }
 
     let hook_path = hooks_dir.join("pre-commit");
+    let script_body = generate_hook_script(installer_bin);
 
     if !hook_path.exists() {
-        let content = format!("#!/bin/sh\n{}\n", HOOK_SCRIPT_BODY);
+        let content = format!("#!/bin/sh\n{}\n", script_body);
         if dry_run {
             return Ok(format!(
                 "Dry-run: No hook detected.\nEngram would create: {}\nContent:\n{}",
@@ -147,7 +276,7 @@ pub fn install_hook(root: &Path, dry_run: bool) -> Result<String> {
     }
 
     // Existing foreign hook: safely append Engram block
-    let new_content = format!("{}\n\n{}\n", existing.trim_end(), HOOK_SCRIPT_BODY);
+    let new_content = format!("{}\n\n{}\n", existing.trim_end(), script_body);
     if dry_run {
         return Ok(format!(
             "Dry-run: Existing hook detected in {}.\nEngram would safely append Change Guard block while preserving existing hook.\nNo files modified.",

@@ -412,3 +412,390 @@ fn test_hook_install_uninstall_and_dry_run_cli() {
 
     let _ = fs::remove_dir_all(&ws);
 }
+
+#[test]
+fn test_hook_script_explicit_engram_path_valid() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("engram_path_valid");
+
+    let inst_out = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["hook", "install"])
+        .output()
+        .unwrap();
+    assert!(inst_out.status.success());
+
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .arg("init")
+        .output()
+        .unwrap();
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("app.ts"), "export const a = 1;").unwrap();
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["contract", "create", "Scoped", "--files", "src/app.ts"])
+        .output()
+        .unwrap();
+
+    let _ = Command::new("git")
+        .args(["add", "src/app.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Valid ENGRAM_PATH commit"])
+        .env("ENGRAM_PATH", bin)
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&commit_out.stdout);
+    let stderr = String::from_utf8_lossy(&commit_out.stderr);
+    assert!(
+        commit_out.status.success(),
+        "Commit with valid ENGRAM_PATH must succeed: stdout={stdout}, stderr={stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_script_explicit_engram_path_invalid_fails_closed() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("engram_path_invalid");
+
+    let inst_out = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["hook", "install"])
+        .output()
+        .unwrap();
+    assert!(inst_out.status.success());
+
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("app.ts"), "export const a = 1;").unwrap();
+    let _ = Command::new("git")
+        .args(["add", "src/app.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Invalid ENGRAM_PATH commit"])
+        .env("ENGRAM_PATH", "/nonexistent/path/to/engram_invalid_exe")
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    assert!(!commit_out.status.success(), "Commit must fail with invalid ENGRAM_PATH");
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&commit_out.stdout),
+        String::from_utf8_lossy(&commit_out.stderr)
+    );
+    assert!(
+        combined.contains("Configured ENGRAM_PATH"),
+        "Must output diagnostic mentioning ENGRAM_PATH: {combined}"
+    );
+    assert!(
+        combined.contains("--no-verify"),
+        "Must mention --no-verify bypass: {combined}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_script_explicit_engram_path_incompatible_fails_closed() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("engram_path_incompatible");
+
+    let inst_out = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["hook", "install"])
+        .output()
+        .unwrap();
+    assert!(inst_out.status.success());
+
+    let mock_bin = ws.join("mock_old_engram.sh");
+    fs::write(
+        &mock_bin,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"engram 1.5.0\"; exit 0; fi\necho \"error: unrecognized subcommand '$1'\" >&2\nexit 1\n",
+    )
+    .unwrap();
+
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("app.ts"), "export const a = 1;").unwrap();
+    let _ = Command::new("git")
+        .args(["add", "src/app.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let mock_bin_str = mock_bin.to_string_lossy().replace('\\', "/");
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Incompatible ENGRAM_PATH commit"])
+        .env("ENGRAM_PATH", &mock_bin_str)
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    assert!(!commit_out.status.success(), "Commit must fail with incompatible ENGRAM_PATH");
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&commit_out.stdout),
+        String::from_utf8_lossy(&commit_out.stderr)
+    );
+    assert!(
+        combined.contains("does not support the required 'hook' command"),
+        "Must output diagnostic explaining hook subcommand is missing: {combined}"
+    );
+    assert!(
+        combined.contains("--no-verify"),
+        "Must mention --no-verify: {combined}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_script_prefers_recorded_installer_binary() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("recorded_installer");
+
+    let inst_out = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["hook", "install"])
+        .output()
+        .unwrap();
+    assert!(inst_out.status.success());
+
+    let hook_path = ws.join(".git").join("hooks").join("pre-commit");
+    let hook_content = fs::read_to_string(&hook_path).unwrap();
+    assert!(
+        hook_content.contains("INSTALLER_BIN="),
+        "Hook must declare INSTALLER_BIN: {hook_content}"
+    );
+
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .arg("init")
+        .output()
+        .unwrap();
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("app.ts"), "export const ok = true;").unwrap();
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["contract", "create", "Add ok", "--files", "src/app.ts"])
+        .output()
+        .unwrap();
+
+    let _ = Command::new("git")
+        .args(["add", "src/app.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Commit with installed hook"])
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&commit_out.stdout);
+    let stderr = String::from_utf8_lossy(&commit_out.stderr);
+    assert!(
+        commit_out.status.success(),
+        "Git commit must succeed using recorded installer: stdout={stdout}, stderr={stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_executes_from_repository_subdirectory() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("subfolder_commit");
+
+    let inst_out = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["hook", "install"])
+        .output()
+        .unwrap();
+    assert!(inst_out.status.success());
+
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .arg("init")
+        .output()
+        .unwrap();
+
+    let sub_dir = ws.join("nested").join("subpkg");
+    fs::create_dir_all(&sub_dir).unwrap();
+    let nested_file = sub_dir.join("sub.ts");
+    fs::write(&nested_file, "export const sub = true;\n").unwrap();
+
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["contract", "create", "Nested task", "--files", "nested/subpkg/sub.ts"])
+        .output()
+        .unwrap();
+
+    let _ = Command::new("git")
+        .args(["add", "nested/subpkg/sub.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Commit from subdirectory"])
+        .current_dir(&sub_dir)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&commit_out.stdout);
+    let stderr = String::from_utf8_lossy(&commit_out.stderr);
+    assert!(
+        commit_out.status.success(),
+        "Subdirectory commit must resolve REPO_ROOT and succeed: stdout={stdout}, stderr={stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_prefers_repository_target_over_outdated_path() {
+    let bin = env!("CARGO_BIN_EXE_engram");
+    let ws = setup_test_git_repo("repo_target_over_path");
+
+    let hooks_dir = ws.join(".git").join("hooks");
+    fs::create_dir_all(&hooks_dir).unwrap();
+    let hook_path = hooks_dir.join("pre-commit");
+    let script = format!("#!/bin/sh\n{}\n", engram::hook::HOOK_SCRIPT_BODY);
+    fs::write(&hook_path, &script).unwrap();
+
+    let target_debug = ws.join("target").join("debug");
+    fs::create_dir_all(&target_debug).unwrap();
+    let target_bin = target_debug.join(if cfg!(windows) { "engram.exe" } else { "engram" });
+    fs::copy(bin, &target_bin).unwrap();
+
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .arg("init")
+        .output()
+        .unwrap();
+
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("app.ts"), "export const ok = 1;").unwrap();
+    let _ = Command::new(bin)
+        .arg("-C")
+        .arg(&ws)
+        .args(["contract", "create", "Scoped", "--files", "src/app.ts"])
+        .output()
+        .unwrap();
+
+    let _ = Command::new("git")
+        .args(["add", "src/app.ts"])
+        .current_dir(&ws)
+        .output();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Commit using repo target"])
+        .env_remove("ENGRAM_PATH")
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&commit_out.stdout);
+    let stderr = String::from_utf8_lossy(&commit_out.stderr);
+    assert!(
+        commit_out.status.success(),
+        "Must find repo target and succeed: stdout={stdout}, stderr={stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_hook_outdated_binary_without_fallback_diagnostics() {
+    let ws = setup_test_git_repo("outdated_diag");
+
+    let hooks_dir = ws.join(".git").join("hooks");
+    fs::create_dir_all(&hooks_dir).unwrap();
+    let hook_path = hooks_dir.join("pre-commit");
+    let script = format!("#!/bin/sh\n{}\n", engram::hook::HOOK_SCRIPT_BODY);
+    fs::write(&hook_path, &script).unwrap();
+
+    let mock_bin_dir = ws.join("mock_bin");
+    fs::create_dir_all(&mock_bin_dir).unwrap();
+    let mock_engram = mock_bin_dir.join("engram");
+    fs::write(
+        &mock_engram,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"engram 1.4.0\"; exit 0; fi\necho \"error: unrecognized subcommand '$1'\" >&2\nexit 1\n",
+    )
+    .unwrap();
+
+    let src_dir = ws.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("test.ts"), "export const t = 1;").unwrap();
+    let _ = Command::new("git")
+        .args(["add", "src/test.ts"])
+        .current_dir(&ws)
+        .output();
+
+    // Filter out any target or scratch directories from PATH so only outdated binary is on PATH
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let filtered: Vec<_> = std::env::split_paths(&path_var)
+        .filter(|p| {
+            let s = p.to_string_lossy().to_lowercase();
+            !s.contains("target\\debug")
+                && !s.contains("target/debug")
+                && !s.contains("target\\release")
+                && !s.contains("target/release")
+                && !s.contains("test_clean_install")
+                && !s.contains("smoke_test")
+        })
+        .collect();
+    let mut new_paths = vec![mock_bin_dir.clone()];
+    new_paths.extend(filtered);
+    let new_path = std::env::join_paths(new_paths).unwrap();
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", "Outdated commit"])
+        .env("PATH", new_path)
+        .env_remove("ENGRAM_PATH")
+        .current_dir(&ws)
+        .output()
+        .unwrap();
+
+    assert!(!commit_out.status.success(), "Commit must fail when only outdated binary is found");
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&commit_out.stdout),
+        String::from_utf8_lossy(&commit_out.stderr)
+    );
+    assert!(
+        combined.contains("does not support the required 'hook' command")
+            || combined.contains("No compatible 'engram' executable found"),
+        "Must output actionable diagnostic: {combined}"
+    );
+    assert!(
+        combined.contains("--no-verify"),
+        "Must output --no-verify escape hatch: {combined}"
+    );
+
+    let _ = fs::remove_dir_all(&ws);
+}

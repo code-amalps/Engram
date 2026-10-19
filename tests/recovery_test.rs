@@ -92,6 +92,7 @@ fn test_1_violation_recovery_attempt1_and_resolution() {
         task: "Refactor order export system".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -197,6 +198,7 @@ fn test_2_multi_turn_exhaustion_gate_and_blocked_awaiting_human() {
         task: "Refactor secrets handling".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -363,6 +365,7 @@ fn test_4_zero_source_code_modification_invariant() {
         task: "Update orders export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -453,6 +456,7 @@ rules:
         task: "Update orders export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -511,6 +515,7 @@ fn test_6_mcp_recover_tool_invocation_and_exhaustion() {
         task: "Refactor secret store".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -566,6 +571,7 @@ fn test_7_locked_session_rejects_recovery() {
         task: "Update export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -603,6 +609,7 @@ fn test_8_blocked_awaiting_human_blocks_postflight_and_preflight() {
         task: "Refactor secret store".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -661,6 +668,7 @@ fn test_9_human_reconciliation_unblocks_exhausted_contract_and_session() {
         task: "Refactor secret store".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -715,6 +723,7 @@ fn test_10_compliant_working_tree_recovery_resolves_without_burning_attempts() {
         task: "Add orders export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -751,6 +760,7 @@ fn test_11_concurrent_recovery_invocations_file_lock_and_cas_protection() {
         task: "Refactor secret store".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -806,6 +816,7 @@ fn test_12_structured_plan_contains_failure_evidence_and_approval_flag() {
         task: "Update export service".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();
@@ -1050,6 +1061,7 @@ fn test_18_recovery_state_consistency_and_reconciliation() {
         task: "Update export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();

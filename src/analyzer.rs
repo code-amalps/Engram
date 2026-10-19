@@ -1,7 +1,7 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ignore::WalkBuilder;
 use regex::Regex;
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -137,12 +137,16 @@ pub fn extract_import_specifier(text: &str, lang: &str) -> String {
     if lang == "typescript" || lang == "javascript" {
         if let Some(pos) = text.find("from") {
             let after = text[pos + 4..].trim();
-            return after.trim_matches(|c| c == '\'' || c == '"' || c == ';' || c == ' ').to_string();
+            return after
+                .trim_matches(|c| c == '\'' || c == '"' || c == ';' || c == ' ')
+                .to_string();
         }
         if let Some(pos) = text.find("require(") {
             let after = text[pos + 8..].trim();
             if let Some(end) = after.find(')') {
-                return after[..end].trim_matches(|c| c == '\'' || c == '"' || c == ' ').to_string();
+                return after[..end]
+                    .trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string();
             }
         }
     } else if lang == "python" {
@@ -167,7 +171,12 @@ pub fn extract_import_specifier(text: &str, lang: &str) -> String {
             return text[4..].trim().trim_matches(';').to_string();
         }
     } else if lang == "java" && text.starts_with("import ") {
-        return text[7..].trim().trim_start_matches("static ").trim().trim_matches(';').to_string();
+        return text[7..]
+            .trim()
+            .trim_start_matches("static ")
+            .trim()
+            .trim_matches(';')
+            .to_string();
     }
     text.chars().take(120).collect()
 }
@@ -192,8 +201,17 @@ pub fn resolve_import_path(current_file: &str, spec: &str) -> String {
         let parent = Path::new(current_file).parent().unwrap_or(Path::new(""));
         let joined = parent.join(spec);
         let normalized = normalize_rel_path(&joined);
-        if !normalized.contains('.') {
-            format!("{normalized}.ts")
+        let ext = Path::new(&normalized)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let is_code_ext = matches!(ext, "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "json");
+        if !is_code_ext {
+            if current_file.ends_with(".js") || current_file.ends_with(".jsx") {
+                format!("{normalized}.js")
+            } else {
+                format!("{normalized}.ts")
+            }
         } else {
             normalized
         }
@@ -239,7 +257,8 @@ pub fn visit(
             fingerprint,
         });
     }
-    if n.kind().contains("import") || n.kind() == "using_directive" || n.kind() == "use_declaration" {
+    if n.kind().contains("import") || n.kind() == "using_directive" || n.kind() == "use_declaration"
+    {
         let raw = node_text(n, src);
         let spec = extract_import_specifier(&raw, lang);
         if !spec.is_empty() {
@@ -274,12 +293,8 @@ pub fn parse_file(
     if lang == "go" {
         let go_mod = crate::go_parser::load_root_go_mod_doc(root);
         let ast = crate::go_parser::extract_go_ast(&source)?;
-        let (symbols, rels) = crate::go_parser::convert_go_ast_to_engram_with_root(
-            root,
-            rel,
-            &ast,
-            go_mod.as_ref(),
-        );
+        let (symbols, rels) =
+            crate::go_parser::convert_go_ast_to_engram_with_root(root, rel, &ast, go_mod.as_ref());
         let display = redact(&source);
         let record = FileRecord {
             path: rel.into(),
@@ -292,11 +307,8 @@ pub fn parse_file(
 
     if lang == "java" {
         let ast = crate::java_parser::extract_java_ast(&source)?;
-        let (symbols, rels) = crate::java_parser::convert_java_ast_to_engram_with_root(
-            root,
-            rel,
-            &ast,
-        );
+        let (symbols, rels) =
+            crate::java_parser::convert_java_ast_to_engram_with_root(root, rel, &ast);
         let display = redact(&source);
         let record = FileRecord {
             path: rel.into(),
@@ -409,7 +421,7 @@ pub fn reconcile_symbol_ids(
     let previous: Vec<(String, String, String, String, usize, String)> = {
         let mut stmt = tx.prepare(
             "SELECT entity_id, path, name, kind, start_line, ast_fingerprint 
-             FROM entity_versions WHERE invalidated_at_revision IS NULL"
+             FROM entity_versions WHERE invalidated_at_revision IS NULL",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -614,17 +626,18 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
     let mut changed_files_list: Vec<String> = Vec::new();
     let mut changed_symbols_list: Vec<String> = Vec::new();
     for (abs, rel) in &files {
-        let (content_hash, bytes, _is_fast) = match crate::incremental::get_authoritative_content_hash(abs, rel, &tx) {
-            Ok(res) => res,
-            Err(_) => {
-                let b = match fs::read(abs) {
-                    Ok(b) if b.len() <= 2_000_000 && !b.contains(&0) => b,
-                    _ => continue,
-                };
-                let h = hash(&b);
-                (h, b, false)
-            }
-        };
+        let (content_hash, bytes, _is_fast) =
+            match crate::incremental::get_authoritative_content_hash(abs, rel, &tx) {
+                Ok(res) => res,
+                Err(_) => {
+                    let b = match fs::read(abs) {
+                        Ok(b) if b.len() <= 2_000_000 && !b.contains(&0) => b,
+                        _ => continue,
+                    };
+                    let h = hash(&b);
+                    (h, b, false)
+                }
+            };
         if !bytes.is_empty() && (bytes.len() > 2_000_000 || bytes.contains(&0)) {
             continue;
         }
@@ -741,10 +754,8 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         }
     }
     if !go_file_asts.is_empty() {
-        let go_refs: Vec<(&str, &crate::go_parser::GoFileAst)> = go_file_asts
-            .iter()
-            .map(|(p, a)| (p.as_str(), a))
-            .collect();
+        let go_refs: Vec<(&str, &crate::go_parser::GoFileAst)> =
+            go_file_asts.iter().map(|(p, a)| (p.as_str(), a)).collect();
         let cross_iface_rels = crate::go_parser::infer_cross_file_go_interfaces(&go_refs);
         for r in cross_iface_rels {
             let path = r.source.split("::").next().unwrap_or(&r.source);
@@ -786,7 +797,11 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         }
     }
     if !changed_files_list.is_empty() {
-        if let Ok(dependents) = crate::incremental::find_tier2_relational_dependents(&tx, &changed_files_list, &changed_symbols_list) {
+        if let Ok(dependents) = crate::incremental::find_tier2_relational_dependents(
+            &tx,
+            &changed_files_list,
+            &changed_symbols_list,
+        ) {
             for dep in dependents {
                 tx.execute(
                     "UPDATE relationships SET created_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL",

@@ -4,12 +4,12 @@
 //! Maven `pom.xml` and Gradle `build.gradle` dependency parsing,
 //! Interface implementation matching, and test convention linking.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tree_sitter::{Node, Parser as TsParser};
 
-use crate::analyzer::{Relationship, Symbol, node_text};
+use crate::analyzer::{node_text, Relationship, Symbol};
 use crate::storage::hash;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,9 +34,9 @@ pub struct JavaType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JavaMethod {
-    pub name: String,          // Canonical name: "InvoiceService.createInvoice"
-    pub class_name: String,    // "InvoiceService"
-    pub method_name: String,   // "createInvoice"
+    pub name: String,        // Canonical name: "InvoiceService.createInvoice"
+    pub class_name: String,  // "InvoiceService"
+    pub method_name: String, // "createInvoice"
     pub return_type: Option<String>,
     pub params: Vec<String>,
     pub annotations: Vec<String>,
@@ -250,17 +250,15 @@ fn extract_type_decl(node: Node, src: &[u8], ast: &mut JavaFileAst, enclosing_ty
     });
 
     // Extract body members (methods, constructors, nested types)
-    let body_node = node
-        .child_by_field_name("body")
-        .or_else(|| {
-            let mut c = node.walk();
-            node.children(&mut c).find(|n| {
-                n.kind() == "class_body"
-                    || n.kind() == "interface_body"
-                    || n.kind() == "enum_body"
-                    || n.kind() == "annotation_type_body"
-            })
-        });
+    let body_node = node.child_by_field_name("body").or_else(|| {
+        let mut c = node.walk();
+        node.children(&mut c).find(|n| {
+            n.kind() == "class_body"
+                || n.kind() == "interface_body"
+                || n.kind() == "enum_body"
+                || n.kind() == "annotation_type_body"
+        })
+    });
 
     if let Some(body) = body_node {
         let mut b_cursor = body.walk();
@@ -288,7 +286,12 @@ fn extract_type_decl(node: Node, src: &[u8], ast: &mut JavaFileAst, enclosing_ty
     }
 }
 
-fn extract_method(node: Node, src: &[u8], class_name: &str, is_constructor: bool) -> Option<JavaMethod> {
+fn extract_method(
+    node: Node,
+    src: &[u8],
+    class_name: &str,
+    is_constructor: bool,
+) -> Option<JavaMethod> {
     let raw_name = node
         .child_by_field_name("name")
         .map(|n| node_text(n, src))
@@ -487,13 +490,25 @@ pub fn parse_build_gradle(contents: &str) -> GradleDocument {
             }
         } else {
             if trimmed.starts_with("group =") || trimmed.starts_with("group=") {
-                let val = trimmed.split('=').nth(1).unwrap_or("").trim().trim_matches(|c| c == '\'' || c == '"');
+                let val = trimmed
+                    .split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches(|c| c == '\'' || c == '"');
                 doc.group = Some(val.to_string());
             } else if trimmed.starts_with("version =") || trimmed.starts_with("version=") {
-                let val = trimmed.split('=').nth(1).unwrap_or("").trim().trim_matches(|c| c == '\'' || c == '"');
+                let val = trimmed
+                    .split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches(|c| c == '\'' || c == '"');
                 doc.version = Some(val.to_string());
             } else if trimmed.starts_with("id '") || trimmed.starts_with("id \"") {
-                let id = trimmed[3..].trim().trim_matches(|c| c == '\'' || c == '"' || c == ';');
+                let id = trimmed[3..]
+                    .trim()
+                    .trim_matches(|c| c == '\'' || c == '"' || c == ';');
                 doc.plugins.push(id.to_string());
             }
         }
@@ -567,7 +582,11 @@ pub fn convert_java_ast_to_engram_with_root(
 
     // 3. Methods & Constructors
     for m in &ast.methods {
-        let kind = if m.is_constructor { "CONSTRUCTOR" } else { "METHOD" };
+        let kind = if m.is_constructor {
+            "CONSTRUCTOR"
+        } else {
+            "METHOD"
+        };
         let stable = hash(format!("{rel_path}\0{}\0{}\0", kind, m.name).as_bytes());
         symbols.push(Symbol {
             id: format!("ent_{}", &stable[..24]),
@@ -643,7 +662,11 @@ pub fn convert_java_ast_to_engram_with_root(
 }
 
 /// Resolve a Java import specifier (e.g. `com.engram.billing.Invoice`) to a local file path if present.
-pub fn resolve_java_import_to_file(root: &Path, _current_rel: &str, import_path: &str) -> Option<String> {
+pub fn resolve_java_import_to_file(
+    root: &Path,
+    _current_rel: &str,
+    import_path: &str,
+) -> Option<String> {
     let rel_file_path = format!("{}.java", import_path.replace('.', "/"));
 
     // Standard Maven / Gradle candidate paths
@@ -833,13 +856,25 @@ dependencies {
         assert_eq!(doc.plugins, vec!["java"]);
         assert_eq!(doc.dependencies.len(), 2);
         assert_eq!(doc.dependencies[0].configuration, "implementation");
-        assert_eq!(doc.dependencies[0].notation, "org.springframework.boot:spring-boot-starter:3.2.0");
+        assert_eq!(
+            doc.dependencies[0].notation,
+            "org.springframework.boot:spring-boot-starter:3.2.0"
+        );
     }
 
     #[test]
     fn test_java_symbol_matching() {
-        assert!(matches_java_contract_symbol("InvoiceService.createInvoice", "InvoiceService.createInvoice"));
-        assert!(matches_java_contract_symbol("createInvoice", "InvoiceService.createInvoice"));
-        assert!(matches_java_contract_symbol("InvoiceService.createInvoice()", "InvoiceService.createInvoice"));
+        assert!(matches_java_contract_symbol(
+            "InvoiceService.createInvoice",
+            "InvoiceService.createInvoice"
+        ));
+        assert!(matches_java_contract_symbol(
+            "createInvoice",
+            "InvoiceService.createInvoice"
+        ));
+        assert!(matches_java_contract_symbol(
+            "InvoiceService.createInvoice()",
+            "InvoiceService.createInvoice"
+        ));
     }
 }

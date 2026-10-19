@@ -2,10 +2,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use engram::contract::{
-    check_contract, create_contract, install_pre_commit_hook,
-    ratify_contract, reconcile_contract, uninstall_pre_commit_hook,
-    validate_contract_diff_with_constitution, CheckExitCode, CheckOptions,
-    FileValidationCategory, RatificationStatus,
+    CheckExitCode, CheckOptions, FileValidationCategory, RatificationStatus, check_contract,
+    create_contract, install_pre_commit_hook, ratify_contract, reconcile_contract,
+    uninstall_pre_commit_hook, validate_contract_diff_with_constitution,
 };
 
 fn temp_repo_dir(prefix: &str) -> PathBuf {
@@ -55,7 +54,11 @@ fn test_check_all_expected_passes() {
     assert_eq!(summary.expected_count, 2);
     assert_eq!(summary.unexpected_count, 0);
     assert_eq!(missing.len(), 0);
-    assert!(classifications.iter().all(|c| c.category == FileValidationCategory::Expected));
+    assert!(
+        classifications
+            .iter()
+            .all(|c| c.category == FileValidationCategory::Expected)
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -356,9 +359,17 @@ fn test_human_reconciliation_v1_to_v2() {
 
     assert_eq!(reconciled.version, 2);
     assert_eq!(reconciled.provenance.origin, "RECONCILED");
-    assert_eq!(reconciled.provenance.ratification_status, RatificationStatus::Ratified);
+    assert_eq!(
+        reconciled.provenance.ratification_status,
+        RatificationStatus::Ratified
+    );
     assert_eq!(reconciled.provenance.ratified_by.as_deref(), Some("Amal"));
-    assert!(reconciled.boundary.expected_files.contains(&"src/payments/metrics.rs".to_string()));
+    assert!(
+        reconciled
+            .boundary
+            .expected_files
+            .contains(&"src/payments/metrics.rs".to_string())
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -435,8 +446,15 @@ rules:
     assert_eq!(summary.expected_count, 0);
 
     let auth_change = &classifications[0];
-    assert_eq!(auth_change.category, FileValidationCategory::BoundaryViolation);
-    assert!(auth_change.reason.contains("Constitution rule 'Auth Layer Immutable'"));
+    assert_eq!(
+        auth_change.category,
+        FileValidationCategory::BoundaryViolation
+    );
+    assert!(
+        auth_change
+            .reason
+            .contains("Constitution rule 'Auth Layer Immutable'")
+    );
     assert!(auth_change.reason.contains("strictly forbids"));
 
     fs::remove_dir_all(&root).unwrap();
@@ -475,8 +493,10 @@ fn test_contract_modified_in_pr_requires_ratification() {
     assert!(
         res.failure_reasons
             .iter()
-            .any(|f| f.contains("CONTRACT_MODIFIED_IN_PR") && f.to_ascii_lowercase().contains("ratification required")),
-        "Expected CONTRACT_MODIFIED_IN_PR failure reason, got: {:?}", res.failure_reasons
+            .any(|f| f.contains("CONTRACT_MODIFIED_IN_PR")
+                && f.to_ascii_lowercase().contains("ratification required")),
+        "Expected CONTRACT_MODIFIED_IN_PR failure reason, got: {:?}",
+        res.failure_reasons
     );
 
     // 2. Human ratifies the contract
@@ -487,11 +507,19 @@ fn test_contract_modified_in_pr_requires_ratification() {
         "Reviewed and approved by tech lead",
     )
     .unwrap();
-    assert_eq!(ratified.provenance.ratification_status, RatificationStatus::Ratified);
+    assert_eq!(
+        ratified.provenance.ratification_status,
+        RatificationStatus::Ratified
+    );
 
     // 3. Re-run check with provenance: passes ratification check!
     let res2 = check_contract(&root, &opts);
-    assert!(!res2.failure_reasons.iter().any(|f| f.contains("CONTRACT_MODIFIED_IN_PR")));
+    assert!(
+        !res2
+            .failure_reasons
+            .iter()
+            .any(|f| f.contains("CONTRACT_MODIFIED_IN_PR"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

@@ -7,7 +7,7 @@
 //! - Fallback: Safe full-analysis fallback when incremental correctness cannot be established.
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{

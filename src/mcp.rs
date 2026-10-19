@@ -1,7 +1,7 @@
 //! MCP Server implementation: stdio JSON-RPC 2.0 protocol exposing engineering intelligence.
 
-use anyhow::{Result, anyhow, bail};
-use serde_json::{Value, json};
+use anyhow::{anyhow, bail, Result};
+use serde_json::{json, Value};
 use std::{
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
@@ -184,9 +184,44 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if budget == 0 {
                 bail!("Token budget must be greater than 0");
             }
-            Ok(json_result(serde_json::to_value(context(
-                &root, task, budget,
-            )?)?))
+            let details = args["details"]
+                .as_bool()
+                .or_else(|| args["verbose"].as_bool())
+                .unwrap_or(false);
+            let ctx = context(&root, task, budget)?;
+            if details {
+                Ok(json_result(serde_json::to_value(ctx)?))
+            } else {
+                let target_files: Vec<Value> = ctx
+                    .files
+                    .iter()
+                    .map(|f| {
+                        json!({
+                            "path": f.path,
+                            "level": f.level,
+                            "score": (f.score * 100.0).round() / 100.0,
+                        })
+                    })
+                    .collect();
+                let governing_rules: Vec<String> =
+                    ctx.constraints.iter().take(5).cloned().collect();
+                let cochange_warnings: Vec<String> =
+                    ctx.cochange_alerts.iter().take(5).cloned().collect();
+                let relevant_decisions: Vec<String> =
+                    ctx.relevant_memories.iter().take(5).cloned().collect();
+                Ok(json_result(json!({
+                    "status": "READY",
+                    "task": ctx.task,
+                    "target_files": target_files,
+                    "governing_rules": governing_rules,
+                    "cochange_warnings": cochange_warnings,
+                    "relevant_decisions": relevant_decisions,
+                    "ambiguity_gaps": ctx.gaps,
+                    "token_budget": ctx.token_budget,
+                    "estimated_tokens": ctx.estimated_tokens,
+                    "next_action": "Plan changes within target files and run engram_preflight with planned_files."
+                })))
+            }
         }
         "engram_inspect_symbol" => {
             let target = args["target"]
@@ -397,18 +432,84 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 None
             };
 
+            let planned_files: Option<Vec<String>> = args["planned_files"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            });
+
+            if let Some(ref pf) = planned_files {
+                for p in pf {
+                    validate_workspace_path(&root, p)
+                        .map_err(|e| anyhow!("Planned file validation failed: {}", e))?;
+                }
+            }
+
+            let details = args["details"]
+                .as_bool()
+                .or_else(|| args["verbose"].as_bool())
+                .unwrap_or(false);
+
             let opts = crate::flywheel::PreflightOptions {
                 task: task.to_string(),
                 token_budget: budget,
                 forbidden_boundaries: forbidden,
+                planned_files,
             };
             let res = crate::flywheel::preflight_task(&root, &opts)?;
-            Ok(json_result(serde_json::to_value(res)?))
+
+            if details {
+                Ok(json_result(serde_json::to_value(res)?))
+            } else {
+                let governing_rule_ids: Vec<String> = res
+                    .governing_policies
+                    .iter()
+                    .map(|p| format!("{}: {}", p.id, p.title))
+                    .collect();
+                let status_str = match res.status {
+                    crate::flywheel::PreflightStatus::ReadyForImplementation => {
+                        "READY_FOR_IMPLEMENTATION"
+                    }
+                    crate::flywheel::PreflightStatus::Blocked => "BLOCKED",
+                };
+                let blocking_violations = if res.status == crate::flywheel::PreflightStatus::Blocked
+                {
+                    res.ambiguity_gaps.clone()
+                } else {
+                    Vec::new()
+                };
+                let next_action = if res.status == crate::flywheel::PreflightStatus::Blocked {
+                    "Reconcile blocking violations before modifying code or request human override."
+                } else if res.is_reused_contract {
+                    "Valid Change Contract active. Proceed to edit expected files."
+                } else {
+                    "Change Contract locked. Proceed to edit expected files. Re-run preflight with planned_files if new files are needed."
+                };
+
+                Ok(json_result(json!({
+                    "status": status_str,
+                    "contract_id": res.contract_id,
+                    "contract_version": res.contract_version,
+                    "task_goal": res.task_goal,
+                    "expected_files": res.expected_files,
+                    "expected_modules": res.expected_modules,
+                    "forbidden_boundaries": res.forbidden_boundaries,
+                    "governing_rules": governing_rule_ids,
+                    "blocking_violations": blocking_violations,
+                    "is_reused_contract": res.is_reused_contract,
+                    "reused_reason": res.reused_reason,
+                    "next_action": next_action,
+                })))
+            }
         }
         "engram_postflight" => {
             let contract_id = args["contract_id"].as_str().map(str::to_string);
             let strict = args["strict"].as_bool().unwrap_or(false);
             let staged = args["staged"].as_bool().unwrap_or(false);
+            let details = args["details"]
+                .as_bool()
+                .or_else(|| args["verbose"].as_bool())
+                .unwrap_or(false);
             let opts = crate::flywheel::PostflightOptions {
                 contract_id,
                 strict,
@@ -417,7 +518,57 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 ci_mode: false,
             };
             let res = crate::flywheel::postflight_check(&root, &opts)?;
-            Ok(json_result(serde_json::to_value(res)?))
+            if details {
+                Ok(json_result(serde_json::to_value(res)?))
+            } else {
+                let verdict_str = match res.verdict {
+                    crate::flywheel::PostflightVerdict::Pass => "PASS",
+                    crate::flywheel::PostflightVerdict::BlockedBoundaryViolation => {
+                        "BLOCKED_BOUNDARY_VIOLATION"
+                    }
+                    crate::flywheel::PostflightVerdict::ReviewUnexpectedExpansion => {
+                        "REVIEW_UNEXPECTED_EXPANSION"
+                    }
+                    crate::flywheel::PostflightVerdict::BlockedConstitutionRule => {
+                        "BLOCKED_CONSTITUTION_RULE"
+                    }
+                };
+                let violations: Vec<Value> = res
+                    .classifications
+                    .iter()
+                    .filter(|c| {
+                        c.category != crate::contract::FileValidationCategory::Expected
+                            && c.category
+                                != crate::contract::FileValidationCategory::ExpectedExpansion
+                    })
+                    .map(|c| {
+                        json!({
+                            "path": c.path,
+                            "category": format!("{:?}", c.category),
+                            "reason": c.reason,
+                        })
+                    })
+                    .collect();
+                let next_action = if res.verdict == crate::flywheel::PostflightVerdict::Pass {
+                    "All changes compliant with Change Contract. Ready to commit / create PR."
+                } else {
+                    "Revert violating/unexpected files or invoke engram_recover for structured remediation."
+                };
+                Ok(json_result(json!({
+                    "verdict": verdict_str,
+                    "contract_id": res.contract_id,
+                    "status": if res.verdict == crate::flywheel::PostflightVerdict::Pass { "COMPLIANT" } else { "VIOLATION_DETECTED" },
+                    "total_changed_files": res.total_changed_files,
+                    "expected_count": res.expected_count,
+                    "expansion_count": res.expansion_count,
+                    "unexpected_count": res.unexpected_count,
+                    "boundary_violation_count": res.boundary_violation_count,
+                    "violations": violations,
+                    "constitution_passed": res.constitution_passed,
+                    "summary": res.summary,
+                    "next_action": next_action,
+                })))
+            }
         }
         "engram_recover" => {
             let contract_id = args["contract_id"]
@@ -488,7 +639,8 @@ pub fn tools_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "task": { "type": "string", "description": "The coding task goal or intent" },
-                    "token_budget": { "type": "integer", "minimum": 1, "description": "Maximum token budget limit" }
+                    "token_budget": { "type": "integer", "minimum": 1, "description": "Maximum token budget limit" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload including complete file excerpts and ecosystem dependencies (default false for compact token-efficient payload)" }
                 },
                 "required": ["task"]
             }
@@ -600,7 +752,9 @@ pub fn tools_definitions() -> Value {
                 "properties": {
                     "task": { "type": "string", "description": "The coding task goal or intent" },
                     "token_budget": { "type": "integer", "description": "Context token budget limit (default 1200)" },
-                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" }
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "List of planned target files for incremental delta validation" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload with complete impact trees and policy rationale (default false for compact token-efficient payload)" }
                 },
                 "required": ["task"]
             }
@@ -613,7 +767,8 @@ pub fn tools_definitions() -> Value {
                 "properties": {
                     "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against" },
                     "strict": { "type": "boolean", "description": "Fail if unexpected files are modified" },
-                    "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" }
+                    "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload with all file classification objects (default false for compact token-efficient payload)" }
                 }
             }
         },

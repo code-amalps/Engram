@@ -105,8 +105,14 @@ fn test_end_to_end_lifecycle() {
         .output()
         .expect("failed to execute decision");
     if !output.status.success() {
-        eprintln!("Decision stderr: {}", String::from_utf8_lossy(&output.stderr));
-        eprintln!("Decision stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!(
+            "Decision stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        eprintln!(
+            "Decision stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     assert!(output.status.success());
 

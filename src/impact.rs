@@ -19,13 +19,13 @@ use crate::storage::root_path;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ImpactCategory {
-    Direct,           // The target symbol or enclosing definition
-    Test,             // Test suites asserting against the target (TESTS)
-    Implementation,   // Struct ↔ Interface structural implementation (IMPLEMENTS)
-    Caller,           // Functions/methods referencing or invoking the target
-    ImportDependent,  // Workspace packages importing the target package (IMPORTS)
-    Configuration,    // Manifests, environment, or ecosystem configurations
-    Historical,       // Statistically mined Git co-change coupling
+    Direct,          // The target symbol or enclosing definition
+    Test,            // Test suites asserting against the target (TESTS)
+    Implementation,  // Struct ↔ Interface structural implementation (IMPLEMENTS)
+    Caller,          // Functions/methods referencing or invoking the target
+    ImportDependent, // Workspace packages importing the target package (IMPORTS)
+    Configuration,   // Manifests, environment, or ecosystem configurations
+    Historical,      // Statistically mined Git co-change coupling
 }
 
 impl ImpactCategory {
@@ -122,8 +122,9 @@ pub fn compute_impact_cone(
     target: &str,
     max_depth: usize,
 ) -> Result<ImpactCone> {
-    let root = root_path(root)?;
-    let trimmed_target = target.trim();
+    let _root = root_path(root)?;
+    let normalized_path_target = target.trim().replace('\\', "/");
+    let trimmed_target = normalized_path_target.as_str();
     let norm_target = crate::go_parser::normalize_go_symbol_name(trimmed_target);
     let norm_java = crate::java_parser::normalize_java_symbol_name(trimmed_target);
 
@@ -131,64 +132,159 @@ pub fn compute_impact_cone(
     let mut direct_entities = Vec::new();
     let mut target_file: Option<String> = None;
 
-    {
-        let mut stmt = conn.prepare(
-            "SELECT entity_id, path, name, kind, start_line, signature 
-             FROM entity_versions 
-             WHERE (name = ?1 OR name = ?2 OR name = ?3 OR path = ?1 OR path || '::' || name = ?1)
-               AND invalidated_at_revision IS NULL"
-        )?;
+    // Check if target refers to a file path or qualified symbol
+    let file_candidate = if let Some((f, _)) = trimmed_target.split_once("::") {
+        Some(f.trim_start_matches('/'))
+    } else if trimmed_target.contains('/') || trimmed_target.contains('.') {
+        Some(trimmed_target.trim_start_matches('/'))
+    } else {
+        None
+    };
 
-        let rows = stmt.query_map(params![trimmed_target, norm_target, norm_java], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, usize>(4)?,
-                r.get::<_, String>(5)?,
-            ))
-        })?;
-
-        for row in rows.flatten() {
-            if target_file.is_none() {
-                target_file = Some(row.1.clone());
+    let resolved_canonical_file = if let Some(cand) = file_candidate {
+        let mut exact_stmt = conn.prepare("SELECT path FROM files WHERE path = ?1")?;
+        let exact_opt: Option<String> = exact_stmt.query_row([cand], |r| r.get(0)).ok();
+        if let Some(exact) = exact_opt {
+            Some(exact)
+        } else {
+            let mut suffix_stmt = conn.prepare(
+                "SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC",
+            )?;
+            let matches: Vec<String> = suffix_stmt
+                .query_map([cand], |r| r.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            if matches.len() > 1 {
+                return Err(anyhow!(
+                    "Target file '{}' is ambiguous: matches multiple files: {:?}. Specify the exact canonical path.",
+                    trimmed_target,
+                    matches
+                ));
             }
-            direct_entities.push(ImpactEntity {
-                entity_id: row.0,
-                path: row.1.clone(),
-                symbol_name: Some(row.2.clone()),
-                category: ImpactCategory::Direct,
-                hop_distance: 0,
-                relationships: Vec::new(),
-                reason: format!("Target entity {} ({}) at line {}", row.2, row.3, row.4),
-            });
+            matches.into_iter().next()
+        }
+    } else {
+        None
+    };
+
+    {
+        if let Some(ref can_file) = resolved_canonical_file {
+            if let Some((_, sym_part)) = trimmed_target.split_once("::") {
+                let mut stmt = conn.prepare(
+                    "SELECT entity_id, path, name, kind, start_line, signature FROM entity_versions WHERE path = ?1 AND name = ?2 AND invalidated_at_revision IS NULL",
+                )?;
+                let rows = stmt.query_map(params![can_file, sym_part], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, usize>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                })?;
+                for row in rows.flatten() {
+                    if target_file.is_none() {
+                        target_file = Some(row.1.clone());
+                    }
+                    direct_entities.push(ImpactEntity {
+                        entity_id: row.0,
+                        path: row.1.clone(),
+                        symbol_name: Some(row.2.clone()),
+                        category: ImpactCategory::Direct,
+                        hop_distance: 0,
+                        relationships: Vec::new(),
+                        reason: format!("Target entity {} ({}) at line {}", row.2, row.3, row.4),
+                    });
+                }
+            } else {
+                let mut stmt = conn.prepare(
+                    "SELECT entity_id, path, name, kind, start_line, signature FROM entity_versions WHERE path = ?1 AND invalidated_at_revision IS NULL",
+                )?;
+                let rows = stmt.query_map(params![can_file], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, usize>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                })?;
+                for row in rows.flatten() {
+                    if target_file.is_none() {
+                        target_file = Some(row.1.clone());
+                    }
+                    direct_entities.push(ImpactEntity {
+                        entity_id: row.0,
+                        path: row.1.clone(),
+                        symbol_name: Some(row.2.clone()),
+                        category: ImpactCategory::Direct,
+                        hop_distance: 0,
+                        relationships: Vec::new(),
+                        reason: format!("Target entity {} ({}) at line {}", row.2, row.3, row.4),
+                    });
+                }
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT entity_id, path, name, kind, start_line, signature FROM entity_versions WHERE (name = ?1 OR name = ?2 OR name = ?3 OR path = ?1 OR path || '::' || name = ?1) AND invalidated_at_revision IS NULL",
+            )?;
+
+            let rows = stmt.query_map(params![trimmed_target, norm_target, norm_java], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, usize>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })?;
+
+            for row in rows.flatten() {
+                if target_file.is_none() {
+                    target_file = Some(row.1.clone());
+                }
+                direct_entities.push(ImpactEntity {
+                    entity_id: row.0,
+                    path: row.1.clone(),
+                    symbol_name: Some(row.2.clone()),
+                    category: ImpactCategory::Direct,
+                    hop_distance: 0,
+                    relationships: Vec::new(),
+                    reason: format!("Target entity {} ({}) at line {}", row.2, row.3, row.4),
+                });
+            }
         }
     }
 
     // If no direct symbol was matched, check if target is an indexed file path
     if direct_entities.is_empty() {
-        let mut stmt = conn.prepare("SELECT path FROM files WHERE path = ?1")?;
-        let exists: bool = stmt.query_row([trimmed_target], |_| Ok(true)).unwrap_or(false);
-        if exists {
-            target_file = Some(trimmed_target.to_string());
+        if let Some(matched) = resolved_canonical_file {
+            target_file = Some(matched.clone());
             direct_entities.push(ImpactEntity {
-                entity_id: format!("file_{}", trimmed_target),
-                path: trimmed_target.to_string(),
+                entity_id: format!("file_{}", matched),
+                path: matched.clone(),
                 symbol_name: None,
                 category: ImpactCategory::Direct,
                 hop_distance: 0,
                 relationships: Vec::new(),
-                reason: format!("Direct target file {}", trimmed_target),
+                reason: format!("Direct target file {}", matched),
             });
         }
     }
 
     if direct_entities.is_empty() {
-        return Err(anyhow!("Target entity or file '{}' not found in repository index", target));
+        return Err(anyhow!(
+            "Target entity or file '{}' not found in repository index",
+            target
+        ));
     }
 
-    let resolved_target_file = target_file.clone().unwrap_or_else(|| trimmed_target.to_string());
+    let resolved_target_file = target_file
+        .clone()
+        .unwrap_or_else(|| trimmed_target.to_string());
 
     // 2. Multi-Hop Breadth-First Expansion
     let mut visited_nodes: HashSet<String> = HashSet::new();
@@ -210,19 +306,20 @@ pub fn compute_impact_cone(
             continue;
         }
 
-        let prefix = format!("{}::%", curr_node);
         let next_depth = curr_depth + 1;
 
         // A. Outgoing relationships: curr_node -> target
         {
+            let prefix_start = format!("{}::", curr_node);
+            let prefix_end = format!("{}::\u{ffff}", curr_node);
             let mut stmt = conn.prepare(
                 "SELECT source_id, target, kind, evidence, confidence, path, line
                  FROM relationships
-                 WHERE (source_id = ?1 OR source_id LIKE ?2 OR path = ?1)
-                   AND invalidated_at_revision IS NULL"
+                 WHERE (source_id = ?1 OR (source_id >= ?2 AND source_id < ?3) OR path = ?1)
+                   AND invalidated_at_revision IS NULL",
             )?;
 
-            let rows = stmt.query_map(params![&curr_node, &prefix], |r| {
+            let rows = stmt.query_map(params![&curr_node, &prefix_start, &prefix_end], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
@@ -285,31 +382,86 @@ pub fn compute_impact_cone(
                 if !visited_nodes.contains(target_clean) {
                     visited_nodes.insert(target_clean.to_string());
                     visited_nodes.insert(target_file_part.to_string());
-                    queue.push_back((target_clean.to_string(), next_depth, target_file_part.to_string()));
+                    queue.push_back((
+                        target_clean.to_string(),
+                        next_depth,
+                        target_file_part.to_string(),
+                    ));
                 }
             }
         }
 
         // B. Incoming relationships: source -> curr_node (reverse dependency query)
         {
+            let curr_trimmed = curr_node.trim();
+            let curr_without_ext = curr_trimmed
+                .strip_suffix(".ts")
+                .or_else(|| curr_trimmed.strip_suffix(".js"))
+                .or_else(|| curr_trimmed.strip_suffix(".tsx"))
+                .or_else(|| curr_trimmed.strip_suffix(".jsx"))
+                .unwrap_or(curr_trimmed);
+
+            let file_trimmed = curr_file.trim();
+            let file_without_ext = file_trimmed
+                .strip_suffix(".ts")
+                .or_else(|| file_trimmed.strip_suffix(".js"))
+                .or_else(|| file_trimmed.strip_suffix(".tsx"))
+                .or_else(|| file_trimmed.strip_suffix(".jsx"))
+                .unwrap_or(file_trimmed);
+
+            let file_name = Path::new(file_trimmed)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(file_trimmed);
+            let file_name_without_ext = Path::new(file_without_ext)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(file_without_ext);
+
+            let prefix_start = format!("{}::", curr_trimmed);
+            let prefix_end = format!("{}::\u{ffff}", curr_trimmed);
+            let wo_prefix_start = format!("{}::", curr_without_ext);
+            let wo_prefix_end = format!("{}::\u{ffff}", curr_without_ext);
+
             let mut stmt = conn.prepare(
                 "SELECT source_id, target, kind, evidence, confidence, path, line
                  FROM relationships
-                 WHERE (target = ?1 OR target LIKE ?2 OR target = ?3)
-                   AND invalidated_at_revision IS NULL"
+                 WHERE (target = ?1
+                        OR (target >= ?2 AND target < ?3)
+                        OR target = ?4
+                        OR target = ?5
+                        OR (target >= ?6 AND target < ?7)
+                        OR target = ?8
+                        OR target = ?9
+                        OR target = ?10)
+                   AND invalidated_at_revision IS NULL",
             )?;
 
-            let rows = stmt.query_map(params![&curr_node, &prefix, &curr_file], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, f64>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, usize>(6)?,
-                ))
-            })?;
+            let rows = stmt.query_map(
+                params![
+                    curr_trimmed,
+                    &prefix_start,
+                    &prefix_end,
+                    file_trimmed,
+                    curr_without_ext,
+                    &wo_prefix_start,
+                    &wo_prefix_end,
+                    file_without_ext,
+                    file_name,
+                    file_name_without_ext,
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, f64>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, usize>(6)?,
+                    ))
+                },
+            )?;
 
             for row in rows.flatten() {
                 let (source_id, target, kind, evidence, confidence, _rel_path, line) = row;
@@ -331,7 +483,10 @@ pub fn compute_impact_cone(
                     ),
                     "IMPORTS" => (
                         ImpactCategory::ImportDependent,
-                        format!("Imported by dependent package {} (line {})", source_clean, line),
+                        format!(
+                            "Imported by dependent package {} (line {})",
+                            source_clean, line
+                        ),
                     ),
                     _ => (
                         ImpactCategory::ImportDependent,
@@ -362,13 +517,17 @@ pub fn compute_impact_cone(
                 if !visited_nodes.contains(source_clean) {
                     visited_nodes.insert(source_clean.to_string());
                     visited_nodes.insert(source_file_part.to_string());
-                    queue.push_back((source_clean.to_string(), next_depth, source_file_part.to_string()));
+                    queue.push_back((
+                        source_clean.to_string(),
+                        next_depth,
+                        source_file_part.to_string(),
+                    ));
                 }
             }
         }
 
         // C. Statistical Git Co-Change Signals (Historical Evidence)
-        if let Ok(cochanges) = crate::git_history::get_cochanges_for_file(&root, &curr_file, 0.25) {
+        if let Ok(cochanges) = crate::git_history::get_cochanges_for_file_conn(conn, &curr_file, 0.25) {
             for cochange in cochanges {
                 let partner = cochange.target_file.replace('\\', "/");
                 if visited_nodes.contains(&partner) {
@@ -432,7 +591,9 @@ pub fn compute_impact_cone(
 
     // Sort entities within each category by hop distance then path for deterministic outputs
     let sort_fn = |a: &ImpactEntity, b: &ImpactEntity| {
-        a.hop_distance.cmp(&b.hop_distance).then_with(|| a.path.cmp(&b.path))
+        a.hop_distance
+            .cmp(&b.hop_distance)
+            .then_with(|| a.path.cmp(&b.path))
     };
 
     direct_entities.sort_by(sort_fn);
@@ -561,6 +722,17 @@ pub fn format_impact_explanation(cone: &ImpactCone) -> String {
         for e in &cone.configuration_entities {
             out.push_str(&format!("    • {} (hop {})\n", e.path, e.hop_distance));
         }
+    }
+
+    let has_dependents = !cone.implementation_entities.is_empty()
+        || !cone.caller_entities.is_empty()
+        || !cone.test_entities.is_empty()
+        || !cone.import_dependent_entities.is_empty()
+        || !cone.historical_entities.is_empty()
+        || !cone.configuration_entities.is_empty();
+
+    if !has_dependents {
+        out.push_str("  (No downstream dependents, tests, or callers detected in index)\n");
     }
 
     out.push_str("\n🔍 PROVENANCE (WHY)\n");

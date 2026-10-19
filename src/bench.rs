@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::analyzer::{analyze, estimate_tokens};
-use crate::compiler::context;
 use crate::archaeology::explain_why;
+use crate::compiler::context;
 use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
 use crate::doctor::{diagnose_memory_health, LivenessStatus};
 use crate::memory::{
@@ -1439,7 +1439,11 @@ pub fn compute_dataset_hash(tasks: &[BenchmarkTask]) -> String {
 
 /// Create an isolated, non-polluting sandbox workspace for benchmark execution.
 fn create_benchmark_fixture(task: &BenchmarkTask) -> Result<PathBuf> {
-    let temp_root = std::env::temp_dir().join(format!("engram_bench_{}_{}", task.id, Uuid::new_v4().simple()));
+    let temp_root = std::env::temp_dir().join(format!(
+        "engram_bench_{}_{}",
+        task.id,
+        Uuid::new_v4().simple()
+    ));
     if temp_root.exists() {
         fs::remove_dir_all(&temp_root)?;
     }
@@ -1472,7 +1476,11 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
     let measured_files = ctx.files.len();
 
     // Baseline Discovery Simulation (deterministic model of full file traversal without Engram)
-    let total_repo_tokens: usize = task.mock_files.iter().map(|(_, c)| estimate_tokens(c)).sum();
+    let total_repo_tokens: usize = task
+        .mock_files
+        .iter()
+        .map(|(_, c)| estimate_tokens(c))
+        .sum();
     let estimated_baseline_tokens = total_repo_tokens.max(4500); // Raw directory scans + imports traversal
     let estimated_baseline_tool_calls = (task.mock_files.len() * 2).max(12); // list_dir + grep + read_file calls
     let estimated_baseline_files = task.mock_files.len();
@@ -1508,7 +1516,10 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
     let retrieved_paths: Vec<String> = ctx.files.iter().map(|f| f.path.clone()).collect();
     let gt_files = &task.ground_truth.files;
 
-    let file_hits = gt_files.iter().filter(|g| retrieved_paths.contains(g)).count();
+    let file_hits = gt_files
+        .iter()
+        .filter(|g| retrieved_paths.contains(g))
+        .count();
     let file_recall = if !gt_files.is_empty() {
         file_hits as f64 / gt_files.len() as f64
     } else {
@@ -1579,7 +1590,11 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
     )?;
 
     let mut correct_classifications = 0;
-    let mutation_paths: Vec<String> = task.synthetic_mutations.iter().map(|m| m.path.clone()).collect();
+    let mutation_paths: Vec<String> = task
+        .synthetic_mutations
+        .iter()
+        .map(|m| m.path.clone())
+        .collect();
     let val_res = validate_contract_diff(&contract, &mutation_paths);
 
     for m in &task.synthetic_mutations {
@@ -1608,7 +1623,10 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
         // Control: Task 2 compiled WITHOUT memory
         let control_ctx = context(&fixture_root, &scenario.task2_goal, 1200)?;
         let control_memories = &control_ctx.relevant_memories;
-        let control_decision_recall_pct = if control_memories.iter().any(|m| m.contains(&scenario.decision_title)) {
+        let control_decision_recall_pct = if control_memories
+            .iter()
+            .any(|m| m.contains(&scenario.decision_title))
+        {
             100.0
         } else {
             0.0
@@ -1629,7 +1647,10 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
 
         let treatment_ctx = context(&fixture_root, &scenario.task2_goal, 1200)?;
         let treatment_memories = &treatment_ctx.relevant_memories;
-        let treatment_decision_recall_pct = if treatment_memories.iter().any(|m| m.contains(&scenario.decision_title)) {
+        let treatment_decision_recall_pct = if treatment_memories
+            .iter()
+            .any(|m| m.contains(&scenario.decision_title))
+        {
             100.0
         } else {
             0.0
@@ -1692,7 +1713,12 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
         }
 
         let conn = crate::storage::db(&fixture_root)?;
-        let cone = crate::impact::compute_impact_cone(&conn, &fixture_root, &scenario.target, scenario.depth)?;
+        let cone = crate::impact::compute_impact_cone(
+            &conn,
+            &fixture_root,
+            &scenario.target,
+            scenario.depth,
+        )?;
 
         let all_entities = cone.all_entities();
         let total_returned = all_entities.len();
@@ -1705,9 +1731,11 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
             if let Some(returned) = all_entities.iter().find(|e| e.path == gt.path) {
                 hits += 1;
                 let category_matches = returned.category == gt.category;
-                let provenance_matches = returned.relationships.iter().any(|r| {
-                    r.provenance.contains(&gt.expected_provenance_contains)
-                }) || returned.reason.contains(&gt.expected_provenance_contains);
+                let provenance_matches = returned
+                    .relationships
+                    .iter()
+                    .any(|r| r.provenance.contains(&gt.expected_provenance_contains))
+                    || returned.reason.contains(&gt.expected_provenance_contains);
 
                 if category_matches && provenance_matches {
                     correct_provenance += 1;
@@ -1715,8 +1743,16 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
             }
         }
 
-        let recall = if total_gt > 0 { hits as f64 / total_gt as f64 } else { 1.0 };
-        let precision = if total_returned > 0 { hits as f64 / total_returned as f64 } else { 1.0 };
+        let recall = if total_gt > 0 {
+            hits as f64 / total_gt as f64
+        } else {
+            1.0
+        };
+        let precision = if total_returned > 0 {
+            hits as f64 / total_returned as f64
+        } else {
+            1.0
+        };
         let f1 = if precision + recall > 0.0 {
             2.0 * (precision * recall) / (precision + recall)
         } else {
@@ -1742,7 +1778,11 @@ pub fn run_task_benchmark(task: &BenchmarkTask) -> Result<TaskBenchmarkResult> {
 
         for cat in &categories {
             let cat_name = format!("{:?}", cat).to_uppercase();
-            let gt_count = scenario.ground_truth_entities.iter().filter(|e| e.category == *cat).count();
+            let gt_count = scenario
+                .ground_truth_entities
+                .iter()
+                .filter(|e| e.category == *cat)
+                .count();
             let returned_count = all_entities.iter().filter(|e| e.category == *cat).count();
             let cat_hits = scenario
                 .ground_truth_entities
@@ -1806,21 +1846,33 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
     let total = task_results.len();
 
     // Aggregate Discovery
-    let sum_measured_tokens: usize = task_results.iter().map(|t| t.discovery.measured_context_tokens).sum();
-    let sum_baseline_tokens: usize = task_results.iter().map(|t| t.discovery.estimated_baseline_tokens).sum();
+    let sum_measured_tokens: usize = task_results
+        .iter()
+        .map(|t| t.discovery.measured_context_tokens)
+        .sum();
+    let sum_baseline_tokens: usize = task_results
+        .iter()
+        .map(|t| t.discovery.estimated_baseline_tokens)
+        .sum();
     let avg_measured_tokens = sum_measured_tokens / total;
     let avg_baseline_tokens = sum_baseline_tokens / total;
     let avg_token_reduction = if avg_baseline_tokens > 0 {
-        ((avg_baseline_tokens.saturating_sub(avg_measured_tokens)) as f64 / avg_baseline_tokens as f64) * 100.0
+        ((avg_baseline_tokens.saturating_sub(avg_measured_tokens)) as f64
+            / avg_baseline_tokens as f64)
+            * 100.0
     } else {
         0.0
     };
 
     let avg_measured_calls: usize = 1;
-    let sum_baseline_calls: usize = task_results.iter().map(|t| t.discovery.estimated_baseline_tool_calls).sum();
+    let sum_baseline_calls: usize = task_results
+        .iter()
+        .map(|t| t.discovery.estimated_baseline_tool_calls)
+        .sum();
     let avg_baseline_calls = sum_baseline_calls / total;
     let avg_tool_reduction = if avg_baseline_calls > 0 {
-        ((avg_baseline_calls.saturating_sub(avg_measured_calls)) as f64 / avg_baseline_calls as f64) * 100.0
+        ((avg_baseline_calls.saturating_sub(avg_measured_calls)) as f64 / avg_baseline_calls as f64)
+            * 100.0
     } else {
         0.0
     };
@@ -1828,21 +1880,53 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
     let aggregate_discovery = DiscoveryMetrics {
         measured_context_tokens: avg_measured_tokens,
         measured_tool_calls: avg_measured_calls,
-        measured_files_returned: task_results.iter().map(|t| t.discovery.measured_files_returned).sum::<usize>() / total,
+        measured_files_returned: task_results
+            .iter()
+            .map(|t| t.discovery.measured_files_returned)
+            .sum::<usize>()
+            / total,
         estimated_baseline_tokens: avg_baseline_tokens,
         estimated_baseline_tool_calls: avg_baseline_calls,
-        estimated_baseline_files: task_results.iter().map(|t| t.discovery.estimated_baseline_files).sum::<usize>() / total,
+        estimated_baseline_files: task_results
+            .iter()
+            .map(|t| t.discovery.estimated_baseline_files)
+            .sum::<usize>()
+            / total,
         token_reduction_pct: (avg_token_reduction * 10.0).round() / 10.0,
         tool_call_reduction_pct: (avg_tool_reduction * 10.0).round() / 10.0,
     };
 
     // Aggregate Grounding
-    let avg_file_recall = task_results.iter().map(|t| t.grounding.file_recall).sum::<f64>() / total as f64;
-    let avg_file_precision = task_results.iter().map(|t| t.grounding.file_precision).sum::<f64>() / total as f64;
-    let avg_file_f1 = task_results.iter().map(|t| t.grounding.file_f1).sum::<f64>() / total as f64;
-    let avg_symbol_recall = task_results.iter().map(|t| t.grounding.symbol_recall).sum::<f64>() / total as f64;
-    let avg_test_recall = task_results.iter().map(|t| t.grounding.test_recall).sum::<f64>() / total as f64;
-    let avg_overall_f1 = task_results.iter().map(|t| t.grounding.overall_f1).sum::<f64>() / total as f64;
+    let avg_file_recall = task_results
+        .iter()
+        .map(|t| t.grounding.file_recall)
+        .sum::<f64>()
+        / total as f64;
+    let avg_file_precision = task_results
+        .iter()
+        .map(|t| t.grounding.file_precision)
+        .sum::<f64>()
+        / total as f64;
+    let avg_file_f1 = task_results
+        .iter()
+        .map(|t| t.grounding.file_f1)
+        .sum::<f64>()
+        / total as f64;
+    let avg_symbol_recall = task_results
+        .iter()
+        .map(|t| t.grounding.symbol_recall)
+        .sum::<f64>()
+        / total as f64;
+    let avg_test_recall = task_results
+        .iter()
+        .map(|t| t.grounding.test_recall)
+        .sum::<f64>()
+        / total as f64;
+    let avg_overall_f1 = task_results
+        .iter()
+        .map(|t| t.grounding.overall_f1)
+        .sum::<f64>()
+        / total as f64;
 
     let aggregate_grounding = GroundingMetrics {
         file_recall: (avg_file_recall * 1000.0).round() / 1000.0,
@@ -1854,8 +1938,14 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
     };
 
     // Aggregate Contract
-    let total_mutations: usize = task_results.iter().map(|t| t.contract.total_mutations).sum();
-    let total_correct: usize = task_results.iter().map(|t| t.contract.correct_classifications).sum();
+    let total_mutations: usize = task_results
+        .iter()
+        .map(|t| t.contract.total_mutations)
+        .sum();
+    let total_correct: usize = task_results
+        .iter()
+        .map(|t| t.contract.correct_classifications)
+        .sum();
     let aggregate_contract = ContractMetrics {
         total_mutations,
         correct_classifications: total_correct,
@@ -1867,33 +1957,78 @@ pub fn run_benchmark_suite(git_revision: &str) -> Result<BenchmarkSuiteResult> {
     };
 
     // Aggregate Memory
-    let memory_results: Vec<&MemoryLiftMetrics> = task_results.iter().filter_map(|t| t.memory.as_ref()).collect();
+    let memory_results: Vec<&MemoryLiftMetrics> = task_results
+        .iter()
+        .filter_map(|t| t.memory.as_ref())
+        .collect();
     let mem_count = memory_results.len().max(1) as f64;
     let aggregate_memory = MemoryLiftMetrics {
-        control_decision_recall_pct: memory_results.iter().map(|m| m.control_decision_recall_pct).sum::<f64>() / mem_count,
-        treatment_decision_recall_pct: memory_results.iter().map(|m| m.treatment_decision_recall_pct).sum::<f64>() / mem_count,
-        control_ambiguity_gaps: memory_results.iter().map(|m| m.control_ambiguity_gaps).sum::<usize>() / memory_results.len().max(1),
-        treatment_ambiguity_gaps: memory_results.iter().map(|m| m.treatment_ambiguity_gaps).sum::<usize>() / memory_results.len().max(1),
-        gap_reduction_pct: memory_results.iter().map(|m| m.gap_reduction_pct).sum::<f64>() / mem_count,
+        control_decision_recall_pct: memory_results
+            .iter()
+            .map(|m| m.control_decision_recall_pct)
+            .sum::<f64>()
+            / mem_count,
+        treatment_decision_recall_pct: memory_results
+            .iter()
+            .map(|m| m.treatment_decision_recall_pct)
+            .sum::<f64>()
+            / mem_count,
+        control_ambiguity_gaps: memory_results
+            .iter()
+            .map(|m| m.control_ambiguity_gaps)
+            .sum::<usize>()
+            / memory_results.len().max(1),
+        treatment_ambiguity_gaps: memory_results
+            .iter()
+            .map(|m| m.treatment_ambiguity_gaps)
+            .sum::<usize>()
+            / memory_results.len().max(1),
+        gap_reduction_pct: memory_results
+            .iter()
+            .map(|m| m.gap_reduction_pct)
+            .sum::<f64>()
+            / mem_count,
         memory_lift_confirmed: memory_results.iter().all(|m| m.memory_lift_confirmed),
-        baseline_rediscovery_cost: memory_results.iter().map(|m| m.baseline_rediscovery_cost).sum::<usize>() / memory_results.len().max(1),
-        memory_rediscovery_cost: memory_results.iter().map(|m| m.memory_rediscovery_cost).sum::<usize>() / memory_results.len().max(1),
-        compounding_lift_pct: memory_results.iter().map(|m| m.compounding_lift_pct).sum::<f64>() / mem_count,
+        baseline_rediscovery_cost: memory_results
+            .iter()
+            .map(|m| m.baseline_rediscovery_cost)
+            .sum::<usize>()
+            / memory_results.len().max(1),
+        memory_rediscovery_cost: memory_results
+            .iter()
+            .map(|m| m.memory_rediscovery_cost)
+            .sum::<usize>()
+            / memory_results.len().max(1),
+        compounding_lift_pct: memory_results
+            .iter()
+            .map(|m| m.compounding_lift_pct)
+            .sum::<f64>()
+            / mem_count,
         conflict_resolution_accuracy_pct: 100.0,
         supersession_correctness_pct: 100.0,
     };
 
     // Aggregate Impact
-    let impact_results: Vec<&ImpactMetrics> = task_results.iter().filter_map(|t| t.impact.as_ref()).collect();
+    let impact_results: Vec<&ImpactMetrics> = task_results
+        .iter()
+        .filter_map(|t| t.impact.as_ref())
+        .collect();
     let aggregate_impact = if !impact_results.is_empty() {
         let n = impact_results.len() as f64;
         let avg_recall = impact_results.iter().map(|i| i.recall).sum::<f64>() / n;
         let avg_precision = impact_results.iter().map(|i| i.precision).sum::<f64>() / n;
         let avg_f1 = impact_results.iter().map(|i| i.f1).sum::<f64>() / n;
-        let avg_prov = impact_results.iter().map(|i| i.provenance_accuracy_pct).sum::<f64>() / n;
+        let avg_prov = impact_results
+            .iter()
+            .map(|i| i.provenance_accuracy_pct)
+            .sum::<f64>()
+            / n;
         let sum_gt = impact_results.iter().map(|i| i.total_ground_truth).sum();
         let sum_ret = impact_results.iter().map(|i| i.total_returned).sum();
-        let sum_corr = impact_results.iter().map(|i| i.total_correct_provenance).sum();
+        let sum_corr = impact_results
+            .iter()
+            .map(|i| i.total_correct_provenance)
+            .sum();
 
         let mut agg_precision_by_category = HashMap::new();
         let mut agg_recall_by_category = HashMap::new();
@@ -1961,8 +2096,14 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
         res.metadata.dataset_version,
         &res.metadata.git_revision[..res.metadata.git_revision.len().min(12)]
     ));
-    out.push_str(&format!("Dataset Fingerprint: {}\n", res.metadata.dataset_hash));
-    out.push_str(&format!("Tasks Evaluated: {} across TypeScript, Python, C#, Rust, Go\n\n", res.total_tasks));
+    out.push_str(&format!(
+        "Dataset Fingerprint: {}\n",
+        res.metadata.dataset_hash
+    ));
+    out.push_str(&format!(
+        "Tasks Evaluated: {} across TypeScript, Python, C#, Rust, Go\n\n",
+        res.total_tasks
+    ));
 
     out.push_str("1. DISCOVERY EFFICIENCY (MEASURED VS. ESTIMATED BASELINE)\n");
     out.push_str(&format!(
@@ -1980,7 +2121,9 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
     out.push_str(&format!(
         "   Empirical Token Reduction:   {:.1}% ({} tokens saved)\n",
         res.aggregate_discovery.token_reduction_pct,
-        res.aggregate_discovery.estimated_baseline_tokens.saturating_sub(res.aggregate_discovery.measured_context_tokens)
+        res.aggregate_discovery
+            .estimated_baseline_tokens
+            .saturating_sub(res.aggregate_discovery.measured_context_tokens)
     ));
     out.push_str(&format!(
         "   Tool Call Reduction:         {:.1}%\n\n",
@@ -2061,14 +2204,18 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
                 let rec = imp.recall_by_category.get(cat).copied().unwrap_or(1.0);
                 out.push_str(&format!(
                     "      • {:<18} Precision: {:>5.1}% | Recall: {:>5.1}%\n",
-                    cat, prec * 100.0, rec * 100.0
+                    cat,
+                    prec * 100.0,
+                    rec * 100.0
                 ));
             }
         }
     }
 
     if let Some(ref di) = res.aggregate_decision_intelligence {
-        out.push_str("\n6. ENGINEERING DECISION INTELLIGENCE (LIVENESS, DORMANT GC & ARCHAEOLOGY)\n");
+        out.push_str(
+            "\n6. ENGINEERING DECISION INTELLIGENCE (LIVENESS, DORMANT GC & ARCHAEOLOGY)\n",
+        );
         out.push_str(&format!(
             "   Synthetic Orphan Corpus Accuracy:    {:.1}%\n",
             di.orphan_detection_accuracy_pct
@@ -2120,7 +2267,9 @@ pub fn format_human_benchmark_report(res: &BenchmarkSuiteResult, verbose: bool) 
     }
 
     if verbose {
-        out.push_str("\n────────────────────────────────────────────────────────────────────────\n");
+        out.push_str(
+            "\n────────────────────────────────────────────────────────────────────────\n",
+        );
         out.push_str("PER-TASK BREAKDOWN:\n");
         for t in &res.task_results {
             out.push_str(&format!(
@@ -2459,8 +2608,12 @@ pub fn run_multi_turn_compounding_benchmark() -> Result<MultiTurnBenchmarkResult
     let doc = load_durable_memories(&fixture_root)?;
     let conflicts = detect_memory_conflicts(&doc.memories);
 
-    let has_shadowing = conflicts.iter().any(|c| c.conflict_type == ConflictType::ScopeShadowing && !c.requires_human_resolution);
-    let has_direct_contra = conflicts.iter().any(|c| c.conflict_type == ConflictType::DirectContradiction && c.requires_human_resolution);
+    let has_shadowing = conflicts
+        .iter()
+        .any(|c| c.conflict_type == ConflictType::ScopeShadowing && !c.requires_human_resolution);
+    let has_direct_contra = conflicts.iter().any(|c| {
+        c.conflict_type == ConflictType::DirectContradiction && c.requires_human_resolution
+    });
 
     let payment_active = query_scoped_memories(
         &fixture_root,
@@ -2469,7 +2622,8 @@ pub fn run_multi_turn_compounding_benchmark() -> Result<MultiTurnBenchmarkResult
         &["PaymentService.Process".into()],
         false,
     )?;
-    let payment_shadowed_correctly = payment_active.iter().any(|m| m.id == "ADR-019") && !payment_active.iter().any(|m| m.id == "ADR-001");
+    let payment_shadowed_correctly = payment_active.iter().any(|m| m.id == "ADR-019")
+        && !payment_active.iter().any(|m| m.id == "ADR-001");
 
     let t4_goal = "Process payment settlement".to_string();
     let t4_ctx = context(&fixture_root, &t4_goal, 1200)?;
@@ -2491,14 +2645,24 @@ pub fn run_multi_turn_compounding_benchmark() -> Result<MultiTurnBenchmarkResult
         success: turn4_success,
     });
 
-    let total_baseline_cost: usize = baseline_t1_cost + baseline_t2_cost + baseline_t3_cost + baseline_t4_cost;
-    let total_memory_cost: usize = memory_t1_cost + memory_t2_cost + memory_t3_cost + memory_t4_cost;
+    let total_baseline_cost: usize =
+        baseline_t1_cost + baseline_t2_cost + baseline_t3_cost + baseline_t4_cost;
+    let total_memory_cost: usize =
+        memory_t1_cost + memory_t2_cost + memory_t3_cost + memory_t4_cost;
     let compounding_lift_pct = ((total_baseline_cost.saturating_sub(total_memory_cost)) as f64
         / total_baseline_cost as f64)
         * 100.0;
 
-    let supersession_correctness_pct = if adr14_excluded && adr29_included { 100.0 } else { 0.0 };
-    let conflict_resolution_accuracy_pct = if has_shadowing && has_direct_contra { 100.0 } else { 0.0 };
+    let supersession_correctness_pct = if adr14_excluded && adr29_included {
+        100.0
+    } else {
+        0.0
+    };
+    let conflict_resolution_accuracy_pct = if has_shadowing && has_direct_contra {
+        100.0
+    } else {
+        0.0
+    };
 
     let cache_path = crate::storage::cache_dir(&fixture_root).ok();
     let _ = fs::remove_dir_all(&fixture_root);
@@ -2542,11 +2706,26 @@ pub fn run_decision_intelligence_benchmark() -> Result<DecisionIntelligenceMetri
     }
 
     // Git init
-    let _ = std::process::Command::new("git").args(["init"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.name", "Benchmark"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.email", "bench@engram.dev"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Initial commit"]).current_dir(&fixture_root).output();
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Benchmark"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "bench@engram.dev"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(&fixture_root)
+        .output();
 
     // 2. Initialize .engram and analyze codebase so symbols exist in entity_versions SQLite
     crate::analyzer::analyze(&fixture_root)?;
@@ -2657,17 +2836,23 @@ pub fn run_decision_intelligence_benchmark() -> Result<DecisionIntelligenceMetri
     // Verify disk state updated to Dormant
     let updated_doc = load_durable_memories(&fixture_root)?;
     let dormant_mem = updated_doc.memories.iter().find(|m| m.id == "ADR-005");
-    let dormant_transitioned = dormant_mem.is_some_and(|m| m.lifecycle_state == MemoryLifecycleState::Dormant);
+    let dormant_transitioned =
+        dormant_mem.is_some_and(|m| m.lifecycle_state == MemoryLifecycleState::Dormant);
 
     // Check Archival Candidate: ADR-001 should be marked ArchivalCandidate (depth >= 3)
     let archival_item = report.items.iter().find(|i| i.memory_id == "ADR-001");
-    let archival_candidate_detected = archival_item.is_some_and(|i| i.liveness == LivenessStatus::ArchivalCandidate);
+    let archival_candidate_detected =
+        archival_item.is_some_and(|i| i.liveness == LivenessStatus::ArchivalCandidate);
 
     // 5. Evaluate Decision Archaeology for OrderService.ExportCSV
     let why = explain_why(&fixture_root, "OrderService.ExportCSV")?;
-    let why_governing_correct = why.current_governing_policy.as_ref().is_some_and(|m| m.id == adr29.id);
+    let why_governing_correct = why
+        .current_governing_policy
+        .as_ref()
+        .is_some_and(|m| m.id == adr29.id);
     let why_history_correct = why.historical_evolution.iter().any(|m| m.id == "ADR-014");
-    let why_provenance_correct = why.contract_provenance.contains(&"cnt_918237".to_string()) && why.commit_provenance.contains(&"e4f82a1".to_string());
+    let why_provenance_correct = why.contract_provenance.contains(&"cnt_918237".to_string())
+        && why.commit_provenance.contains(&"e4f82a1".to_string());
 
     // Clean up fixture root & cache
     let cache_path = crate::storage::cache_dir(&fixture_root).ok();
@@ -2678,8 +2863,17 @@ pub fn run_decision_intelligence_benchmark() -> Result<DecisionIntelligenceMetri
 
     let orphan_accuracy = if orphan_detected { 100.0 } else { 0.0 };
     let dormant_accuracy = if dormant_transitioned { 100.0 } else { 0.0 };
-    let archival_accuracy = if archival_candidate_detected { 100.0 } else { 0.0 };
-    let archaeology_accuracy = if why_governing_correct && why_history_correct && why_provenance_correct { 100.0 } else { 0.0 };
+    let archival_accuracy = if archival_candidate_detected {
+        100.0
+    } else {
+        0.0
+    };
+    let archaeology_accuracy =
+        if why_governing_correct && why_history_correct && why_provenance_correct {
+            100.0
+        } else {
+            0.0
+        };
 
     Ok(DecisionIntelligenceMetrics {
         orphan_detection_accuracy_pct: orphan_accuracy,
@@ -2695,7 +2889,8 @@ pub fn run_decision_intelligence_benchmark() -> Result<DecisionIntelligenceMetri
 /// Evaluates two-tier invalidation (Tier 1 syntactic re-parse and Tier 2 relational re-linking)
 /// across cold analysis versus warm incremental mutation.
 pub fn run_incremental_efficiency_benchmark() -> Result<IncrementalEfficiencyMetrics> {
-    let fixture_root = std::env::temp_dir().join(format!("engram_bench_incremental_{}", Uuid::new_v4()));
+    let fixture_root =
+        std::env::temp_dir().join(format!("engram_bench_incremental_{}", Uuid::new_v4()));
     if fixture_root.exists() {
         let _ = fs::remove_dir_all(&fixture_root);
     }
@@ -2703,16 +2898,46 @@ pub fn run_incremental_efficiency_benchmark() -> Result<IncrementalEfficiencyMet
 
     // Populate a realistic polyglot repository with 10 files across TypeScript, Go, Python, Rust, C#, JS
     let files = vec![
-        ("src/orders/service.ts", "export class OrderService {\n  createOrder() { return 'order_1'; }\n  cancelOrder() { return true; }\n}\n"),
-        ("src/orders/types.ts", "export interface Order { id: string; amount: number; }\n"),
-        ("src/orders/utils.ts", "export function formatCurrency(amount: number) { return `$${amount}`; }\n"),
-        ("internal/payments/processor.go", "package payments\n\ntype Processor struct {}\nfunc (p *Processor) Charge() error { return nil }\nfunc (p *Processor) Refund() error { return nil }\n"),
-        ("internal/payments/models.go", "package payments\n\ntype Payment struct { ID string }\n"),
-        ("src/inventory/service.py", "class InventoryService:\n    def check_stock(self, item_id: str) -> bool:\n        return True\n    def reduce_stock(self, item_id: str, count: int) -> None:\n        pass\n"),
-        ("src/inventory/models.py", "class StockItem:\n    def __init__(self, sku: str):\n        self.sku = sku\n"),
-        ("src/Worker.cs", "namespace Worker;\npublic class BackgroundWorker {\n    public void Run() {}\n    public void Stop() {}\n}\n"),
-        ("src/pipeline/worker.rs", "pub struct PipelineWorker {\n    pub id: String,\n}\nimpl PipelineWorker {\n    pub fn execute(&self) -> bool { true }\n}\n"),
-        ("src/app.js", "class App {\n  start() { console.log('started'); }\n}\nmodule.exports = { App };\n"),
+        (
+            "src/orders/service.ts",
+            "export class OrderService {\n  createOrder() { return 'order_1'; }\n  cancelOrder() { return true; }\n}\n",
+        ),
+        (
+            "src/orders/types.ts",
+            "export interface Order { id: string; amount: number; }\n",
+        ),
+        (
+            "src/orders/utils.ts",
+            "export function formatCurrency(amount: number) { return `$${amount}`; }\n",
+        ),
+        (
+            "internal/payments/processor.go",
+            "package payments\n\ntype Processor struct {}\nfunc (p *Processor) Charge() error { return nil }\nfunc (p *Processor) Refund() error { return nil }\n",
+        ),
+        (
+            "internal/payments/models.go",
+            "package payments\n\ntype Payment struct { ID string }\n",
+        ),
+        (
+            "src/inventory/service.py",
+            "class InventoryService:\n    def check_stock(self, item_id: str) -> bool:\n        return True\n    def reduce_stock(self, item_id: str, count: int) -> None:\n        pass\n",
+        ),
+        (
+            "src/inventory/models.py",
+            "class StockItem:\n    def __init__(self, sku: str):\n        self.sku = sku\n",
+        ),
+        (
+            "src/Worker.cs",
+            "namespace Worker;\npublic class BackgroundWorker {\n    public void Run() {}\n    public void Stop() {}\n}\n",
+        ),
+        (
+            "src/pipeline/worker.rs",
+            "pub struct PipelineWorker {\n    pub id: String,\n}\nimpl PipelineWorker {\n    pub fn execute(&self) -> bool { true }\n}\n",
+        ),
+        (
+            "src/app.js",
+            "class App {\n  start() { console.log('started'); }\n}\nmodule.exports = { App };\n",
+        ),
     ];
 
     for (rel_path, content) in &files {
@@ -2724,11 +2949,26 @@ pub fn run_incremental_efficiency_benchmark() -> Result<IncrementalEfficiencyMet
     }
 
     // Git init
-    let _ = std::process::Command::new("git").args(["init"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.name", "Benchmark"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.email", "bench@engram.dev"]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&fixture_root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Initial commit"]).current_dir(&fixture_root).output();
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Benchmark"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "bench@engram.dev"])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&fixture_root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(&fixture_root)
+        .output();
 
     // Cold run: analyze everything from scratch
     let start_cold = std::time::Instant::now();
@@ -2807,14 +3047,19 @@ pub fn run_incremental_efficiency_benchmark() -> Result<IncrementalEfficiencyMet
 /// surface reduction, and detected languages. Strictly separated from cargo test.
 pub fn run_external_benchmark(external_path: &std::path::Path) -> Result<ExternalBenchmarkResult> {
     if !external_path.exists() {
-        anyhow::bail!("Specified external repository path does not exist: {}", external_path.display());
+        anyhow::bail!(
+            "Specified external repository path does not exist: {}",
+            external_path.display()
+        );
     }
     if !external_path.is_dir() {
-        anyhow::bail!("Specified external repository path must be a directory: {}", external_path.display());
+        anyhow::bail!(
+            "Specified external repository path must be a directory: {}",
+            external_path.display()
+        );
     }
 
-    let canonical = fs::canonicalize(external_path)
-        .unwrap_or_else(|_| external_path.to_path_buf());
+    let canonical = fs::canonicalize(external_path).unwrap_or_else(|_| external_path.to_path_buf());
     let git_rev = crate::storage::revision(&canonical);
 
     // Detect languages and estimate tokens
@@ -2924,22 +3169,54 @@ pub fn format_external_benchmark_report(res: &ExternalBenchmarkResult) -> String
     out.push_str("🌐 Engram External Repository Benchmark\n");
     out.push_str("────────────────────────────────────────────────────────────────────────\n");
     out.push_str(&format!("Repository Path:     {}\n", res.repository_path));
-    out.push_str(&format!("Git Revision:        {}\n", &res.git_revision[..res.git_revision.len().min(16)]));
-    out.push_str(&format!("Languages Detected:  {}\n\n", if res.languages_detected.is_empty() { "none".to_string() } else { res.languages_detected.join(", ") }));
+    out.push_str(&format!(
+        "Git Revision:        {}\n",
+        &res.git_revision[..res.git_revision.len().min(16)]
+    ));
+    out.push_str(&format!(
+        "Languages Detected:  {}\n\n",
+        if res.languages_detected.is_empty() {
+            "none".to_string()
+        } else {
+            res.languages_detected.join(", ")
+        }
+    ));
 
     out.push_str("1. DISCOVERY & SCALE\n");
-    out.push_str(&format!("   Indexed Files:            {}\n", res.indexed_files));
-    out.push_str(&format!("   Extracted Symbols:        {}\n", res.total_symbols));
-    out.push_str(&format!("   Estimated Total Tokens:   {}\n\n", res.estimated_total_tokens));
+    out.push_str(&format!(
+        "   Indexed Files:            {}\n",
+        res.indexed_files
+    ));
+    out.push_str(&format!(
+        "   Extracted Symbols:        {}\n",
+        res.total_symbols
+    ));
+    out.push_str(&format!(
+        "   Estimated Total Tokens:   {}\n\n",
+        res.estimated_total_tokens
+    ));
 
     out.push_str("2. INCREMENTAL ANALYSIS EFFICIENCY (TWO-TIER INVALIDATION)\n");
-    out.push_str(&format!("   Cold Analysis Latency:    {:.2} ms ({} files parsed, {} symbols linked)\n",
-        res.cold_analysis_latency_ms, res.indexed_files, res.total_symbols));
-    out.push_str(&format!("   Warm Incremental Latency: {:.2} ms ({} files reparsed, {} symbols relinked)\n",
-        res.warm_incremental_latency_ms, res.files_reparsed_warm, res.symbols_relinked_warm));
-    out.push_str(&format!("   Measured Speedup:         {:.2}× faster than cold scan\n", res.speedup_factor));
-    out.push_str(&format!("   Tier-1 Cache Hit Rate:    {:.1}%\n", res.cache_hit_rate_pct));
-    out.push_str(&format!("   Reparsed Reduction:       {:.1}%\n\n", res.incremental.reparsed_reduction_pct));
+    out.push_str(&format!(
+        "   Cold Analysis Latency:    {:.2} ms ({} files parsed, {} symbols linked)\n",
+        res.cold_analysis_latency_ms, res.indexed_files, res.total_symbols
+    ));
+    out.push_str(&format!(
+        "   Warm Incremental Latency: {:.2} ms ({} files reparsed, {} symbols relinked)\n",
+        res.warm_incremental_latency_ms, res.files_reparsed_warm, res.symbols_relinked_warm
+    ));
+    out.push_str(&format!(
+        "   Measured Speedup:         {:.2}× faster than cold scan\n",
+        res.speedup_factor
+    ));
+    out.push_str(&format!(
+        "   Tier-1 Cache Hit Rate:    {:.1}%\n",
+        res.cache_hit_rate_pct
+    ));
+    out.push_str(&format!(
+        "   Reparsed Reduction:       {:.1}%\n\n",
+        res.incremental.reparsed_reduction_pct
+    ));
 
     out.push_str("────────────────────────────────────────────────────────────────────────\n");
     out.push_str("Status: External benchmark evaluated cleanly with zero side-effects.\n");

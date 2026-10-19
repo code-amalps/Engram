@@ -93,7 +93,8 @@ pub fn execute_gc(root: &Path, opts: &GcOptions) -> Result<GcPlan> {
                         if let Ok(content) = fs::read_to_string(&path) {
                             if let Ok(cand) = serde_json::from_str::<MemoryCandidate>(&content) {
                                 let is_expired = (now - cand.created_at) > ttl;
-                                let is_rejected = cand.lifecycle_state == MemoryLifecycleState::Rejected;
+                                let is_rejected =
+                                    cand.lifecycle_state == MemoryLifecycleState::Rejected;
                                 if is_expired || is_rejected {
                                     pruned_candidates.push(cand.candidate_id.clone());
                                     candidate_paths_to_delete.push(path);
@@ -188,23 +189,46 @@ pub fn format_gc_plan(plan: &GcPlan) -> String {
     let mut out = String::new();
     if plan.dry_run {
         out.push_str("🔍 Engram Garbage Collection (PRE-FLIGHT DRY-RUN)\n");
-        out.push_str("──────────────────────────────────────────────────────────────────────────\n");
+        out.push_str(
+            "──────────────────────────────────────────────────────────────────────────\n",
+        );
         out.push_str("No disk state was modified. Review the plan below:\n\n");
-        out.push_str(&format!("  • Ephemeral Candidates to Prune: {}\n", plan.pruned_candidates.len()));
+        out.push_str(&format!(
+            "  • Ephemeral Candidates to Prune: {}\n",
+            plan.pruned_candidates.len()
+        ));
         for c in &plan.pruned_candidates {
             out.push_str(&format!("      - {}\n", c));
         }
-        out.push_str(&format!("  • Deep Memories to Archive:      {}\n", plan.archival_candidates.len()));
+        out.push_str(&format!(
+            "  • Deep Memories to Archive:      {}\n",
+            plan.archival_candidates.len()
+        ));
         for a in &plan.archival_candidates {
-            out.push_str(&format!("      - {} -> .engram/archive/memory_archive.yaml\n", a));
+            out.push_str(&format!(
+                "      - {} -> .engram/archive/memory_archive.yaml\n",
+                a
+            ));
         }
         out.push_str("\nRun 'engram gc' without --dry-run to apply.\n");
     } else {
         out.push_str("🧹 Engram Garbage Collection (EXECUTED)\n");
-        out.push_str("──────────────────────────────────────────────────────────────────────────\n");
+        out.push_str(
+            "──────────────────────────────────────────────────────────────────────────\n",
+        );
         out.push_str(&format!("  ✓ Archived Memories: {}\n", plan.archived_count));
-        out.push_str(&format!("  ✓ Pruned Candidates: {}\n", plan.pruned_candidates.len()));
-        out.push_str(&format!("  ✓ SQLite Vacuum:     {}\n\n", if plan.vacuum_executed { "Complete" } else { "Skipped" }));
+        out.push_str(&format!(
+            "  ✓ Pruned Candidates: {}\n",
+            plan.pruned_candidates.len()
+        ));
+        out.push_str(&format!(
+            "  ✓ SQLite Vacuum:     {}\n\n",
+            if plan.vacuum_executed {
+                "Complete"
+            } else {
+                "Skipped"
+            }
+        ));
         out.push_str(&format!("Status: {}\n", plan.summary_message));
     }
     out

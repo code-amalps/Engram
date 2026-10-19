@@ -16,21 +16,21 @@ use uuid::Uuid;
 
 use engram::analyzer::analyze;
 use engram::bench::PROTOCOL_VERSION as BENCH_PROTO;
-use engram::contract::{check_contract, CheckOptions, PROTOCOL_VERSION as CONTRACT_PROTO};
-use engram::doctor::{diagnose_memory_health, PROTOCOL_VERSION as DOCTOR_PROTO};
+use engram::contract::{CheckOptions, PROTOCOL_VERSION as CONTRACT_PROTO, check_contract};
+use engram::doctor::{PROTOCOL_VERSION as DOCTOR_PROTO, diagnose_memory_health};
 use engram::flywheel::{
-    postflight_check, preflight_task, PostflightOptions, PreflightOptions,
-    PROTOCOL_VERSION as FLYWHEEL_PROTO,
+    PROTOCOL_VERSION as FLYWHEEL_PROTO, PostflightOptions, PreflightOptions, postflight_check,
+    preflight_task,
 };
 use engram::incremental::{
-    get_authoritative_content_hash, incremental_analyze, init_meta_cache,
-    PROTOCOL_VERSION as INCR_PROTO,
+    PROTOCOL_VERSION as INCR_PROTO, get_authoritative_content_hash, incremental_analyze,
+    init_meta_cache,
 };
 use engram::memory::{promote_candidate, record_task_candidate};
 use engram::storage::db;
 use engram::telemetry::{
-    load_events, record_event, verify_event_chain, EventChainStatus, GENESIS_HASH,
-    PROTOCOL_VERSION as TELEM_PROTO,
+    EventChainStatus, GENESIS_HASH, PROTOCOL_VERSION as TELEM_PROTO, load_events, record_event,
+    verify_event_chain,
 };
 
 fn temp_repo_dir(prefix: &str) -> PathBuf {
@@ -92,8 +92,14 @@ fn test_two_tier_incremental_analysis_engine() {
     .unwrap();
 
     // Commit baseline files
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Initial"]).current_dir(&root).output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Initial"])
+        .current_dir(&root)
+        .output();
 
     // Cold analysis
     let cold_res = incremental_analyze(&root).expect("Cold incremental analysis should succeed");
@@ -106,7 +112,11 @@ fn test_two_tier_incremental_analysis_engine() {
     // All 3 files must be recognized as unchanged (Tier 1 skipped via fast-path / hash match)
     let warm_clean = incremental_analyze(&root).expect("Warm clean analysis should succeed");
     assert_eq!(warm_clean.total_files, 3);
-    assert_eq!(warm_clean.tier1_reparsed_files.len(), 0, "No files modified, Tier 1 must re-parse 0");
+    assert_eq!(
+        warm_clean.tier1_reparsed_files.len(),
+        0,
+        "No files modified, Tier 1 must re-parse 0"
+    );
     assert_eq!(warm_clean.unchanged_files_count, 3);
 
     // Modify ONLY utils.ts:
@@ -120,12 +130,15 @@ fn test_two_tier_incremental_analysis_engine() {
 
     let warm_modified = incremental_analyze(&root).expect("Warm modified analysis should succeed");
     assert_eq!(
-        warm_modified.tier1_reparsed_files.len(), 1,
+        warm_modified.tier1_reparsed_files.len(),
+        1,
         "Tier 1 must re-parse strictly the 1 modified file"
     );
     assert_eq!(warm_modified.tier1_reparsed_files[0], "src/utils.ts");
     assert!(
-        warm_modified.tier2_relinked_files.contains(&"src/service.ts".to_string()),
+        warm_modified
+            .tier2_relinked_files
+            .contains(&"src/service.ts".to_string()),
         "Tier 2 must identify src/service.ts as dependent on utils.ts"
     );
     assert!(warm_modified.unchanged_files_count >= 1);
@@ -143,14 +156,18 @@ fn test_authoritative_content_hash_and_fast_path_hint() {
     init_meta_cache(&conn).unwrap();
 
     // 1st call: Fast-path miss, computes authoritative hash
-    let (h1, bytes1, is_fast1) = get_authoritative_content_hash(&file_path, "test.ts", &conn).unwrap();
+    let (h1, bytes1, is_fast1) =
+        get_authoritative_content_hash(&file_path, "test.ts", &conn).unwrap();
     assert!(!is_fast1, "First lookup must be fast-path miss");
     assert!(!h1.is_empty());
     assert!(!bytes1.is_empty());
 
     // 2nd call without touch: Fast-path hit
     let (h2, _, is_fast2) = get_authoritative_content_hash(&file_path, "test.ts", &conn).unwrap();
-    assert!(is_fast2, "Second lookup with untouched file must be fast-path hit");
+    assert!(
+        is_fast2,
+        "Second lookup with untouched file must be fast-path hit"
+    );
     assert_eq!(h1, h2, "Cached hash must match authoritative hash");
 
     // Modify file with identical length: authoritative hash must change!
@@ -224,10 +241,17 @@ fn test_telemetry_append_only_hash_chain_and_verification() {
 
     // 2. Test Tampering Detection -> EVENT_CHAIN_BROKEN
     // Modify Event 2's payload on disk
-    let ev2_path = root.join(".engram").join("events").join(format!("{:06}_{}.json", ev2.sequence_number, ev2.event_id));
+    let ev2_path = root
+        .join(".engram")
+        .join("events")
+        .join(format!("{:06}_{}.json", ev2.sequence_number, ev2.event_id));
     let mut ev2_tampered = ev2.clone();
     ev2_tampered.actor = "malicious_actor".to_string();
-    fs::write(&ev2_path, serde_json::to_string_pretty(&ev2_tampered).unwrap()).unwrap();
+    fs::write(
+        &ev2_path,
+        serde_json::to_string_pretty(&ev2_tampered).unwrap(),
+    )
+    .unwrap();
 
     let (status_tampered, msg_tampered) = verify_event_chain(&root).unwrap();
     assert_eq!(status_tampered, EventChainStatus::Broken);
@@ -235,7 +259,10 @@ fn test_telemetry_append_only_hash_chain_and_verification() {
 
     // Restore clean ev2
     fs::write(&ev2_path, serde_json::to_string_pretty(&ev2).unwrap()).unwrap();
-    assert_eq!(verify_event_chain(&root).unwrap().0, EventChainStatus::Valid);
+    assert_eq!(
+        verify_event_chain(&root).unwrap().0,
+        EventChainStatus::Valid
+    );
 
     // 3. Test Sequence Gap Detection -> EVENT_MISSING
     // Delete Event 2 from disk
@@ -254,8 +281,14 @@ fn test_closed_loop_telemetry_and_doctor_integration() {
 
     // Initialize files and analyze
     fs::write(root.join("index.ts"), "export const APP = 'Engram';\n").unwrap();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "init"]).current_dir(&root).output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&root)
+        .output();
 
     analyze(&root).unwrap();
 
@@ -264,6 +297,7 @@ fn test_closed_loop_telemetry_and_doctor_integration() {
         task: "Add payment gateway".into(),
         token_budget: 1000,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let pre_res = preflight_task(&root, &pre_opts).unwrap();
     assert_eq!(pre_res.protocol_version, "1.1");
@@ -302,7 +336,11 @@ fn test_closed_loop_telemetry_and_doctor_integration() {
 
     // Verify all 5 telemetry events were created and chain is valid
     let events = load_events(&root).unwrap();
-    assert!(events.len() >= 4, "Expected at least 4 recorded audit events, got {}", events.len());
+    assert!(
+        events.len() >= 4,
+        "Expected at least 4 recorded audit events, got {}",
+        events.len()
+    );
 
     let (chain_status, _) = verify_event_chain(&root).unwrap();
     assert_eq!(chain_status, EventChainStatus::Valid);
@@ -310,7 +348,10 @@ fn test_closed_loop_telemetry_and_doctor_integration() {
     // 6. Engram Doctor diagnostic: verifies event chain integrity integration
     let doc_report = diagnose_memory_health(&root).unwrap();
     assert_eq!(doc_report.protocol_version, "1.1");
-    assert_eq!(doc_report.event_chain_status, Some("EVENT_CHAIN_VALID".to_string()));
+    assert_eq!(
+        doc_report.event_chain_status,
+        Some("EVENT_CHAIN_VALID".to_string())
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -319,29 +360,44 @@ fn test_closed_loop_telemetry_and_doctor_integration() {
 fn test_strongly_typed_json_serialization_across_all_commands() {
     let root = temp_repo_dir("json_serialization");
     fs::write(root.join("app.ts"), "export class App {}\n").unwrap();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "init"]).current_dir(&root).output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&root)
+        .output();
 
     analyze(&root).unwrap();
 
     // 1. Preflight JSON
-    let pre = preflight_task(&root, &PreflightOptions {
-        task: "App feature".into(),
-        token_budget: 1000,
-        forbidden_boundaries: None,
-    }).unwrap();
+    let pre = preflight_task(
+        &root,
+        &PreflightOptions {
+            task: "App feature".into(),
+            token_budget: 1000,
+            forbidden_boundaries: None,
+            planned_files: None,
+        },
+    )
+    .unwrap();
     let pre_json = serde_json::to_string(&pre).unwrap();
     let pre_val: serde_json::Value = serde_json::from_str(&pre_json).unwrap();
     assert_eq!(pre_val["protocol_version"], "1.1");
 
     // 2. Postflight JSON
-    let post = postflight_check(&root, &PostflightOptions {
-        contract_id: Some(pre.contract_id),
-        strict: false,
-        staged: false,
-        base_commit: None,
-        ci_mode: false,
-    }).unwrap();
+    let post = postflight_check(
+        &root,
+        &PostflightOptions {
+            contract_id: Some(pre.contract_id),
+            strict: false,
+            staged: false,
+            base_commit: None,
+            ci_mode: false,
+        },
+    )
+    .unwrap();
     let post_json = serde_json::to_string(&post).unwrap();
     let post_val: serde_json::Value = serde_json::from_str(&post_json).unwrap();
     assert_eq!(post_val["protocol_version"], "1.1");
@@ -394,8 +450,15 @@ fn test_duplicate_sequence_tampering_detected_as_broken() {
         event_hash: "deadbeef".to_string(),
     };
 
-    let forged_path = root.join(".engram").join("events").join("000001_evt_forged001.json");
-    fs::write(&forged_path, serde_json::to_string_pretty(&forged_ev).unwrap()).unwrap();
+    let forged_path = root
+        .join(".engram")
+        .join("events")
+        .join("000001_evt_forged001.json");
+    fs::write(
+        &forged_path,
+        serde_json::to_string_pretty(&forged_ev).unwrap(),
+    )
+    .unwrap();
 
     let (status, msg) = verify_event_chain(&root).unwrap();
     // Must be flagged as BROKEN, not missing
@@ -419,15 +482,20 @@ fn test_zero_disk_read_on_warm_cache_fast_path() {
     init_meta_cache(&conn).unwrap();
 
     // 1st call: cold read
-    let (h1, bytes1, is_fast1) = get_authoritative_content_hash(&file_path, "service.ts", &conn).unwrap();
+    let (h1, bytes1, is_fast1) =
+        get_authoritative_content_hash(&file_path, "service.ts", &conn).unwrap();
     assert!(!is_fast1);
     assert!(!bytes1.is_empty());
 
     // 2nd call: warm hit -> bytes is empty because disk read was short-circuited
-    let (h2, bytes2, is_fast2) = get_authoritative_content_hash(&file_path, "service.ts", &conn).unwrap();
+    let (h2, bytes2, is_fast2) =
+        get_authoritative_content_hash(&file_path, "service.ts", &conn).unwrap();
     assert!(is_fast2);
     assert_eq!(h1, h2);
-    assert!(bytes2.is_empty(), "Warm fast-path hit must short-circuit disk read");
+    assert!(
+        bytes2.is_empty(),
+        "Warm fast-path hit must short-circuit disk read"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }

@@ -12,7 +12,7 @@ use std::process::Command;
 
 use crate::contract::{extract_module, list_all_contracts};
 use crate::memory::{
-    DurableMemory, MemoryLifecycleState, load_durable_memories, save_durable_memories,
+    load_durable_memories, save_durable_memories, DurableMemory, MemoryLifecycleState,
 };
 use crate::storage::{db, root_path};
 use crate::telemetry::load_events;
@@ -995,8 +995,11 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
             affected_symbols: Vec::new(),
             expected_state: "Durable memory store readable and well-formed".to_string(),
             observed_state: format!("Failed reading memory store: {err_msg}"),
-            explanation: "Could not evaluate decision drift due to unavailable or corrupt memory store.".to_string(),
-            suggested_action: "Inspect .engram/memory.json or reinitialize with 'engram init'".to_string(),
+            explanation:
+                "Could not evaluate decision drift due to unavailable or corrupt memory store."
+                    .to_string(),
+            suggested_action: "Inspect .engram/memory.json or reinitialize with 'engram init'"
+                .to_string(),
         });
     }
 
@@ -1012,7 +1015,9 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
             expected_state: "Complete Git commit history available for audit".to_string(),
             observed_state: "Shallow Git clone detected (commit history truncated)".to_string(),
             explanation: "Shallow Git history limits mutation distance calculation.".to_string(),
-            suggested_action: "Run 'git fetch --unshallow' to enable complete historical drift analysis".to_string(),
+            suggested_action:
+                "Run 'git fetch --unshallow' to enable complete historical drift analysis"
+                    .to_string(),
         });
     }
 
@@ -1025,10 +1030,14 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
             reference_id: "SQLITE_INDEX".to_string(),
             affected_paths: Vec::new(),
             affected_symbols: Vec::new(),
-            expected_state: "SQLite symbol index and entity relationship graph initialized".to_string(),
+            expected_state: "SQLite symbol index and entity relationship graph initialized"
+                .to_string(),
             observed_state: "SQLite index is unavailable or uninitialized".to_string(),
-            explanation: "AST entity relationships could not be queried; relying on commit diff analysis.".to_string(),
-            suggested_action: "Run 'engram analyze' to build code intelligence database".to_string(),
+            explanation:
+                "AST entity relationships could not be queried; relying on commit diff analysis."
+                    .to_string(),
+            suggested_action: "Run 'engram analyze' to build code intelligence database"
+                .to_string(),
         });
     }
 
@@ -1170,7 +1179,10 @@ pub fn analyze_drift(root: &Path, options: &DriftOptions) -> Result<DriftReport>
             .trim_matches('-')
             .to_string();
         findings.push(DriftFinding {
-            id: format!("DRIFT-BOUNDARY-EROSION-{}-{}", bv.source_module, clean_target),
+            id: format!(
+                "DRIFT-BOUNDARY-EROSION-{}-{}",
+                bv.source_module, clean_target
+            ),
             category: DriftCategory::BoundaryErosion,
             severity: DriftSeverity::Warn,
             confidence: DriftConfidence::Confirmed,
@@ -1296,7 +1308,10 @@ pub fn format_drift_report(report: &DriftReport) -> String {
                 icon, f.id, f.confidence, f.explanation
             ));
             if !f.affected_paths.is_empty() {
-                out.push_str(&format!("      Paths:    {}\n", f.affected_paths.join(", ")));
+                out.push_str(&format!(
+                    "      Paths:    {}\n",
+                    f.affected_paths.join(", ")
+                ));
             }
             if !f.affected_symbols.is_empty() {
                 out.push_str(&format!(

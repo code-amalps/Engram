@@ -16,8 +16,7 @@ fn test_discovery_measured_vs_estimated_separation() {
     assert!(res.discovery.measured_context_tokens > 0);
     assert!(res.discovery.estimated_baseline_tokens > 0);
     assert_ne!(
-        res.discovery.measured_context_tokens,
-        res.discovery.estimated_baseline_tokens,
+        res.discovery.measured_context_tokens, res.discovery.estimated_baseline_tokens,
         "Measured context tokens must not be equal to simulated baseline tokens!"
     );
 
@@ -34,12 +33,36 @@ fn test_grounding_multi_entity_recall_precision() {
         let res = run_task_benchmark(task).unwrap();
 
         // Multi-entity grounding evaluations:
-        assert!(res.grounding.file_recall > 0.0, "File recall must be positive for {}", task.name);
-        assert!(res.grounding.file_precision > 0.0, "File precision must be positive for {}", task.name);
-        assert!(res.grounding.file_f1 > 0.0, "File F1 must be positive for {}", task.name);
-        assert!(res.grounding.symbol_recall > 0.0, "Symbol recall must be positive for {}", task.name);
-        assert!(res.grounding.test_recall > 0.0, "Test recall must be positive for {}", task.name);
-        assert!(res.grounding.overall_f1 > 0.0, "Overall F1 must be positive for {}", task.name);
+        assert!(
+            res.grounding.file_recall > 0.0,
+            "File recall must be positive for {}",
+            task.name
+        );
+        assert!(
+            res.grounding.file_precision > 0.0,
+            "File precision must be positive for {}",
+            task.name
+        );
+        assert!(
+            res.grounding.file_f1 > 0.0,
+            "File F1 must be positive for {}",
+            task.name
+        );
+        assert!(
+            res.grounding.symbol_recall > 0.0,
+            "Symbol recall must be positive for {}",
+            task.name
+        );
+        assert!(
+            res.grounding.test_recall > 0.0,
+            "Test recall must be positive for {}",
+            task.name
+        );
+        assert!(
+            res.grounding.overall_f1 > 0.0,
+            "Overall F1 must be positive for {}",
+            task.name
+        );
     }
 }
 
@@ -158,10 +181,21 @@ fn test_impact_benchmarks_all_scenarios() {
 
     for task in &tasks {
         let res = engram::bench::run_task_benchmark(task).unwrap();
-        let impact = res.impact.as_ref().expect("Impact scenario must produce metrics");
+        let impact = res
+            .impact
+            .as_ref()
+            .expect("Impact scenario must produce metrics");
 
-        assert_eq!(impact.recall, 1.0, "Impact recall must be 100% for {}", task.id);
-        assert!(impact.precision >= 0.5, "Impact precision must be >= 0.5 for {}", task.id);
+        assert_eq!(
+            impact.recall, 1.0,
+            "Impact recall must be 100% for {}",
+            task.id
+        );
+        assert!(
+            impact.precision >= 0.5,
+            "Impact precision must be >= 0.5 for {}",
+            task.id
+        );
         assert_eq!(
             impact.provenance_accuracy_pct, 100.0,
             "Provenance accuracy must be 100% for {}",
@@ -179,11 +213,20 @@ fn test_impact_benchmarks_all_scenarios() {
 fn test_empirical_precision_by_relationship_category() {
     let tasks = engram::bench::get_impact_benchmark_tasks();
     let res = engram::bench::run_task_benchmark(&tasks[0]).unwrap();
-    let impact = res.impact.as_ref().expect("Impact scenario must produce metrics");
+    let impact = res
+        .impact
+        .as_ref()
+        .expect("Impact scenario must produce metrics");
 
     // Dynamic empirical precision breakdown by relationship type
-    assert!(!impact.precision_by_category.is_empty(), "precision_by_category must be populated");
-    assert!(!impact.recall_by_category.is_empty(), "recall_by_category must be populated");
+    assert!(
+        !impact.precision_by_category.is_empty(),
+        "precision_by_category must be populated"
+    );
+    assert!(
+        !impact.recall_by_category.is_empty(),
+        "recall_by_category must be populated"
+    );
     assert!(impact.precision_by_category.contains_key("DIRECT"));
 }
 
@@ -208,18 +251,30 @@ fn test_multi_turn_memory_compounding_suite() {
     // 4. Turn 3: Architectural Policy Supersession (ADR-014 -> ADR-029)
     assert_eq!(res.turns[2].turn_id, "TASK-COMP-03");
     assert!(res.turns[2].success);
-    assert_eq!(res.supersession_correctness_pct, 100.0, "Superseded policy must be 100% excluded from active query");
+    assert_eq!(
+        res.supersession_correctness_pct, 100.0,
+        "Superseded policy must be 100% excluded from active query"
+    );
 
     // 5. Turn 4: Scoped Specialization vs Global Shadowing
     assert_eq!(res.turns[3].turn_id, "TASK-COMP-04");
     assert!(res.turns[3].success);
-    assert_eq!(res.conflict_resolution_accuracy_pct, 100.0, "Conflict resolution and shadowing must be 100% accurate");
+    assert_eq!(
+        res.conflict_resolution_accuracy_pct, 100.0,
+        "Conflict resolution and shadowing must be 100% accurate"
+    );
 
     // 6. Memory Compounding Lift Formula:
     // Compounding Lift = (Baseline Rediscovery Cost - Memory Rediscovery Cost) / Baseline Rediscovery Cost
     assert!(res.baseline_rediscovery_cost > res.memory_rediscovery_cost);
-    assert!(res.compounding_lift_pct > 0.0, "Compounding lift must be positive");
-    assert!(res.compounding_lift_pct >= 50.0, "Compounding lift should exceed 50% for grounded turns");
+    assert!(
+        res.compounding_lift_pct > 0.0,
+        "Compounding lift must be positive"
+    );
+    assert!(
+        res.compounding_lift_pct >= 50.0,
+        "Compounding lift should exceed 50% for grounded turns"
+    );
 }
 
 #[test]
@@ -243,5 +298,7 @@ fn test_decision_intelligence_synthetic_benchmark() {
         di.decision_archaeology_accuracy_pct, 100.0,
         "Decision archaeology accuracy must be 100% on defined deterministic synthetic corpus"
     );
-    assert!(di.qualified_claim.contains("100% precision on the defined deterministic synthetic orphan/liveness benchmark corpus"));
+    assert!(di.qualified_claim.contains(
+        "100% precision on the defined deterministic synthetic orphan/liveness benchmark corpus"
+    ));
 }

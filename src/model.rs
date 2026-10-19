@@ -360,4 +360,3 @@ pub struct FactRecord {
     pub reason: Option<String>,
     pub evidence_ids: Vec<String>,
 }
-

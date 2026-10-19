@@ -6,7 +6,9 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::memory::{load_durable_memories, save_durable_memories, MemoryLifecycleState, ScopeLevel};
+use crate::memory::{
+    load_durable_memories, save_durable_memories, MemoryLifecycleState, ScopeLevel,
+};
 use crate::storage::{db, root_path};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,7 +77,9 @@ fn calculate_supersession_depth(mem_id: &str, memories: &[crate::memory::Durable
         if depth >= 20 {
             break;
         }
-        let successor = memories.iter().find(|m| m.supersedes.as_deref() == Some(&id));
+        let successor = memories
+            .iter()
+            .find(|m| m.supersedes.as_deref() == Some(&id));
         if let Some(succ) = successor {
             depth += 1;
             current_id = Some(succ.id.clone());
@@ -111,9 +115,13 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                     archival_candidate_count += 1;
                     (
                         LivenessStatus::ArchivalCandidate,
-                        format!("Deep superseded record (depth {} hops). Eligible for cold archive.", depth),
+                        format!(
+                            "Deep superseded record (depth {} hops). Eligible for cold archive.",
+                            depth
+                        ),
                         vec![
-                            "Run 'engram gc --archive-superseded' to move to .engram/archive/".into(),
+                            "Run 'engram gc --archive-superseded' to move to .engram/archive/"
+                                .into(),
                             "Preserve in hot memory.yaml if needed for active development".into(),
                         ],
                     )
@@ -121,7 +129,10 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                     superseded_count += 1;
                     (
                         LivenessStatus::Superseded,
-                        format!("Superseded by {}.", mem.superseded_by.as_deref().unwrap_or("newer policy")),
+                        format!(
+                            "Superseded by {}.",
+                            mem.superseded_by.as_deref().unwrap_or("newer policy")
+                        ),
                         vec!["Active query automatically excludes this record".into()],
                     )
                 }
@@ -130,7 +141,10 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                 dormant_count += 1;
                 (
                     LivenessStatus::Dormant,
-                    format!("Target '{:?}' not found in active codebase. Marked DORMANT.", mem.scope.target),
+                    format!(
+                        "Target '{:?}' not found in active codebase. Marked DORMANT.",
+                        mem.scope.target
+                    ),
                     vec![
                         "Re-anchor to new symbol or file via 'engram memory update'".into(),
                         "Retire decision if architecture permanently changed".into(),
@@ -142,7 +156,8 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                 stale_count += 1;
                 (
                     LivenessStatus::Stale,
-                    "Governed code evolved beyond staleness threshold. Marked STALE_REVIEW.".to_string(),
+                    "Governed code evolved beyond staleness threshold. Marked STALE_REVIEW."
+                        .to_string(),
                     vec![
                         format!("Run 'engram memory re-ratify {}' to re-ratify", mem.id),
                         "Verify policy alignment with active codebase".into(),
@@ -161,7 +176,10 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                             dormant_count += 1;
                             (
                                 LivenessStatus::Dormant,
-                                format!("Target symbol '{}' not found in active codebase. Marked DORMANT.", sym),
+                                format!(
+                                    "Target symbol '{}' not found in active codebase. Marked DORMANT.",
+                                    sym
+                                ),
                                 vec![
                                     "Re-anchor to replacement symbol".into(),
                                     "Retire decision".into(),
@@ -185,7 +203,8 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
                             dormant_count += 1;
                             (
                                 LivenessStatus::Dormant,
-                                "Package target files not found in working tree. Marked DORMANT.".into(),
+                                "Package target files not found in working tree. Marked DORMANT."
+                                    .into(),
                                 vec!["Re-anchor to updated file paths".into()],
                             )
                         } else {
@@ -247,10 +266,14 @@ pub fn diagnose_memory_health(root: &Path) -> Result<DoctorReport> {
         save_durable_memories(&root, &doc)?;
     }
 
-    let (event_chain_status, event_chain_details) = match crate::telemetry::verify_event_chain(&root) {
-        Ok((status, details)) => (Some(status.to_string()), Some(details)),
-        Err(e) => (Some("EVENT_CHAIN_BROKEN".to_string()), Some(format!("Error verifying telemetry event chain: {e}"))),
-    };
+    let (event_chain_status, event_chain_details) =
+        match crate::telemetry::verify_event_chain(&root) {
+            Ok((status, details)) => (Some(status.to_string()), Some(details)),
+            Err(e) => (
+                Some("EVENT_CHAIN_BROKEN".to_string()),
+                Some(format!("Error verifying telemetry event chain: {e}")),
+            ),
+        };
 
     Ok(DoctorReport {
         protocol_version: PROTOCOL_VERSION.to_string(),
@@ -297,7 +320,10 @@ pub fn format_doctor_report(report: &DoctorReport) -> String {
             LivenessStatus::ArchivalCandidate => "📦 [ARCHIVAL CANDIDATE]",
         };
         let target_str = item.scope_target.as_deref().unwrap_or("repo");
-        out.push_str(&format!("  {} {} ({}) - {}\n", icon, item.memory_id, target_str, item.title));
+        out.push_str(&format!(
+            "  {} {} ({}) - {}\n",
+            icon, item.memory_id, target_str, item.title
+        ));
         out.push_str(&format!("      Status Note: {}\n", item.diagnostic_message));
         if item.liveness != LivenessStatus::Live {
             out.push_str("      Suggested Actions:\n");

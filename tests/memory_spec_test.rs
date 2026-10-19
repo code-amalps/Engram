@@ -11,13 +11,14 @@ use std::fs;
 use std::path::PathBuf;
 
 use engram::memory::{
-    detect_memory_conflicts, load_durable_memories, promote_candidate,
-    query_scoped_memories, record_scoped_decision, record_task_candidate,
-    supersede_memory, ConflictType, MemoryLifecycleState, MemoryScope, ScopeLevel,
+    ConflictType, MemoryLifecycleState, MemoryScope, ScopeLevel, detect_memory_conflicts,
+    load_durable_memories, promote_candidate, query_scoped_memories, record_scoped_decision,
+    record_task_candidate, supersede_memory,
 };
 
 fn setup_temp_repo(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("engram_mem_spec_{}_{}", name, uuid::Uuid::new_v4()));
+    let root =
+        std::env::temp_dir().join(format!("engram_mem_spec_{}_{}", name, uuid::Uuid::new_v4()));
     if root.exists() {
         let _ = fs::remove_dir_all(&root);
     }
@@ -62,18 +63,35 @@ fn test_immutable_record_supersession_chain() {
     // Verify ADR-014 was NOT mutated, but marked superseded with pointer
     let doc = load_durable_memories(&root).unwrap();
     let old = doc.memories.iter().find(|m| m.id == "ADR-014").unwrap();
-    assert_eq!(old.statement, "OrderService.ExportCSV buffers CSV in memory before disk write"); // Immutable statement!
+    assert_eq!(
+        old.statement,
+        "OrderService.ExportCSV buffers CSV in memory before disk write"
+    ); // Immutable statement!
     assert_eq!(old.lifecycle_state, MemoryLifecycleState::Superseded);
     assert_eq!(old.superseded_by.as_deref(), Some(adr29.id.as_str()));
 
     // 3. Active query excludes superseded ADR-014 and returns only active ADR-029
-    let active = query_scoped_memories(&root, "Export CSV for orders", &["internal/orders/service.go".into()], &[], false).unwrap();
+    let active = query_scoped_memories(
+        &root,
+        "Export CSV for orders",
+        &["internal/orders/service.go".into()],
+        &[],
+        false,
+    )
+    .unwrap();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].id, adr29.id);
     assert!(active[0].statement.contains("must stream via io.Writer"));
 
     // 4. Audit query (include_superseded: true) returns both with resolution graph intact
-    let audit = query_scoped_memories(&root, "Export CSV for orders", &["internal/orders/service.go".into()], &[], true).unwrap();
+    let audit = query_scoped_memories(
+        &root,
+        "Export CSV for orders",
+        &["internal/orders/service.go".into()],
+        &[],
+        true,
+    )
+    .unwrap();
     assert_eq!(audit.len(), 2);
 
     let _ = fs::remove_dir_all(&root);
@@ -183,8 +201,14 @@ fn test_direct_contradiction_requires_human_resolution() {
     let conflicts = detect_memory_conflicts(&doc.memories);
 
     assert_eq!(conflicts.len(), 1);
-    assert_eq!(conflicts[0].conflict_type, ConflictType::DirectContradiction);
-    assert!(conflicts[0].requires_human_resolution, "Same-scope contradiction MUST require human resolution!");
+    assert_eq!(
+        conflicts[0].conflict_type,
+        ConflictType::DirectContradiction
+    );
+    assert!(
+        conflicts[0].requires_human_resolution,
+        "Same-scope contradiction MUST require human resolution!"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -216,11 +240,27 @@ fn test_agent_output_never_becomes_durable_automatically() {
     );
 
     // 3. Active queries return nothing (agent cannot poison next turn)
-    let queried = query_scoped_memories(&root, "auth token validation", &["internal/auth/token.go".into()], &[], false).unwrap();
-    assert!(queried.is_empty(), "Unpromoted agent candidate must not be retrieved");
+    let queried = query_scoped_memories(
+        &root,
+        "auth token validation",
+        &["internal/auth/token.go".into()],
+        &[],
+        false,
+    )
+    .unwrap();
+    assert!(
+        queried.is_empty(),
+        "Unpromoted agent candidate must not be retrieved"
+    );
 
     // 4. Only explicit human promotion converts candidate to DurableMemory
-    let promoted = promote_candidate(&root, &candidate.candidate_id, "security_team", Some("Approved debug flag exception with compile guards")).unwrap();
+    let promoted = promote_candidate(
+        &root,
+        &candidate.candidate_id,
+        "security_team",
+        Some("Approved debug flag exception with compile guards"),
+    )
+    .unwrap();
     assert_eq!(promoted.lifecycle_state, MemoryLifecycleState::Durable);
 
     let doc_after = load_durable_memories(&root).unwrap();

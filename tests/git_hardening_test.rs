@@ -9,13 +9,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use uuid::Uuid;
 
-use engram::contract::{
-    check_contract, create_contract, CheckExitCode, CheckOptions,
-};
+use engram::contract::{CheckExitCode, CheckOptions, check_contract, create_contract};
 use engram::git::{
-    current_branch, current_revision, extract_changed_paths, get_diff_changed_files,
-    is_detached_head, is_merge_commit, is_shallow_repository, resolve_baseline,
-    GitFileDiffKind, SHALLOW_HISTORY_TRUNCATED,
+    GitFileDiffKind, SHALLOW_HISTORY_TRUNCATED, current_branch, current_revision,
+    extract_changed_paths, get_diff_changed_files, is_detached_head, is_merge_commit,
+    is_shallow_repository, resolve_baseline,
 };
 
 fn setup_git_repo(prefix: &str) -> PathBuf {
@@ -69,7 +67,10 @@ fn test_detached_head_detection_and_revision_resolution() {
     assert!(out.status.success());
 
     // Verify detached HEAD state
-    assert!(is_detached_head(&root), "Repository must be recognized as detached HEAD");
+    assert!(
+        is_detached_head(&root),
+        "Repository must be recognized as detached HEAD"
+    );
     assert_eq!(
         current_branch(&root).unwrap(),
         None,
@@ -228,7 +229,13 @@ fn test_merge_commit_detection_and_handling() {
 
     // Merge feature branch with a merge commit
     let merge_out = Command::new("git")
-        .args(["merge", "--no-ff", "feature/orders", "-m", "Merge orders feature"])
+        .args([
+            "merge",
+            "--no-ff",
+            "feature/orders",
+            "-m",
+            "Merge orders feature",
+        ])
         .current_dir(&root)
         .output()
         .unwrap();
@@ -259,7 +266,11 @@ fn test_shallow_clone_detection_and_graceful_fallback() {
     // Simulate shallow clone by creating .git/shallow marker file
     let git_dir = root.join(".git");
     let shallow_marker = git_dir.join("shallow");
-    fs::write(&shallow_marker, "0000000000000000000000000000000000000001\n").unwrap();
+    fs::write(
+        &shallow_marker,
+        "0000000000000000000000000000000000000001\n",
+    )
+    .unwrap();
 
     // Verify shallow repository is detected
     assert!(
@@ -301,7 +312,9 @@ fn test_shallow_clone_detection_and_graceful_fallback() {
     assert_eq!(res.status, "FAILED");
     assert_eq!(res.exit_code, CheckExitCode::BaselineUnavailable.as_i32());
     assert!(
-        res.failure_reasons.iter().any(|r| r.contains(SHALLOW_HISTORY_TRUNCATED)),
+        res.failure_reasons
+            .iter()
+            .any(|r| r.contains(SHALLOW_HISTORY_TRUNCATED)),
         "Failure reasons must clearly report SHALLOW_HISTORY_TRUNCATED, got: {:?}",
         res.failure_reasons
     );
@@ -325,10 +338,7 @@ fn test_baseline_resolution_and_validation() {
 
     // 2. Real commit SHA
     let rev = current_revision(&root).unwrap();
-    assert_eq!(
-        resolve_baseline(&root, &rev).unwrap(),
-        Ok(rev.clone())
-    );
+    assert_eq!(resolve_baseline(&root, &rev).unwrap(), Ok(rev.clone()));
 
     // 3. Unknown commit SHA in non-shallow repo: returns clear error
     let unknown_sha = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
@@ -358,15 +368,18 @@ fn test_untracked_nested_directory_and_files_handled_individually() {
     // Both files must be individually present, NOT aggregated as "src/" or "src/orders/"
     assert!(
         paths.contains(&"src/orders/deep/file_a.ts".to_string()),
-        "Must contain individual file_a.ts, got: {:?}", paths
+        "Must contain individual file_a.ts, got: {:?}",
+        paths
     );
     assert!(
         paths.contains(&"src/orders/deep/file_b.ts".to_string()),
-        "Must contain individual file_b.ts, got: {:?}", paths
+        "Must contain individual file_b.ts, got: {:?}",
+        paths
     );
     assert!(
         !paths.contains(&"src/orders/deep".to_string()) && !paths.contains(&"src".to_string()),
-        "Must not contain raw directory paths, got: {:?}", paths
+        "Must not contain raw directory paths, got: {:?}",
+        paths
     );
 
     let _ = fs::remove_dir_all(&root);
@@ -402,13 +415,18 @@ fn test_submodule_gitdir_shallow_detection() {
     fs::write(
         fake_submodule_dir.join(".git"),
         "gitdir: ../.git_modules_target\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     // Target does not have shallow yet
     assert!(!is_shallow_repository(&fake_submodule_dir));
 
     // Now write shallow marker in gitdir
-    fs::write(git_modules_dir.join("shallow"), "1111111111111111111111111111111111111111\n").unwrap();
+    fs::write(
+        git_modules_dir.join("shallow"),
+        "1111111111111111111111111111111111111111\n",
+    )
+    .unwrap();
     assert!(
         is_shallow_repository(&fake_submodule_dir),
         "Submodule with shallow marker in gitdir must be detected as shallow"
@@ -422,8 +440,16 @@ fn test_rename_with_spaces_in_path() {
     let root = setup_git_repo("rename_spaces");
 
     fs::write(root.join("old file with spaces.txt"), "hello world\n").unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Add space file"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add space file"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     Command::new("git")
         .args(["mv", "old file with spaces.txt", "new file with spaces.txt"])

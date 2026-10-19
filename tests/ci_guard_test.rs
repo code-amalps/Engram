@@ -4,9 +4,8 @@ use std::process::Command;
 use uuid::Uuid;
 
 use engram::contract::{
-    check_contract, create_contract, format_check_markdown_summary,
-    format_check_report, save_contract, CheckExitCode, CheckOptions,
-    RatificationStatus,
+    CheckExitCode, CheckOptions, RatificationStatus, check_contract, create_contract,
+    format_check_markdown_summary, format_check_report, save_contract,
 };
 
 fn setup_test_git_repo(prefix: &str) -> PathBuf {
@@ -211,8 +210,16 @@ rules:
     description: "Billing cannot be modified by agent without team sign-off."
 "#;
     fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Add constitution"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add constitution"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // 2. Agent creates contract declaring billing/gateway.rs as EXPECTED
     let contract = create_contract(
@@ -238,7 +245,10 @@ rules:
     assert_eq!(res.status, "FAILED");
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
     assert_eq!(res.summary.boundary_violations, 1);
-    assert!(res.changes.iter().any(|c| c.reason.contains("Constitution rule 'Billing Layer Locked'")));
+    assert!(res.changes.iter().any(|c| {
+        c.reason
+            .contains("Constitution rule 'Billing Layer Locked'")
+    }));
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -284,7 +294,10 @@ rules:
 
     let viol_res = check_contract(&root, &opts);
     assert_eq!(viol_res.status, "FAILED");
-    assert_eq!(viol_res.exit_code, CheckExitCode::ContractViolation.as_i32());
+    assert_eq!(
+        viol_res.exit_code,
+        CheckExitCode::ContractViolation.as_i32()
+    );
     assert_eq!(viol_res.summary.boundary_violations, 1);
     assert!(viol_res.failure_reasons[0].contains("CONSTITUTION_VIOLATION"));
 
@@ -322,7 +335,11 @@ fn test_ci_guard_fail_closed_unratified_expansion() {
     let res = check_contract(&root, &opts);
     assert_eq!(res.status, "FAILED");
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
-    assert!(res.failure_reasons.iter().any(|f| f.contains("CONTRACT_MODIFIED_IN_PR")));
+    assert!(
+        res.failure_reasons
+            .iter()
+            .any(|f| f.contains("CONTRACT_MODIFIED_IN_PR"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -380,11 +397,23 @@ rules:
     description: "Secrets directory must never be altered."
 "#;
     fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Add base constitution"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add base constitution"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // Now switch to a PR branch
-    Command::new("git").args(["checkout", "-b", "feature/tamper"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["checkout", "-b", "feature/tamper"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // The PR deletes the constitution file to weaken the rules!
     fs::remove_file(engram_dir.join("constitution.yaml")).unwrap();
@@ -401,9 +430,17 @@ rules:
     };
 
     let res = check_contract(&root, &opts);
-    assert_eq!(res.status, "FAILED", "Deleting constitution and editing forbidden secrets in PR must FAIL");
+    assert_eq!(
+        res.status, "FAILED",
+        "Deleting constitution and editing forbidden secrets in PR must FAIL"
+    );
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
-    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR") || r.contains("CONSTITUTION_VIOLATION")));
+    assert!(
+        res.failure_reasons
+            .iter()
+            .any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR")
+                || r.contains("CONSTITUTION_VIOLATION"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -425,10 +462,22 @@ rules:
     description: "Do not touch payments."
 "#;
     fs::write(engram_dir.join("constitution.yaml"), constitution_yaml).unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Base constitution"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Base constitution"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
-    Command::new("git").args(["checkout", "-b", "feature/modify-rules"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["checkout", "-b", "feature/modify-rules"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // PR modifies constitution to remove the forbidden rule
     let weakened_yaml = r#"
@@ -449,9 +498,17 @@ rules: []
     };
 
     let res = check_contract(&root, &opts);
-    assert_eq!(res.status, "FAILED", "Modifying constitution in PR to bypass rules must FAIL");
+    assert_eq!(
+        res.status, "FAILED",
+        "Modifying constitution in PR to bypass rules must FAIL"
+    );
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
-    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR") || r.contains("CONSTITUTION_VIOLATION")));
+    assert!(
+        res.failure_reasons
+            .iter()
+            .any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR")
+                || r.contains("CONSTITUTION_VIOLATION"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -501,14 +558,30 @@ fn test_ci_guard_fails_when_pr_modifies_workflow_or_action_yml() {
     fs::create_dir_all(&wf_dir).unwrap();
     fs::write(wf_dir.join("engram-guard.yml"), "name: Guard Workflow\n").unwrap();
 
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Add action and workflow"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add action and workflow"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // Switch to PR branch
-    Command::new("git").args(["checkout", "-b", "feature/weaken-guard"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["checkout", "-b", "feature/weaken-guard"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // Attacker PR modifies action.yml to bypass verification
-    fs::write(root.join("action.yml"), "name: Weakened Action\nrun: exit 0\n").unwrap();
+    fs::write(
+        root.join("action.yml"),
+        "name: Weakened Action\nrun: exit 0\n",
+    )
+    .unwrap();
 
     let opts = CheckOptions {
         base_commit: Some("main".to_string()),
@@ -517,10 +590,21 @@ fn test_ci_guard_fails_when_pr_modifies_workflow_or_action_yml() {
     };
 
     let res = check_contract(&root, &opts);
-    assert_eq!(res.status, "FAILED", "Modifying action.yml in PR must FAIL closed");
+    assert_eq!(
+        res.status, "FAILED",
+        "Modifying action.yml in PR must FAIL closed"
+    );
     assert_eq!(res.exit_code, CheckExitCode::ContractViolation.as_i32());
-    assert!(res.failure_reasons.iter().any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR")));
-    assert!(res.changes.iter().any(|c| c.path == "action.yml" && c.reason.contains("UNRATIFIED_POLICY_MUTATION")));
+    assert!(
+        res.failure_reasons
+            .iter()
+            .any(|r| r.contains("CONSTITUTION_MODIFIED_IN_PR"))
+    );
+    assert!(
+        res.changes
+            .iter()
+            .any(|c| c.path == "action.yml" && c.reason.contains("UNRATIFIED_POLICY_MUTATION"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

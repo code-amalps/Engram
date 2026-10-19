@@ -80,7 +80,7 @@ pub fn build_memory_graph(root: &Path, conn: &Connection) -> Result<()> {
     let mut extracted_symbols: Vec<(String, String)> = Vec::new(); // (symbol_name, file_path)
     {
         let mut stmt = conn.prepare(
-            "SELECT name, path FROM entity_versions WHERE invalidated_at_revision IS NULL"
+            "SELECT name, path FROM entity_versions WHERE invalidated_at_revision IS NULL",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -210,7 +210,12 @@ pub fn build_memory_graph(root: &Path, conn: &Connection) -> Result<()> {
                 conn.execute(
                     "INSERT INTO memory_edges (source_id, target_id, kind, provenance, created_at)
                      VALUES (?1, ?2, ?3, 'Repository scope target', ?4)",
-                    params![mem.id, repo_target, MemoryEdgeKind::Governs.as_str(), accepted_at_str],
+                    params![
+                        mem.id,
+                        repo_target,
+                        MemoryEdgeKind::Governs.as_str(),
+                        accepted_at_str
+                    ],
                 )?;
             }
         }
@@ -221,7 +226,12 @@ pub fn build_memory_graph(root: &Path, conn: &Connection) -> Result<()> {
                 conn.execute(
                     "INSERT INTO memory_edges (source_id, target_id, kind, provenance, created_at)
                      VALUES (?1, ?2, ?3, 'Change contract authorization', ?4)",
-                    params![mem.id, cid, MemoryEdgeKind::Explains.as_str(), accepted_at_str],
+                    params![
+                        mem.id,
+                        cid,
+                        MemoryEdgeKind::Explains.as_str(),
+                        accepted_at_str
+                    ],
                 )?;
             }
             // Edge 4: MOTIVATED_BY (Commit provenance)
@@ -229,7 +239,12 @@ pub fn build_memory_graph(root: &Path, conn: &Connection) -> Result<()> {
                 conn.execute(
                     "INSERT INTO memory_edges (source_id, target_id, kind, provenance, created_at)
                      VALUES (?1, ?2, ?3, 'Originating commit motivation', ?4)",
-                    params![mem.id, sha, MemoryEdgeKind::MotivatedBy.as_str(), accepted_at_str],
+                    params![
+                        mem.id,
+                        sha,
+                        MemoryEdgeKind::MotivatedBy.as_str(),
+                        accepted_at_str
+                    ],
                 )?;
             }
         }
@@ -239,7 +254,10 @@ pub fn build_memory_graph(root: &Path, conn: &Connection) -> Result<()> {
 }
 
 /// Query active memories governing a specific symbol or target path (Code -> Why?).
-pub fn query_governing_memories(conn: &Connection, target_symbol: &str) -> Result<Vec<DurableMemory>> {
+pub fn query_governing_memories(
+    conn: &Connection,
+    target_symbol: &str,
+) -> Result<Vec<DurableMemory>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT mn.data_json
          FROM memory_nodes mn
@@ -258,7 +276,7 @@ pub fn query_governing_memories(conn: &Connection, target_symbol: &str) -> Resul
              WHEN 'MODULE' THEN 3
              WHEN 'REPOSITORY' THEN 4
              ELSE 5
-           END"
+           END",
     )?;
 
     let rows = stmt.query_map([target_symbol], |row| {
@@ -281,7 +299,7 @@ pub fn query_governing_memories(conn: &Connection, target_symbol: &str) -> Resul
 /// Query all code entities and files governed by a specific memory (Decision -> Affected Code?).
 pub fn query_governed_entities(conn: &Connection, memory_id: &str) -> Result<Vec<GovernedEntity>> {
     let mut stmt = conn.prepare(
-        "SELECT target_id, kind FROM memory_edges WHERE source_id = ?1 AND kind = 'GOVERNS'"
+        "SELECT target_id, kind FROM memory_edges WHERE source_id = ?1 AND kind = 'GOVERNS'",
     )?;
 
     let rows = stmt.query_map([memory_id], |row| {

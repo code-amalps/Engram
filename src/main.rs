@@ -31,10 +31,10 @@ pub mod setup;
 pub mod storage;
 pub mod telemetry;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -267,6 +267,19 @@ enum CommandLine {
         base: Option<String>,
         #[arg(long)]
         ci: bool,
+    },
+    /// Local deterministic postflight validation: inspects diff vs contract, scope, staleness, and test evidence
+    ValidateLocal {
+        #[arg(long)]
+        contract_id: Option<String>,
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        staged: bool,
+        #[arg(long)]
+        test_passed: Option<bool>,
+        #[arg(long)]
+        build_passed: Option<bool>,
     },
     /// Formulate structured recovery repair plan for a contract violation
     Recover {
@@ -762,13 +775,8 @@ fn run() -> Result<()> {
                 reason,
                 commit,
             } => {
-                let mem = memory::ratify_decision(
-                    root,
-                    &decision_id,
-                    &by,
-                    &reason,
-                    commit.as_deref(),
-                )?;
+                let mem =
+                    memory::ratify_decision(root, &decision_id, &by, &reason, commit.as_deref())?;
                 if force_json {
                     print_json(&mem)?;
                 } else {
@@ -1478,6 +1486,7 @@ fn run() -> Result<()> {
                 task,
                 token_budget,
                 forbidden_boundaries: forbidden,
+                planned_files: None,
             };
             let res = flywheel::preflight_task(root, &opts)?;
             if force_json {
@@ -1505,6 +1514,30 @@ fn run() -> Result<()> {
                 print_json(&res)?;
             } else {
                 print!("{}", flywheel::format_postflight_report(&res, ci));
+            }
+            if res.exit_code != 0 {
+                std::process::exit(res.exit_code);
+            }
+        }
+        Some(CommandLine::ValidateLocal {
+            contract_id,
+            strict,
+            staged,
+            test_passed,
+            build_passed,
+        }) => {
+            let opts = flywheel::LocalPostflightOptions {
+                contract_id,
+                staged,
+                strict,
+                test_evidence: test_passed,
+                build_evidence: build_passed,
+            };
+            let res = flywheel::validate_local_postflight(root, &opts)?;
+            if force_json {
+                print_json(&res)?;
+            } else {
+                print!("{}", flywheel::format_local_postflight_report(&res));
             }
             if res.exit_code != 0 {
                 std::process::exit(res.exit_code);
@@ -1597,9 +1630,25 @@ fn run() -> Result<()> {
 }
 
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("engram: {e:#}");
-        std::process::exit(1);
+    // Windows PE default main thread stack is 1MB, which can overflow in debug mode
+    // when evaluating Clap's deep subcommand parser tree. Run with an 8MB stack.
+    const STACK_SIZE: usize = 8 * 1024 * 1024;
+    let run_res = std::thread::Builder::new()
+        .name("engram-main".into())
+        .stack_size(STACK_SIZE)
+        .spawn(run)
+        .expect("Failed to spawn main thread with custom stack")
+        .join();
+
+    match run_res {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            eprintln!("engram: {e:#}");
+            std::process::exit(1);
+        }
+        Err(panic) => {
+            std::panic::resume_unwind(panic);
+        }
     }
 }
 
@@ -1607,7 +1656,7 @@ fn main() {
 mod tests {
     use super::*;
     use analyzer::{estimate_tokens, language, matches_pattern, parse_file, redact, tokens};
-    use model::{Evidence, EvidenceTier, analysis_key};
+    use model::{analysis_key, Evidence, EvidenceTier};
 
     #[test]
     fn test_secret_redaction() {
@@ -1706,16 +1755,12 @@ mod tests {
         let code = b"class OrderProcessor:\n    def process_order(self, order_id):\n        pass\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.py", code, "rev1").unwrap();
         assert_eq!(record.language, "python");
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
-        );
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
     }
 
     #[test]
@@ -1723,21 +1768,15 @@ mod tests {
         let code = b"export interface IOrder { id: string; }\nexport class OrderService implements IOrder {\n  getOrder(id: string) { return id; }\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.ts", code, "rev1").unwrap();
         assert_eq!(record.language, "typescript");
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "IOrder" && s.kind == "INTERFACE")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderService" && s.kind == "CLASS")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "getOrder" && s.kind == "METHOD")
-        );
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "IOrder" && s.kind == "INTERFACE"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderService" && s.kind == "CLASS"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "getOrder" && s.kind == "METHOD"));
     }
 
     #[test]
@@ -1746,16 +1785,12 @@ mod tests {
         let (record, symbols, _) =
             parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
         assert_eq!(record.language, "csharp");
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "CartService" && s.kind == "CLASS")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "Checkout" && s.kind == "METHOD")
-        );
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "CartService" && s.kind == "CLASS"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Checkout" && s.kind == "METHOD"));
     }
 
     #[test]
@@ -1763,21 +1798,15 @@ mod tests {
         let code = b"pub struct OrderService;\nimpl OrderService {\n    pub fn process_order(&self) {}\n}\npub trait OrderRepository {}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.rs", code, "rev1").unwrap();
         assert_eq!(record.language, "rust");
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT")
-        );
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
     }
 
     #[test]
@@ -1785,25 +1814,17 @@ mod tests {
         let code = b"package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV() error { return nil }\n\ntype Exporter interface {\n    Export() error\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.go", code, "rev1").unwrap();
         assert_eq!(record.language, "go");
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "Exporter" && s.kind == "INTERFACE")
-        );
-        assert!(
-            symbols
-                .iter()
-                .any(|s| s.name == "orders" && s.kind == "MODULE")
-        );
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Exporter" && s.kind == "INTERFACE"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "orders" && s.kind == "MODULE"));
     }
 }

@@ -10,20 +10,19 @@ use std::fs;
 use std::path::PathBuf;
 
 use engram::analyzer::analyze;
-use engram::archaeology::{explain_why, ArchaeologyReport};
-use engram::doctor::{diagnose_memory_health, DoctorReport, LivenessStatus};
-use engram::gc::{execute_gc, GcOptions, GcPlan};
+use engram::archaeology::{ArchaeologyReport, explain_why};
+use engram::doctor::{DoctorReport, LivenessStatus, diagnose_memory_health};
+use engram::gc::{GcOptions, GcPlan, execute_gc};
 use engram::memory::{
-    load_durable_memories, record_scoped_decision, supersede_memory, MemoryLifecycleState,
-    MemoryScope,
+    MemoryLifecycleState, MemoryScope, load_durable_memories, record_scoped_decision,
+    supersede_memory,
 };
-use engram::memory_graph::{
-    build_memory_graph, query_governed_entities, query_governing_memories,
-};
+use engram::memory_graph::{build_memory_graph, query_governed_entities, query_governing_memories};
 use engram::storage::db;
 
 fn setup_temp_repo(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("engram_v09_spec_{}_{}", name, uuid::Uuid::new_v4()));
+    let root =
+        std::env::temp_dir().join(format!("engram_v09_spec_{}_{}", name, uuid::Uuid::new_v4()));
     if root.exists() {
         let _ = fs::remove_dir_all(&root);
     }
@@ -37,11 +36,26 @@ fn setup_temp_repo(name: &str) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("service.go"), svc).unwrap();
 
-    let _ = std::process::Command::new("git").args(["init"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.name", "Tester"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.email", "test@engram.dev"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Initial orders structure"]).current_dir(&root).output();
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Tester"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@engram.dev"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Initial orders structure"])
+        .current_dir(&root)
+        .output();
 
     root
 }
@@ -82,13 +96,23 @@ fn test_memory_code_graph_bidirectional_traversal() {
 
     // 4. Test Code -> Memory traversal: What decisions govern OrderService.ExportCSV?
     let governing = query_governing_memories(&conn, "OrderService.ExportCSV").unwrap();
-    assert!(!governing.is_empty(), "Governing memories must not be empty");
-    assert!(governing.iter().any(|m| m.id == adr29.id), "ADR-029 must govern OrderService.ExportCSV");
+    assert!(
+        !governing.is_empty(),
+        "Governing memories must not be empty"
+    );
+    assert!(
+        governing.iter().any(|m| m.id == adr29.id),
+        "ADR-029 must govern OrderService.ExportCSV"
+    );
 
     // 5. Test Memory -> Code traversal: What code does ADR-029 govern?
     let governed = query_governed_entities(&conn, &adr29.id).unwrap();
     assert!(!governed.is_empty(), "Governed entities must not be empty");
-    assert!(governed.iter().any(|e| e.name == "OrderService.ExportCSV" || e.name.contains("orders")));
+    assert!(
+        governed
+            .iter()
+            .any(|e| e.name == "OrderService.ExportCSV" || e.name.contains("orders"))
+    );
 
     // 6. Test Supersedes lineage edge in graph
     let old_lineage = query_governing_memories(&conn, "OrderService.ExportCSV")
@@ -96,7 +120,10 @@ fn test_memory_code_graph_bidirectional_traversal() {
         .into_iter()
         .find(|m| m.id == "ADR-014");
     // Active governing query excludes superseded, but graph preserves SUPERSEDES edge
-    assert!(old_lineage.is_none(), "Active governing query must exclude superseded ADR-014");
+    assert!(
+        old_lineage.is_none(),
+        "Active governing query must exclude superseded ADR-014"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -137,10 +164,16 @@ fn test_decision_archaeology_why_query() {
     let report: ArchaeologyReport = explain_why(&root, "OrderService.ExportCSV").unwrap();
 
     assert_eq!(report.target_symbol, "OrderService.ExportCSV");
-    assert_eq!(report.current_governing_policy.as_ref().unwrap().id, adr29.id);
+    assert_eq!(
+        report.current_governing_policy.as_ref().unwrap().id,
+        adr29.id
+    );
     assert_eq!(report.historical_evolution.len(), 1);
     assert_eq!(report.historical_evolution[0].id, "ADR-014");
-    assert_eq!(report.historical_evolution[0].lifecycle_state, MemoryLifecycleState::Superseded);
+    assert_eq!(
+        report.historical_evolution[0].lifecycle_state,
+        MemoryLifecycleState::Superseded
+    );
     assert!(report.rationale_summary.contains("io.Writer"));
 
     let _ = fs::remove_dir_all(&root);
@@ -167,7 +200,11 @@ fn test_memory_doctor_liveness_and_dormant_state() {
 
     // 2. Doctor check when code target is present -> LIVE
     let report1: DoctorReport = diagnose_memory_health(&root).unwrap();
-    let dec41_status = report1.items.iter().find(|i| i.memory_id == "DEC-041").unwrap();
+    let dec41_status = report1
+        .items
+        .iter()
+        .find(|i| i.memory_id == "DEC-041")
+        .unwrap();
     assert_eq!(dec41_status.liveness, LivenessStatus::Live);
 
     // 3. Refactor deletes OrderService.ExportCSV from internal/orders/service.go!
@@ -179,9 +216,17 @@ fn test_memory_doctor_liveness_and_dormant_state() {
 
     // 4. Doctor diagnosis detects target is missing -> transitions to DORMANT
     let report2: DoctorReport = diagnose_memory_health(&root).unwrap();
-    let dec41_status2 = report2.items.iter().find(|i| i.memory_id == "DEC-041").unwrap();
+    let dec41_status2 = report2
+        .items
+        .iter()
+        .find(|i| i.memory_id == "DEC-041")
+        .unwrap();
     assert_eq!(dec41_status2.liveness, LivenessStatus::Dormant);
-    assert!(dec41_status2.diagnostic_message.contains("not found in active codebase"));
+    assert!(
+        dec41_status2
+            .diagnostic_message
+            .contains("not found in active codebase")
+    );
 
     // 5. Verify DORMANT memory is excluded from active compiler prompts (Poisoning prevention)
     let active_mems = engram::memory::query_scoped_memories(
@@ -207,14 +252,46 @@ fn test_controlled_gc_dry_run_and_execution() {
 
     // 1. Record deep superseded chain: ADR-01 -> ADR-02 -> ADR-03 -> ADR-04
     let scope = MemoryScope::module("orders");
-    let _a1 = record_scoped_decision(&root, Some("ADR-01"), "V1 Policy", "Rule 1", "R1", scope.clone(), None, "arch").unwrap();
-    let a2 = supersede_memory(&root, "ADR-01", "V2 Policy", "Rule 2", "R2", scope.clone(), "arch").unwrap();
-    let a3 = supersede_memory(&root, &a2.id, "V3 Policy", "Rule 3", "R3", scope.clone(), "arch").unwrap();
+    let _a1 = record_scoped_decision(
+        &root,
+        Some("ADR-01"),
+        "V1 Policy",
+        "Rule 1",
+        "R1",
+        scope.clone(),
+        None,
+        "arch",
+    )
+    .unwrap();
+    let a2 = supersede_memory(
+        &root,
+        "ADR-01",
+        "V2 Policy",
+        "Rule 2",
+        "R2",
+        scope.clone(),
+        "arch",
+    )
+    .unwrap();
+    let a3 = supersede_memory(
+        &root,
+        &a2.id,
+        "V3 Policy",
+        "Rule 3",
+        "R3",
+        scope.clone(),
+        "arch",
+    )
+    .unwrap();
     let _a4 = supersede_memory(&root, &a3.id, "V4 Policy", "Rule 4", "R4", scope, "arch").unwrap();
 
     // 2. Doctor identifies ADR-01 as ArchivalCandidate (depth >= 3)
     let doc_report = diagnose_memory_health(&root).unwrap();
-    let a1_status = doc_report.items.iter().find(|i| i.memory_id == "ADR-01").unwrap();
+    let a1_status = doc_report
+        .items
+        .iter()
+        .find(|i| i.memory_id == "ADR-01")
+        .unwrap();
     assert_eq!(a1_status.liveness, LivenessStatus::ArchivalCandidate);
 
     // 3. Dry-run GC generates plan without modifying disk
@@ -245,10 +322,19 @@ fn test_controlled_gc_dry_run_and_execution() {
 
     // Verify ADR-01 was moved from active memory.yaml into archive
     let doc_after = load_durable_memories(&root).unwrap();
-    assert!(!doc_after.memories.iter().any(|m| m.id == "ADR-01"), "Archived ADR-01 must be pruned from hot memory.yaml");
+    assert!(
+        !doc_after.memories.iter().any(|m| m.id == "ADR-01"),
+        "Archived ADR-01 must be pruned from hot memory.yaml"
+    );
 
-    let archive_path = root.join(".engram").join("archive").join("memory_archive.yaml");
-    assert!(archive_path.exists(), "Cold memory archive must exist on disk");
+    let archive_path = root
+        .join(".engram")
+        .join("archive")
+        .join("memory_archive.yaml");
+    assert!(
+        archive_path.exists(),
+        "Cold memory archive must exist on disk"
+    );
     let archive_contents = fs::read_to_string(archive_path).unwrap();
     assert!(archive_contents.contains("ADR-01"));
 

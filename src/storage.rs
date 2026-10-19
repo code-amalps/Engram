@@ -210,6 +210,7 @@ pub fn db(root: &Path) -> Result<Connection> {
         );
         CREATE INDEX IF NOT EXISTS relationships_src ON relationships(source_id);
         CREATE INDEX IF NOT EXISTS relationships_tgt ON relationships(target);
+        CREATE INDEX IF NOT EXISTS relationships_path ON relationships(path);
         CREATE TABLE IF NOT EXISTS metadata(
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL

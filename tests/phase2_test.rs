@@ -20,9 +20,21 @@ fn temp_test_dir() -> PathBuf {
 fn test_setup_targets_list() {
     let list = list_targets();
     let supported = list["supported"].as_array().unwrap();
-    assert!(supported.iter().any(|s| s.as_str().unwrap().contains("cursor")));
-    assert!(supported.iter().any(|s| s.as_str().unwrap().contains("claude")));
-    assert!(supported.iter().any(|s| s.as_str().unwrap().contains("windsurf")));
+    assert!(
+        supported
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("cursor"))
+    );
+    assert!(
+        supported
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("claude"))
+    );
+    assert!(
+        supported
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("windsurf"))
+    );
 }
 
 #[test]
@@ -55,8 +67,14 @@ fn test_setup_safe_merge_preserves_unrelated_servers() {
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
     let servers = v["mcpServers"].as_object().unwrap();
 
-    assert!(servers.contains_key("github"), "Must preserve unrelated servers");
-    assert!(servers.contains_key("engram"), "Must add engram server block");
+    assert!(
+        servers.contains_key("github"),
+        "Must preserve unrelated servers"
+    );
+    assert!(
+        servers.contains_key("engram"),
+        "Must add engram server block"
+    );
 
     // Verify backup file was created
     assert!(cursor_dir.join("mcp.json.bak").exists());
@@ -68,8 +86,14 @@ fn test_setup_safe_merge_preserves_unrelated_servers() {
     let content_after = fs::read_to_string(&mcp_file).unwrap();
     let v_after: serde_json::Value = serde_json::from_str(&content_after).unwrap();
     let servers_after = v_after["mcpServers"].as_object().unwrap();
-    assert!(servers_after.contains_key("github"), "Must still preserve github");
-    assert!(!servers_after.contains_key("engram"), "Engram must be removed");
+    assert!(
+        servers_after.contains_key("github"),
+        "Must still preserve github"
+    );
+    assert!(
+        !servers_after.contains_key("engram"),
+        "Engram must be removed"
+    );
 }
 
 #[test]
@@ -155,7 +179,11 @@ rules:
 
     // Create a violating component
     let comp_file = dir.join("user.component.ts");
-    fs::write(&comp_file, "export class UserComponent { load() { fetch('/api/user'); } }").unwrap();
+    fs::write(
+        &comp_file,
+        "export class UserComponent { load() { fetch('/api/user'); } }",
+    )
+    .unwrap();
 
     let conn = db(&dir).unwrap();
     let violations = evaluate_rules(&dir, &["user.component.ts".into()], &conn).unwrap();
@@ -175,7 +203,10 @@ rules:
     let violations_after = evaluate_rules(&dir, &["user.component.ts".into()], &conn).unwrap();
     assert_eq!(violations_after.len(), 1);
     assert!(violations_after[0].overridden);
-    assert_eq!(violations_after[0].override_reason, Some("Legacy migration exception".into()));
+    assert_eq!(
+        violations_after[0].override_reason,
+        Some("Legacy migration exception".into())
+    );
 }
 
 #[test]
@@ -209,13 +240,21 @@ fn test_graph_traversal_and_reverse_dependencies() {
     let traversal = GraphTraversal::new(&conn);
 
     // Outgoing dependencies of controller.ts -> should find service.ts
-    let out = traversal.neighbors("controller.ts", &["IMPORTS"], Direction::Outgoing, 1).unwrap();
+    let out = traversal
+        .neighbors("controller.ts", &["IMPORTS"], Direction::Outgoing, 1)
+        .unwrap();
     assert!(out.iter().any(|e| e.target == "service.ts"));
 
     // Reverse dependencies of service.ts -> should find controller.ts (imported by) and service.spec.ts (tested by)
     let rev = traversal.reverse_dependencies("service.ts").unwrap();
-    assert!(rev.iter().any(|e| e.source == "controller.ts" && e.kind == "IMPORTS"));
-    assert!(rev.iter().any(|e| e.source == "service.spec.ts" && e.kind == "TESTS"));
+    assert!(
+        rev.iter()
+            .any(|e| e.source == "controller.ts" && e.kind == "IMPORTS")
+    );
+    assert!(
+        rev.iter()
+            .any(|e| e.source == "service.spec.ts" && e.kind == "TESTS")
+    );
 
     // Context compilation pulls service.ts when querying controller, with provenance attached
     let ctx = context(&dir, "OrderController workflow", 1000).unwrap();

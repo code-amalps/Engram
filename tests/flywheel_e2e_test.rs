@@ -4,8 +4,8 @@
 //! and Turn 1 -> Turn 2 Compounding Flywheel (AC-4).
 
 use engram::flywheel::{
-    postflight_check, preflight_task, PostflightOptions, PostflightVerdict, PreflightOptions,
-    PreflightStatus,
+    PostflightOptions, PostflightVerdict, PreflightOptions, PreflightStatus, postflight_check,
+    preflight_task,
 };
 use engram::memory::{load_durable_memories, promote_candidate};
 use std::fs;
@@ -45,11 +45,31 @@ fn setup_mock_project() -> std::path::PathBuf {
     }
 
     // Git repository initialization
-    let _ = std::process::Command::new("git").args(["init"]).current_dir(&root).output().unwrap();
-    let _ = std::process::Command::new("git").args(["config", "user.name", "FlywheelTest"]).current_dir(&root).output().unwrap();
-    let _ = std::process::Command::new("git").args(["config", "user.email", "flywheel@engram.dev"]).current_dir(&root).output().unwrap();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Initial commit"]).current_dir(&root).output().unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "FlywheelTest"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "flywheel@engram.dev"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     root
 }
@@ -62,6 +82,7 @@ fn test_preflight_deterministic_handshake_and_idempotency() {
         task: "Add CSV export to OrderService".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
 
     // 1. Initial Pre-Flight Handshake
@@ -72,13 +93,22 @@ fn test_preflight_deterministic_handshake_and_idempotency() {
     assert!(res1.context_files >= 1);
     assert!(res1.context_tokens > 0);
     assert!(!res1.contract_id.is_empty());
-    assert!(res1.forbidden_boundaries.contains(&"internal/secrets/**".to_string()));
+    assert!(
+        res1.forbidden_boundaries
+            .contains(&"internal/secrets/**".to_string())
+    );
 
     // 2. Preflight Idempotency (AC-1e): Same revision and task reuses active contract
     let res2 = preflight_task(&root, &opts).unwrap();
     assert_eq!(res2.status, PreflightStatus::ReadyForImplementation);
-    assert!(res2.is_reused_contract, "Preflight must be idempotent and reuse active contract");
-    assert_eq!(res1.contract_id, res2.contract_id, "Contract ID must be identical on idempotent call");
+    assert!(
+        res2.is_reused_contract,
+        "Preflight must be idempotent and reuse active contract"
+    );
+    assert_eq!(
+        res1.contract_id, res2.contract_id,
+        "Contract ID must be identical on idempotent call"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -92,6 +122,7 @@ fn test_postflight_clean_mutation_and_candidate_compounding() {
         task: "Add CSV export streaming to OrderService".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
 
@@ -103,7 +134,8 @@ fn test_postflight_clean_mutation_and_candidate_compounding() {
     fs::write(
         root.join("internal/orders/export.go"),
         "package orders\n\ntype CsvExporter struct {}\n// expansion update\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     // 3. Post-Flight Check
     let post_opts = PostflightOptions {
@@ -121,7 +153,11 @@ fn test_postflight_clean_mutation_and_candidate_compounding() {
     assert_eq!(post.total_changed_files, 2);
 
     // 4. Candidate Compounding (AC-3, Zero-Poisoning Gate)
-    assert_eq!(post.generated_candidates.len(), 1, "Passing mutation must generate exactly 1 candidate");
+    assert_eq!(
+        post.generated_candidates.len(),
+        1,
+        "Passing mutation must generate exactly 1 candidate"
+    );
     let cand = &post.generated_candidates[0];
     assert!(cand.title.contains("OrderService"));
     assert!(post.human_action_required.is_some());
@@ -129,12 +165,21 @@ fn test_postflight_clean_mutation_and_candidate_compounding() {
     // Invariant: Candidate must NOT be in durable memory yet!
     let doc_before = load_durable_memories(&root).unwrap();
     assert!(
-        !doc_before.memories.iter().any(|m| m.id == cand.candidate_id),
+        !doc_before
+            .memories
+            .iter()
+            .any(|m| m.id == cand.candidate_id),
         "Candidate memory must NOT be in durable memory before human promotion!"
     );
 
     // 5. Human Promotion Gate (AC-3b)
-    let promoted = promote_candidate(&root, &cand.candidate_id, "lead_architect", Some("Approved streaming export")).unwrap();
+    let promoted = promote_candidate(
+        &root,
+        &cand.candidate_id,
+        "lead_architect",
+        Some("Approved streaming export"),
+    )
+    .unwrap();
     assert!(promoted.id.starts_with("mem_"));
 
     let doc_after = load_durable_memories(&root).unwrap();
@@ -155,6 +200,7 @@ fn test_postflight_boundary_violation_and_zero_poisoning() {
         task: "Refactor secrets handling in orders".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
 
@@ -162,7 +208,8 @@ fn test_postflight_boundary_violation_and_zero_poisoning() {
     fs::write(
         root.join("internal/secrets/vault.go"),
         "package secrets\n\ntype Vault struct {}\n// FORBIDDEN CHANGE\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     // 3. Post-Flight Check
     let post_opts = PostflightOptions {
@@ -180,10 +227,16 @@ fn test_postflight_boundary_violation_and_zero_poisoning() {
     assert!(post.boundary_violation_count >= 1);
 
     // Zero Poisoning: No candidate must ever be synthesized for boundary violations!
-    assert!(post.generated_candidates.is_empty(), "Violating mutation must NEVER synthesize memory candidates");
+    assert!(
+        post.generated_candidates.is_empty(),
+        "Violating mutation must NEVER synthesize memory candidates"
+    );
 
     let doc = load_durable_memories(&root).unwrap();
-    assert!(doc.memories.is_empty(), "Durable memory must remain unpolluted after boundary violation");
+    assert!(
+        doc.memories.is_empty(),
+        "Durable memory must remain unpolluted after boundary violation"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -196,6 +249,7 @@ fn test_postflight_unexpected_change_and_strict_mode() {
         task: "Update orders service".to_string(),
         token_budget: 1200,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
 
@@ -214,7 +268,8 @@ fn test_postflight_unexpected_change_and_strict_mode() {
             base_commit: None,
             ci_mode: false,
         },
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(post_normal.verdict, PostflightVerdict::Pass);
     assert_eq!(post_normal.exit_code, 0);
     assert_eq!(post_normal.unexpected_count, 1);
@@ -229,8 +284,12 @@ fn test_postflight_unexpected_change_and_strict_mode() {
             base_commit: None,
             ci_mode: false,
         },
-    ).unwrap();
-    assert_eq!(post_strict.verdict, PostflightVerdict::ReviewUnexpectedExpansion);
+    )
+    .unwrap();
+    assert_eq!(
+        post_strict.verdict,
+        PostflightVerdict::ReviewUnexpectedExpansion
+    );
     assert_eq!(post_strict.exit_code, 1);
 
     let _ = fs::remove_dir_all(&root);
@@ -250,8 +309,10 @@ fn test_closed_loop_flywheel_turn1_to_turn2_compounding() {
             task: t1_task.clone(),
             token_budget: 1200,
             forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+            planned_files: None,
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     // Simulated agent edits
     fs::write(
@@ -268,7 +329,8 @@ fn test_closed_loop_flywheel_turn1_to_turn2_compounding() {
             base_commit: None,
             ci_mode: false,
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(post1.verdict, PostflightVerdict::Pass);
     assert_eq!(post1.generated_candidates.len(), 1);
@@ -281,12 +343,21 @@ fn test_closed_loop_flywheel_turn1_to_turn2_compounding() {
         cand_id,
         "lead_architect",
         Some("Ratified streaming io.Writer convention for all order exports"),
-    ).unwrap();
+    )
+    .unwrap();
     assert!(promoted.id.starts_with("mem_"));
 
     // Commit changes to establish clean git baseline for Turn 2
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Turn 1 complete"]).current_dir(&root).output().unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Turn 1 complete"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // ─────────────────────────────────────────────────────────────
     // TURN 2: Follow-up Task in Same Module -> Prior Rationale Retrieved!
@@ -298,13 +369,18 @@ fn test_closed_loop_flywheel_turn1_to_turn2_compounding() {
             task: t2_task,
             token_budget: 1200,
             forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+            planned_files: None,
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(pre2.status, PreflightStatus::ReadyForImplementation);
 
     // Proves AC-4 & AC-4c: Turn 1 decision automatically retrieved as governing policy upfront!
-    let retrieved_turn1_decision = pre2.governing_policies.iter().any(|p| p.id == promoted.id || p.title.contains("Stream order exports"));
+    let retrieved_turn1_decision = pre2
+        .governing_policies
+        .iter()
+        .any(|p| p.id == promoted.id || p.title.contains("Stream order exports"));
     assert!(
         retrieved_turn1_decision,
         "Turn 2 preflight MUST retrieve Turn 1 promoted architectural decision under governing policies!"

@@ -11,8 +11,9 @@ use engram::analyzer::analyze;
 use engram::compiler::context;
 use engram::contract::{create_contract, reconcile_contract, validate_contract_diff};
 use engram::go_parser::{
+    GoMethod, GoModDocument, GoReplace, GoRequire, PackageOrigin,
     check_struct_implements_interface, extract_go_ast, parse_full_go_mod,
-    resolve_go_dependency_origin, GoMethod, GoModDocument, GoReplace, GoRequire, PackageOrigin,
+    resolve_go_dependency_origin,
 };
 use engram::graph::GraphTraversal;
 use engram::memory::{
@@ -98,7 +99,11 @@ fn test_vendored_dependency_precedence() {
     let root = temp_repo_dir("vendored");
     let vendor_pkg_dir = root.join("vendor/github.com/secure/vault");
     fs::create_dir_all(&vendor_pkg_dir).unwrap();
-    fs::write(vendor_pkg_dir.join("vault.go"), "package vault\ntype Client struct {}\n").unwrap();
+    fs::write(
+        vendor_pkg_dir.join("vault.go"),
+        "package vault\ntype Client struct {}\n",
+    )
+    .unwrap();
 
     let doc = GoModDocument {
         module: Some("github.com/acme/shop".to_string()),
@@ -119,7 +124,11 @@ fn test_vendored_dependency_precedence() {
 
     assert_eq!(origin, PackageOrigin::Vendored);
     assert_eq!(origin.as_str(), "VENDORED");
-    assert!(targets.iter().any(|t| t.contains("vendor/github.com/secure/vault")));
+    assert!(
+        targets
+            .iter()
+            .any(|t| t.contains("vendor/github.com/secure/vault"))
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -130,7 +139,11 @@ fn test_replaced_local_and_external_resolution() {
     let root = temp_repo_dir("replaced");
     let local_common_dir = root.join("local/common");
     fs::create_dir_all(&local_common_dir).unwrap();
-    fs::write(local_common_dir.join("logger.go"), "package common\ntype Logger struct {}\n").unwrap();
+    fs::write(
+        local_common_dir.join("logger.go"),
+        "package common\ntype Logger struct {}\n",
+    )
+    .unwrap();
 
     let doc = GoModDocument {
         module: Some("github.com/acme/shop".to_string()),
@@ -215,7 +228,10 @@ fn test_unresolved_dependency_evidence_integrity() {
         Some(&doc),
     );
 
-    let imp_rel = rels.iter().find(|r| r.target == "github.com/acme/ghost_package").unwrap();
+    let imp_rel = rels
+        .iter()
+        .find(|r| r.target == "github.com/acme/ghost_package")
+        .unwrap();
     assert_eq!(imp_rel.evidence, "UNRESOLVED");
     assert_eq!(imp_rel.confidence, 0.0);
 
@@ -228,7 +244,11 @@ fn test_external_not_confused_with_local_subpath() {
     let root = temp_repo_dir("external_vs_local");
     // Accidentally matching directory in workspace:
     fs::create_dir_all(root.join("github.com/google/uuid")).unwrap();
-    fs::write(root.join("github.com/google/uuid/uuid.go"), "package uuid\n").unwrap();
+    fs::write(
+        root.join("github.com/google/uuid/uuid.go"),
+        "package uuid\n",
+    )
+    .unwrap();
 
     let doc = GoModDocument {
         module: Some("github.com/acme/shop".to_string()),
@@ -382,22 +402,40 @@ func (s *OrderService) Export() error {
     let traversal = GraphTraversal::new(&conn);
 
     let iface_edges = traversal
-        .neighbors("internal/orders/service.go", &["IMPLEMENTS"], Direction::Both, 2)
+        .neighbors(
+            "internal/orders/service.go",
+            &["IMPLEMENTS"],
+            Direction::Both,
+            2,
+        )
         .unwrap();
 
     assert!(
-        iface_edges.iter().any(|e| e.kind == "IMPLEMENTS" && e.target.contains("Exporter")),
+        iface_edges
+            .iter()
+            .any(|e| e.kind == "IMPLEMENTS" && e.target.contains("Exporter")),
         "Expected IMPLEMENTS relationship connecting OrderService to Exporter!"
     );
 
     // Context compilation with graph expansion pulls implementing interface
     let ctx = context(&root, "OrderService streaming implementation", 1500).unwrap();
-    assert!(ctx.files.iter().any(|f| f.path == "internal/orders/service.go"));
+    assert!(
+        ctx.files
+            .iter()
+            .any(|f| f.path == "internal/orders/service.go")
+    );
     assert!(ctx.files.iter().any(|f| f.path == "pkg/export/exporter.go"));
 
-    let iface_file = ctx.files.iter().find(|f| f.path == "pkg/export/exporter.go").unwrap();
+    let iface_file = ctx
+        .files
+        .iter()
+        .find(|f| f.path == "pkg/export/exporter.go")
+        .unwrap();
     assert!(
-        iface_file.provenance.iter().any(|p| p.contains("IMPLEMENTS")),
+        iface_file
+            .provenance
+            .iter()
+            .any(|p| p.contains("IMPLEMENTS")),
         "Expected IMPLEMENTS graph edge provenance on exporter.go!"
     );
 
@@ -491,11 +529,23 @@ var SecretKey = "classified"
 
     // Step 3: Context Compilation -> Grounding pulls service, exporter (via IMPLEMENTS), and test (via TESTS convention)
     let ctx = context(&root, "Add CSV export to OrderService", 1200).unwrap();
-    assert!(ctx.files.iter().any(|f| f.path == "internal/orders/service.go"));
+    assert!(
+        ctx.files
+            .iter()
+            .any(|f| f.path == "internal/orders/service.go")
+    );
     assert!(ctx.files.iter().any(|f| f.path == "pkg/export/exporter.go"));
-    assert!(ctx.files.iter().any(|f| f.path == "internal/orders/service_test.go"));
+    assert!(
+        ctx.files
+            .iter()
+            .any(|f| f.path == "internal/orders/service_test.go")
+    );
     // Forbidden/unrelated files are excluded
-    assert!(!ctx.files.iter().any(|f| f.path == "internal/secret/keys.go"));
+    assert!(
+        !ctx.files
+            .iter()
+            .any(|f| f.path == "internal/secret/keys.go")
+    );
 
     // Step 4: Create Change Contract v1 (Protected boundary: internal/secret/**)
     let contract = create_contract(
@@ -524,7 +574,10 @@ var SecretKey = "classified"
 
     // Step 6: Change Guard Diff Validation -> Fails due to boundary violation
     let val1 = validate_contract_diff(&contract, &agent_edits);
-    assert!(!val1.is_valid, "Contract check must fail on boundary violation!");
+    assert!(
+        !val1.is_valid,
+        "Contract check must fail on boundary violation!"
+    );
     assert_eq!(val1.summary.expected_count, 2);
     assert_eq!(val1.summary.expansion_count, 1);
     assert_eq!(val1.summary.violation_count, 1);
@@ -571,8 +624,16 @@ var SecretKey = "classified"
     .unwrap();
 
     assert_eq!(next_memories.len(), 2);
-    assert!(next_memories.iter().any(|m| m.title == "Go Streaming Exporter Policy"));
-    assert!(next_memories.iter().any(|m| m.title == "Order Export Signing Keys"));
+    assert!(
+        next_memories
+            .iter()
+            .any(|m| m.title == "Go Streaming Exporter Policy")
+    );
+    assert!(
+        next_memories
+            .iter()
+            .any(|m| m.title == "Order Export Signing Keys")
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

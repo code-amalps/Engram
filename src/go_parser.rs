@@ -3,13 +3,13 @@
 //! dependency classification (LOCAL, VENDORED, REPLACED_LOCAL, REPLACED_EXTERNAL, EXTERNAL, UNRESOLVED),
 //! two-stage structural interface satisfaction, and test conventions.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Node, Parser as TsParser};
 
-use crate::analyzer::{Relationship, Symbol, node_text};
+use crate::analyzer::{node_text, Relationship, Symbol};
 use crate::storage::hash;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,15 +186,30 @@ pub fn parse_full_go_mod(contents: &str) -> GoModDocument {
         // Single-line directives
         if line.starts_with("module ") {
             let mod_part = line["module ".len()..].trim();
-            let clean = mod_part.split("//").next().unwrap_or(mod_part).trim().trim_matches(|c| c == '"' || c == '\'');
+            let clean = mod_part
+                .split("//")
+                .next()
+                .unwrap_or(mod_part)
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'');
             if !clean.is_empty() {
                 doc.module = Some(clean.to_string());
             }
         } else if line.starts_with("go ") {
-            let ver = line["go ".len()..].trim().split("//").next().unwrap_or("").trim();
+            let ver = line["go ".len()..]
+                .trim()
+                .split("//")
+                .next()
+                .unwrap_or("")
+                .trim();
             doc.go_version = Some(ver.to_string());
         } else if line.starts_with("toolchain ") {
-            let tc = line["toolchain ".len()..].trim().split("//").next().unwrap_or("").trim();
+            let tc = line["toolchain ".len()..]
+                .trim()
+                .split("//")
+                .next()
+                .unwrap_or("")
+                .trim();
             doc.toolchain = Some(tc.to_string());
         } else if line.starts_with("require ") {
             let req_part = line["require ".len()..].trim();
@@ -263,7 +278,8 @@ fn parse_replace_line(line: &str) -> Option<GoReplace> {
         None
     };
 
-    let is_local_dir = new_path.starts_with('.') || new_path.starts_with('/') || new_path.contains('\\');
+    let is_local_dir =
+        new_path.starts_with('.') || new_path.starts_with('/') || new_path.contains('\\');
 
     Some(GoReplace {
         old_path,
@@ -304,7 +320,10 @@ pub fn normalize_go_symbol_name(sym: &str) -> String {
         let norm_recv = receiver.trim_start_matches(|c| c == '*' || c == '&').trim();
         format!("{norm_recv}.{method}")
     } else {
-        trimmed.trim_start_matches(|c| c == '*' || c == '&').trim().to_string()
+        trimmed
+            .trim_start_matches(|c| c == '*' || c == '&')
+            .trim()
+            .to_string()
     }
 }
 
@@ -380,7 +399,8 @@ pub fn resolve_go_dependency_origin(
     // 3. Replace directive check
     if let Some(doc) = go_mod {
         for rep in &doc.replaces {
-            if rep.old_path == import_path || import_path.starts_with(&format!("{}/", rep.old_path)) {
+            if rep.old_path == import_path || import_path.starts_with(&format!("{}/", rep.old_path))
+            {
                 let sub_suffix = if import_path == rep.old_path {
                     ""
                 } else {
@@ -396,7 +416,8 @@ pub fn resolve_go_dependency_origin(
                         if let Ok(entries) = std::fs::read_dir(&local_target) {
                             for entry in entries.flatten() {
                                 let p = entry.path();
-                                if p.is_file() && p.extension().map(|e| e == "go").unwrap_or(false) {
+                                if p.is_file() && p.extension().map(|e| e == "go").unwrap_or(false)
+                                {
                                     if let Ok(rel) = p.strip_prefix(root) {
                                         target_files.push(crate::analyzer::normalize_rel_path(rel));
                                     }
@@ -455,7 +476,11 @@ pub fn resolve_go_dependency_origin(
     }
 
     if let Some(doc) = go_mod {
-        if doc.requires.iter().any(|r| r.path == import_path || import_path.starts_with(&format!("{}/", r.path))) {
+        if doc
+            .requires
+            .iter()
+            .any(|r| r.path == import_path || import_path.starts_with(&format!("{}/", r.path)))
+        {
             return (PackageOrigin::External, vec![import_path.to_string()]);
         }
     }
@@ -671,8 +696,10 @@ fn extract_types(
                                         .child_by_field_name("parameters")
                                         .map(|p| extract_parameter_types(p, src))
                                         .unwrap_or_default();
-                                    let results =
-                                        extract_result_types(elem.child_by_field_name("result"), src);
+                                    let results = extract_result_types(
+                                        elem.child_by_field_name("result"),
+                                        src,
+                                    );
 
                                     iface_methods.push(GoMethodSignature {
                                         name: m_name,
@@ -983,7 +1010,8 @@ pub fn resolve_go_import_targets(
         ..Default::default()
     });
 
-    let (origin, mut targets) = resolve_go_dependency_origin(dummy_root, current_file, import_path, doc.as_ref());
+    let (origin, mut targets) =
+        resolve_go_dependency_origin(dummy_root, current_file, import_path, doc.as_ref());
 
     if let Some(ws) = workspace_files {
         if origin == PackageOrigin::Local {
@@ -1057,7 +1085,8 @@ exclude (
 
     #[test]
     fn test_dependency_origin_classification() {
-        let temp_dir = std::env::temp_dir().join(format!("engram_test_dep_{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("engram_test_dep_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(temp_dir.join("vendor/github.com/vendored/pkg")).unwrap();
         std::fs::create_dir_all(temp_dir.join("internal/payment")).unwrap();
         std::fs::create_dir_all(temp_dir.join("local/common")).unwrap();
@@ -1089,29 +1118,59 @@ exclude (
         };
 
         // 1. Vendored
-        let (origin1, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "github.com/vendored/pkg", Some(&doc));
+        let (origin1, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "github.com/vendored/pkg",
+            Some(&doc),
+        );
         assert_eq!(origin1, PackageOrigin::Vendored);
 
         // 2. Replaced Local
-        let (origin2, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "github.com/acme/common", Some(&doc));
+        let (origin2, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "github.com/acme/common",
+            Some(&doc),
+        );
         assert_eq!(origin2, PackageOrigin::ReplacedLocal);
 
         // 3. Replaced External
-        let (origin3, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "golang.org/x/crypto", Some(&doc));
+        let (origin3, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "golang.org/x/crypto",
+            Some(&doc),
+        );
         assert_eq!(origin3, PackageOrigin::ReplacedExternal);
 
         // 4. Local Module
-        let (origin4, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "github.com/acme/shop/internal/payment", Some(&doc));
+        let (origin4, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "github.com/acme/shop/internal/payment",
+            Some(&doc),
+        );
         assert_eq!(origin4, PackageOrigin::Local);
 
         // 5. External (Required or Stdlib)
-        let (origin5a, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "github.com/google/uuid", Some(&doc));
+        let (origin5a, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "github.com/google/uuid",
+            Some(&doc),
+        );
         assert_eq!(origin5a, PackageOrigin::External);
         let (origin5b, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "io", Some(&doc));
         assert_eq!(origin5b, PackageOrigin::External);
 
         // 6. Explicitly UNRESOLVED (missing/unknown)
-        let (origin6, _) = resolve_go_dependency_origin(&temp_dir, "service.go", "github.com/unknown/ghost", Some(&doc));
+        let (origin6, _) = resolve_go_dependency_origin(
+            &temp_dir,
+            "service.go",
+            "github.com/unknown/ghost",
+            Some(&doc),
+        );
         assert_eq!(origin6, PackageOrigin::Unresolved);
 
         std::fs::remove_dir_all(&temp_dir).unwrap();

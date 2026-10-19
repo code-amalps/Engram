@@ -11,7 +11,10 @@ fn test_measurement_framework_definitions_and_calculations() {
     assert_eq!(measurement::MEASUREMENT_VERSION, "1.1.0");
 
     let reduction = measurement::calculate_surface_reduction(10, 1);
-    assert!((reduction - 90.0).abs() < f64::EPSILON, "10 -> 1 files must be 90% reduction");
+    assert!(
+        (reduction - 90.0).abs() < f64::EPSILON,
+        "10 -> 1 files must be 90% reduction"
+    );
 
     let zero_reduction = measurement::calculate_surface_reduction(0, 0);
     assert_eq!(zero_reduction, 0.0);
@@ -30,5 +33,8 @@ fn test_north_star_benchmark_definitions_and_stages() {
     let stages = north_star::NorthStarStage::all_stages();
     assert_eq!(stages.len(), 12);
     assert_eq!(stages[0], north_star::NorthStarStage::TaskInitiation);
-    assert_eq!(stages[11], north_star::NorthStarStage::NextPreflightGrounding);
+    assert_eq!(
+        stages[11],
+        north_star::NorthStarStage::NextPreflightGrounding
+    );
 }

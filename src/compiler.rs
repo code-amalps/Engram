@@ -72,7 +72,8 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
             *df.entry(t).or_default() += 1;
         }
     }
-    let avg = (docs.iter().map(|x| tokens(&x.2).len()).sum::<usize>() as f64 / (n.max(1.0))).max(1.0);
+    let avg =
+        (docs.iter().map(|x| tokens(&x.2).len()).sum::<usize>() as f64 / (n.max(1.0))).max(1.0);
 
     let mut doc_map: HashMap<String, (String, String)> = HashMap::new();
     let mut bm25_scores: HashMap<String, f64> = HashMap::new();
@@ -136,7 +137,10 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
 
                     let prov = format!(
                         "Impact {} (hop {}) via {} (reason: {})",
-                        entity.category.as_str(), entity.hop_distance, seed_path, entity.reason
+                        entity.category.as_str(),
+                        entity.hop_distance,
+                        seed_path,
+                        entity.reason
                     );
                     let list = provenance_map.entry(entity.path.clone()).or_default();
                     if !list.contains(&prov) {
@@ -147,9 +151,16 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
         }
 
         // Expand 1-hop and 2-hop neighbors (IMPORTS, TESTS, IMPLEMENTS)
-        if let Ok(neighbors) = traversal.neighbors(&seed_path, &["IMPORTS", "TESTS", "IMPLEMENTS"], Direction::Both, 2) {
+        if let Ok(neighbors) = traversal.neighbors(
+            &seed_path,
+            &["IMPORTS", "TESTS", "IMPLEMENTS"],
+            Direction::Both,
+            2,
+        ) {
             for edge in neighbors {
-                let neighbor_path = if edge.source == seed_path || edge.source.starts_with(&format!("{seed_path}::")) {
+                let neighbor_path = if edge.source == seed_path
+                    || edge.source.starts_with(&format!("{seed_path}::"))
+                {
                     edge.target.clone()
                 } else {
                     edge.source.clone()
@@ -159,7 +170,9 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
                 // Only consider workspace files
                 if doc_map.contains_key(neighbor_file) {
                     let boost = (seed_score * 0.4).max(2.5);
-                    let score_entry = composite_scores.entry(neighbor_file.to_string()).or_insert(0.0);
+                    let score_entry = composite_scores
+                        .entry(neighbor_file.to_string())
+                        .or_insert(0.0);
                     *score_entry += boost;
 
                     let prov = format!(
@@ -204,7 +217,7 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
                 "SELECT name, kind, start_line, signature 
                  FROM entity_versions 
                  WHERE path=?1 AND invalidated_at_revision IS NULL 
-                 ORDER BY start_line"
+                 ORDER BY start_line",
             )?;
             for row in s.query_map([&path], |r| {
                 Ok((
@@ -242,12 +255,20 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
 
         let cost = estimate_tokens(&content);
         if used + cost > limit {
-            excluded.push((path, format!("Budget limit exceeded (+{} tokens would exceed {})", cost, limit)));
+            excluded.push((
+                path,
+                format!(
+                    "Budget limit exceeded (+{} tokens would exceed {})",
+                    cost, limit
+                ),
+            ));
             continue;
         }
 
         used += cost;
-        let prov = provenance_map.remove(&path).unwrap_or_else(|| vec!["Ranked candidate".into()]);
+        let prov = provenance_map
+            .remove(&path)
+            .unwrap_or_else(|| vec!["Ranked candidate".into()]);
         selected.push(ContextFile {
             path,
             score: (score * 100.0).round() / 100.0,
@@ -282,7 +303,14 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
     };
 
     let touched_paths: Vec<String> = selected.iter().map(|f| f.path.clone()).collect();
-    let memories = crate::memory::query_scoped_memories(&root, task, &touched_paths, &all_selected_symbols, false).unwrap_or_default();
+    let memories = crate::memory::query_scoped_memories(
+        &root,
+        task,
+        &touched_paths,
+        &all_selected_symbols,
+        false,
+    )
+    .unwrap_or_default();
     let relevant_memories: Vec<String> = memories
         .into_iter()
         .map(|m| {
@@ -295,10 +323,7 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
             };
             format!(
                 "[{}] {}: {} (Reason: {})",
-                scope_tag,
-                m.title,
-                m.statement,
-                m.reason
+                scope_tag, m.title, m.statement, m.reason
             )
         })
         .collect();
@@ -341,7 +366,10 @@ pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> 
 pub fn format_explain(res: &ContextResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("🧠 Task: \"{}\"\n", res.task));
-    out.push_str(&format!("Confidence: {} | Budget: {} / {} tokens\n\n", res.confidence, res.estimated_tokens, res.token_budget));
+    out.push_str(&format!(
+        "Confidence: {} | Budget: {} / {} tokens\n\n",
+        res.confidence, res.estimated_tokens, res.token_budget
+    ));
 
     if !res.relevant_memories.is_empty() {
         out.push_str("RELEVANT ENGINEERING MEMORIES:\n");
@@ -361,7 +389,10 @@ pub fn format_explain(res: &ContextResult) -> String {
 
     out.push_str("SELECTED FILES:\n");
     for f in &res.files {
-        out.push_str(&format!("  ✓ {} (score: {:.2}, Level {})\n", f.path, f.score, f.level));
+        out.push_str(&format!(
+            "  ✓ {} (score: {:.2}, Level {})\n",
+            f.path, f.score, f.level
+        ));
         for p in &f.provenance {
             out.push_str(&format!("      • {}\n", p));
         }

@@ -1,7 +1,7 @@
 //! Change Contract Engine: elastic boundary validation, versioning, baseline anchoring,
 //! Constitution precedence, provenance ratification, Git hook management, and Change Guard CI checks.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -108,6 +108,8 @@ pub struct ChangeContract {
     pub boundary: ContractBoundary,
     #[serde(default)]
     pub provenance: ContractProvenance,
+    #[serde(default)]
+    pub input_fingerprint: Option<String>,
     pub reconciliation_history: Vec<ReconciliationRecord>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -436,22 +438,57 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
     }
 }
 
-/// Extract module from a file path (e.g. "src/orders/export/csv.rs" -> "orders" or "internal/orders/service.go" -> "orders")
+/// Extract architectural module from a file path.
+/// Handles monorepos (e.g. "projects/app/src/app/core/auth/..." -> "core"),
+/// standard frameworks ("src/orders/export/csv.rs" -> "orders", "internal/auth/handler.go" -> "auth"),
+/// and asset/i18n paths ("projects/app/src/assets/i18n/de.json" -> "assets").
 pub fn extract_module(path: &str) -> String {
     let norm = normalize_rel_path(path);
-    let parts: Vec<&str> = norm.split('/').collect();
+    let mut parts: Vec<&str> = norm
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
+    if parts.is_empty() {
+        return "root".to_string();
+    }
+
+    // 1. Strip monorepo container prefixes: projects/<name>/, packages/<name>/, apps/<name>/, libs/<name>/, modules/<name>/
+    if parts.len() >= 3
+        && (parts[0] == "projects"
+            || parts[0] == "packages"
+            || parts[0] == "apps"
+            || parts[0] == "libs"
+            || parts[0] == "modules")
+    {
+        parts = parts[2..].to_vec();
+    }
+
+    if parts.is_empty() {
+        return "root".to_string();
+    }
+
+    // 2. Identify module from source directory structure
     let candidate = if parts.len() >= 2
         && (parts[0] == "src"
             || parts[0] == "lib"
-            || parts[0] == "packages"
             || parts[0] == "internal"
-            || parts[0] == "pkg")
+            || parts[0] == "pkg"
+            || parts[0] == "packages")
     {
-        parts[1]
-    } else if !parts.is_empty() {
+        if (parts[1] == "app"
+            || parts[1] == "features"
+            || parts[1] == "components"
+            || parts[1] == "modules")
+            && parts.len() >= 3
+        {
+            parts[2]
+        } else {
+            parts[1]
+        }
+    } else if parts.len() >= 2 {
         parts[0]
     } else {
-        "root"
+        parts[0]
     };
 
     Path::new(candidate)
@@ -459,6 +496,53 @@ pub fn extract_module(path: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or(candidate)
         .to_string()
+}
+
+/// Helper: detects if a path represents a localization/internationalization file.
+pub fn is_localization_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.contains("/i18n/")
+        || lower.contains("/locales/")
+        || lower.contains("/locale/")
+        || lower.contains("/translations/")
+        || lower.contains("/lang/")
+        || ((lower.ends_with(".json") || lower.ends_with(".po") || lower.ends_with(".mo"))
+            && (lower.contains("en.json")
+                || lower.contains("de.json")
+                || lower.contains("fr.json")
+                || lower.contains("es.json")
+                || lower.contains("zh.json")
+                || lower.contains("ja.json")
+                || lower.contains("pt.json")
+                || lower.contains("it.json")
+                || lower.contains("ru.json")
+                || lower.contains("he.json")))
+}
+
+/// Helper: checks if task goal explicitly authorizes localization/translation.
+pub fn task_authorizes_localization(task_goal: &str) -> bool {
+    let lower = task_goal.to_lowercase();
+    lower.contains("translat")
+        || lower.contains("i18n")
+        || lower.contains("locale")
+        || lower.contains("localiz")
+        || lower.contains("language")
+        || lower.contains("internationaliz")
+}
+
+/// Helper: detects unrequested UI dialog/modal components created outside authorized scope.
+pub fn is_unrequested_dialog_or_modal(path: &str, task_goal: &str) -> bool {
+    let lower = path.to_lowercase();
+    let is_dialog_pattern =
+        lower.contains("dialog") || lower.contains("modal") || lower.contains("popup");
+    if !is_dialog_pattern {
+        return false;
+    }
+    let task_lower = task_goal.to_lowercase();
+    let task_mentions = task_lower.contains("dialog")
+        || task_lower.contains("modal")
+        || task_lower.contains("popup");
+    !task_mentions
 }
 
 /// Create a new Change Contract, auto-grounding expected files and modules if not provided.
@@ -561,6 +645,7 @@ pub fn create_contract(
             constraints,
         },
         provenance,
+        input_fingerprint: None,
         reconciliation_history: Vec::new(),
         created_at: now_ts,
         updated_at: now_ts,
@@ -578,10 +663,14 @@ pub fn ratify_contract(
     reason: &str,
 ) -> Result<ChangeContract> {
     if ratified_by.trim().is_empty() {
-        return Err(anyhow!("Ratification rejected: reviewer ('by') must be non-empty"));
+        return Err(anyhow!(
+            "Ratification rejected: reviewer ('by') must be non-empty"
+        ));
     }
     if reason.trim().is_empty() {
-        return Err(anyhow!("Ratification rejected: ratification reason must be non-empty"));
+        return Err(anyhow!(
+            "Ratification rejected: ratification reason must be non-empty"
+        ));
     }
 
     let root = root_path(root)?;
@@ -849,6 +938,12 @@ pub fn validate_contract_diff_with_constitution_and_base(
         .map(|f| normalize_rel_path(f))
         .collect();
 
+    let bulk_i18n_count = changed_files
+        .iter()
+        .filter(|f| is_localization_file(f))
+        .count();
+    let allows_i18n = task_authorizes_localization(&contract.task_goal);
+
     for file in changed_files {
         let norm_file = normalize_rel_path(file);
         let clean = norm_file.trim_start_matches("./").trim_end_matches('/');
@@ -888,12 +983,6 @@ pub fn validate_contract_diff_with_constitution_and_base(
         for rule in &constitution_rules {
             let matches_rule = if let Some(ref f) = rule.forbidden {
                 matches_boundary(&norm_file, f)
-            } else if let Some(ref t) = rule.target_files {
-                rule.severity == crate::model::RuleSeverity::Error
-                    && matches_boundary(&norm_file, t)
-            } else if let Some(ref s) = rule.source {
-                rule.severity == crate::model::RuleSeverity::Error
-                    && matches_boundary(&norm_file, s)
             } else {
                 false
             };
@@ -945,12 +1034,48 @@ pub fn validate_contract_diff_with_constitution_and_base(
             continue;
         }
 
-        // 4. Check if belongs to expected module (EXPECTED_EXPANSION)
+        // 4. Scope-drift check: Bulk localization changes without explicit task authorization
+        if bulk_i18n_count >= 3 && !allows_i18n && is_localization_file(&norm_file) {
+            unexpected_count += 1;
+            classifications.push(FileClassification {
+                path: file.clone(),
+                category: FileValidationCategory::Unexpected,
+                reason: format!(
+                    "SCOPE_DRIFT_WARNING: Bulk localization file '{}' modified ({} localization files touched) without explicit translation task authorization",
+                    file, bulk_i18n_count
+                ),
+            });
+            continue;
+        }
+
+        // 5. Scope-drift check: Unrequested new UI dialog/modal component
+        if is_unrequested_dialog_or_modal(&norm_file, &contract.task_goal) {
+            unexpected_count += 1;
+            classifications.push(FileClassification {
+                path: file.clone(),
+                category: FileValidationCategory::Unexpected,
+                reason: format!(
+                    "SCOPE_DRIFT_WARNING: Unrequested component/dialog '{}' created without task authorization or dependency linkage",
+                    file
+                ),
+            });
+            continue;
+        }
+
+        // 6. Check if belongs to expected module (EXPECTED_EXPANSION)
         let file_module = extract_module(&norm_file);
         let is_module_expected = contract.boundary.expected_modules.iter().any(|m| {
-            m.eq_ignore_ascii_case(&file_module)
-                || norm_file.starts_with(&format!("{m}/"))
-                || norm_file.contains(&format!("/{m}/"))
+            let m_trim = m.trim();
+            if m_trim.is_empty()
+                || m_trim.eq_ignore_ascii_case("root")
+                || m_trim.eq_ignore_ascii_case("projects")
+                || m_trim.eq_ignore_ascii_case("packages")
+            {
+                return false;
+            }
+            m_trim.eq_ignore_ascii_case(&file_module)
+                || norm_file.starts_with(&format!("{m_trim}/"))
+                || (m_trim != "src" && norm_file.contains(&format!("/{m_trim}/")))
         });
 
         if is_module_expected {
@@ -963,7 +1088,7 @@ pub fn validate_contract_diff_with_constitution_and_base(
             continue;
         }
 
-        // 5. Otherwise, UNEXPECTED change
+        // 7. Otherwise, UNEXPECTED change
         unexpected_count += 1;
         classifications.push(FileClassification {
             path: file.clone(),
@@ -1762,8 +1887,18 @@ const HOOK_START_MARKER: &str = "# --- BEGIN ENGRAM CHANGE GUARD ---";
 const HOOK_END_MARKER: &str = "# --- END ENGRAM CHANGE GUARD ---";
 
 const HOOK_BODY: &str = r#"# --- BEGIN ENGRAM CHANGE GUARD ---
-if command -v engram >/dev/null 2>&1; then
-  engram contract check --staged || exit 1
+# Engram Pre-Commit Hook: Asynchronous Change Guard verification
+ENGRAM_BIN="engram"
+if ! command -v "$ENGRAM_BIN" >/dev/null 2>&1; then
+  if [ -x "./target/release/engram" ]; then
+    ENGRAM_BIN="./target/release/engram"
+  elif [ -x "./target/debug/engram" ]; then
+    ENGRAM_BIN="./target/debug/engram"
+  fi
+fi
+
+if command -v "$ENGRAM_BIN" >/dev/null 2>&1 || [ -x "$ENGRAM_BIN" ]; then
+  "$ENGRAM_BIN" hook run || engram contract check --staged || exit 1
 fi
 # --- END ENGRAM CHANGE GUARD ---"#;
 

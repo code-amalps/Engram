@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use engram::analyzer::{analyze, parse_file};
 use engram::compiler::context;
 use engram::contract::{
-    create_contract, create_contract_with_symbols, matches_contract_symbol,
-    validate_contract_diff_with_constitution, validate_symbol_against_contract,
-    FileValidationCategory, SymbolMatchResult,
+    FileValidationCategory, SymbolMatchResult, create_contract, create_contract_with_symbols,
+    matches_contract_symbol, validate_contract_diff_with_constitution,
+    validate_symbol_against_contract,
 };
 use engram::go_parser::{
     extract_go_ast, normalize_go_symbol_name, parse_go_mod, resolve_go_import_targets,
@@ -61,7 +61,10 @@ func HelperFunction() string {
 "#;
 
     let ast = extract_go_ast(source).unwrap();
-    assert_eq!(ast.package.as_ref().map(|p| p.name.as_str()), Some("orders"));
+    assert_eq!(
+        ast.package.as_ref().map(|p| p.name.as_str()),
+        Some("orders")
+    );
 
     // Verify struct
     let struct_type = ast.types.iter().find(|t| t.name == "OrderService").unwrap();
@@ -72,7 +75,11 @@ func HelperFunction() string {
     assert_eq!(iface.kind, "INTERFACE");
 
     // Verify free function
-    let func = ast.functions.iter().find(|f| f.name == "HelperFunction").unwrap();
+    let func = ast
+        .functions
+        .iter()
+        .find(|f| f.name == "HelperFunction")
+        .unwrap();
     assert_eq!(func.name, "HelperFunction");
 }
 
@@ -99,21 +106,38 @@ func (s OrderService) GetStatus() string {
     assert_eq!(ast.methods.len(), 2);
 
     // Pointer receiver method
-    let m_ptr = ast.methods.iter().find(|m| m.method_name == "ExportCSV").unwrap();
+    let m_ptr = ast
+        .methods
+        .iter()
+        .find(|m| m.method_name == "ExportCSV")
+        .unwrap();
     assert_eq!(m_ptr.name, "OrderService.ExportCSV");
     assert_eq!(m_ptr.receiver_type, "OrderService");
     assert!(m_ptr.is_pointer_receiver);
 
     // Value receiver method
-    let m_val = ast.methods.iter().find(|m| m.method_name == "GetStatus").unwrap();
+    let m_val = ast
+        .methods
+        .iter()
+        .find(|m| m.method_name == "GetStatus")
+        .unwrap();
     assert_eq!(m_val.name, "OrderService.GetStatus");
     assert_eq!(m_val.receiver_type, "OrderService");
     assert!(!m_val.is_pointer_receiver);
 
     // Both resolve to canonical dot-notation without pointer symbol
-    assert_eq!(normalize_go_symbol_name("*OrderService.ExportCSV"), "OrderService.ExportCSV");
-    assert_eq!(normalize_go_symbol_name("OrderService.ExportCSV"), "OrderService.ExportCSV");
-    assert_eq!(normalize_go_symbol_name("&OrderService.GetStatus"), "OrderService.GetStatus");
+    assert_eq!(
+        normalize_go_symbol_name("*OrderService.ExportCSV"),
+        "OrderService.ExportCSV"
+    );
+    assert_eq!(
+        normalize_go_symbol_name("OrderService.ExportCSV"),
+        "OrderService.ExportCSV"
+    );
+    assert_eq!(
+        normalize_go_symbol_name("&OrderService.GetStatus"),
+        "OrderService.GetStatus"
+    );
 }
 
 /// 3. Go module resolution via go.mod parsing
@@ -154,7 +178,8 @@ fn test_go_test_convention_linking() {
     fs::create_dir_all(&orders_dir).unwrap();
 
     let service_go = "package orders\ntype OrderService struct {}\n";
-    let service_test_go = "package orders\nimport \"testing\"\nfunc TestOrderService(t *testing.T) {}\n";
+    let service_test_go =
+        "package orders\nimport \"testing\"\nfunc TestOrderService(t *testing.T) {}\n";
 
     fs::write(orders_dir.join("service.go"), service_go).unwrap();
     fs::write(orders_dir.join("service_test.go"), service_test_go).unwrap();
@@ -203,8 +228,16 @@ func (s *OrderService) Delete() error { return nil }
 "#;
 
     let ast = extract_go_ast(go_source).unwrap();
-    let export_method = ast.methods.iter().find(|m| m.method_name == "ExportCSV").unwrap();
-    let delete_method = ast.methods.iter().find(|m| m.method_name == "Delete").unwrap();
+    let export_method = ast
+        .methods
+        .iter()
+        .find(|m| m.method_name == "ExportCSV")
+        .unwrap();
+    let delete_method = ast
+        .methods
+        .iter()
+        .find(|m| m.method_name == "Delete")
+        .unwrap();
 
     // Acceptance Gate Assertions:
     // a. OrderService.ExportCSV -> MATCH
@@ -215,7 +248,10 @@ func (s *OrderService) Delete() error { return nil }
     );
 
     // b. Also matches if contract used pointer prefix '*OrderService.ExportCSV'
-    assert!(matches_contract_symbol("*OrderService.ExportCSV", &export_method.name));
+    assert!(matches_contract_symbol(
+        "*OrderService.ExportCSV",
+        &export_method.name
+    ));
 
     // c. OrderService.Delete -> NO MATCH
     assert_eq!(
@@ -233,7 +269,11 @@ fn test_go_extracted_import_grounding_context_selection() {
     let root = temp_repo_dir("go_grounding");
 
     // 1. Create go.mod
-    fs::write(root.join("go.mod"), "module github.com/acme/shop\n\ngo 1.22\n").unwrap();
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/shop\n\ngo 1.22\n",
+    )
+    .unwrap();
 
     // 2. Create internal/orders/service.go importing payment
     let orders_dir = root.join("internal").join("orders");
@@ -283,7 +323,9 @@ type PaymentProcessor struct {}
         .files
         .iter()
         .find(|f| f.path.contains("processor.go"))
-        .expect("payment processor.go must be grounded into context via 1-hop Go IMPORTS graph edge");
+        .expect(
+            "payment processor.go must be grounded into context via 1-hop Go IMPORTS graph edge",
+        );
 
     assert!(
         payment_file
@@ -315,10 +357,10 @@ fn test_go_change_guard_contract_enforcement() {
     .unwrap();
 
     let changed = vec![
-        "internal/orders/service.go".to_string(),      // Expected
-        "internal/orders/formatter.go".to_string(),     // ExpectedExpansion (same module)
-        "internal/metrics/stats.go".to_string(),       // Unexpected
-        "legacy/db.go".to_string(),                    // BoundaryViolation
+        "internal/orders/service.go".to_string(),   // Expected
+        "internal/orders/formatter.go".to_string(), // ExpectedExpansion (same module)
+        "internal/metrics/stats.go".to_string(),    // Unexpected
+        "legacy/db.go".to_string(),                 // BoundaryViolation
     ];
 
     let (classifications, _, summary) =
@@ -330,19 +372,35 @@ fn test_go_change_guard_contract_enforcement() {
     assert_eq!(summary.violation_count, 1);
 
     assert_eq!(
-        classifications.iter().find(|c| c.path == "internal/orders/service.go").unwrap().category,
+        classifications
+            .iter()
+            .find(|c| c.path == "internal/orders/service.go")
+            .unwrap()
+            .category,
         FileValidationCategory::Expected
     );
     assert_eq!(
-        classifications.iter().find(|c| c.path == "internal/orders/formatter.go").unwrap().category,
+        classifications
+            .iter()
+            .find(|c| c.path == "internal/orders/formatter.go")
+            .unwrap()
+            .category,
         FileValidationCategory::ExpectedExpansion
     );
     assert_eq!(
-        classifications.iter().find(|c| c.path == "internal/metrics/stats.go").unwrap().category,
+        classifications
+            .iter()
+            .find(|c| c.path == "internal/metrics/stats.go")
+            .unwrap()
+            .category,
         FileValidationCategory::Unexpected
     );
     assert_eq!(
-        classifications.iter().find(|c| c.path == "legacy/db.go").unwrap().category,
+        classifications
+            .iter()
+            .find(|c| c.path == "legacy/db.go")
+            .unwrap()
+            .category,
         FileValidationCategory::BoundaryViolation
     );
 
@@ -391,8 +449,15 @@ rules:
     assert_eq!(summary.expected_count, 0);
 
     let auth_change = &classifications[0];
-    assert_eq!(auth_change.category, FileValidationCategory::BoundaryViolation);
-    assert!(auth_change.reason.contains("Constitution rule 'Go Auth Layer Immutable'"));
+    assert_eq!(
+        auth_change.category,
+        FileValidationCategory::BoundaryViolation
+    );
+    assert!(
+        auth_change
+            .reason
+            .contains("Constitution rule 'Go Auth Layer Immutable'")
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

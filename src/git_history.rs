@@ -82,7 +82,10 @@ pub fn init_cochange_table(conn: &Connection) -> Result<()> {
 }
 
 /// Extract commit batches of modified files from `git log`.
-pub fn extract_commit_file_batches(root: &Path, window: usize) -> Result<(usize, Vec<Vec<String>>)> {
+pub fn extract_commit_file_batches(
+    root: &Path,
+    window: usize,
+) -> Result<(usize, Vec<Vec<String>>)> {
     let output = Command::new("git")
         .args([
             "log",
@@ -219,24 +222,23 @@ pub fn mine_and_persist_cochanges(root: &Path, window: usize) -> Result<usize> {
     Ok(edges_inserted)
 }
 
-/// Query co-change signals for a given source file.
-pub fn get_cochanges_for_file(
-    root: &Path,
+/// Query co-change signals on an existing SQLite connection.
+pub fn get_cochanges_for_file_conn(
+    conn: &Connection,
     source_file: &str,
     min_prob: f64,
 ) -> Result<Vec<CoChangeSignal>> {
-    let root = root_path(root)?;
     let norm_source = source_file.replace('\\', "/");
-    let conn = db(&root)?;
-    init_cochange_table(&conn)?;
-
-    let mut stmt = conn.prepare(
+    let mut stmt = match conn.prepare(
         "SELECT target_file, support, sample_size, cond_prob, rev_prob, lift, window_size
          FROM cochange_edges
          WHERE source_file = ?1 AND cond_prob >= ?2
          ORDER BY cond_prob DESC, support DESC
          LIMIT 10",
-    )?;
+    ) {
+        Ok(s) => s,
+        Err(_) => return Ok(Vec::new()),
+    };
 
     let rows = stmt.query_map(params![norm_source, min_prob], |row| {
         let target: String = row.get(0)?;
@@ -271,4 +273,16 @@ pub fn get_cochanges_for_file(
         results.push(r?);
     }
     Ok(results)
+}
+
+/// Query co-change signals for a given source file.
+pub fn get_cochanges_for_file(
+    root: &Path,
+    source_file: &str,
+    min_prob: f64,
+) -> Result<Vec<CoChangeSignal>> {
+    let root = root_path(root)?;
+    let conn = db(&root)?;
+    init_cochange_table(&conn)?;
+    get_cochanges_for_file_conn(&conn, source_file, min_prob)
 }

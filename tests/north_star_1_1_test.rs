@@ -17,15 +17,15 @@
 #[path = "benchmarks/north_star/mod.rs"]
 pub mod north_star;
 
-use engram::drift::{analyze_drift, DriftOptions};
+use engram::drift::{DriftOptions, analyze_drift};
 use engram::flywheel::{
-    postflight_check, preflight_task, PostflightOptions, PostflightVerdict, PreflightOptions,
-    PreflightStatus,
+    PostflightOptions, PostflightVerdict, PreflightOptions, PreflightStatus, postflight_check,
+    preflight_task,
 };
 use engram::memory::{
-    load_durable_memories, promote_candidate, re_ratify_decision, MemoryLifecycleState,
+    MemoryLifecycleState, load_durable_memories, promote_candidate, re_ratify_decision,
 };
-use engram::recovery::{get_recovery_session, recover_contract, RecoveryStatus};
+use engram::recovery::{RecoveryStatus, get_recovery_session, recover_contract};
 use north_star::*;
 use std::fs;
 use std::path::Path;
@@ -162,7 +162,11 @@ fn commit_all(root: &Path, message: &str) -> String {
 
 fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResult {
     let start = std::time::Instant::now();
-    let root = std::env::temp_dir().join(format!("engram_ns11_{}_{}", scenario.language, Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "engram_ns11_{}_{}",
+        scenario.language,
+        Uuid::new_v4()
+    ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
 
@@ -187,6 +191,7 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
         task: scenario.task_goal.to_string(),
         token_budget: 1500,
         forbidden_boundaries: Some(vec!["secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).expect("Preflight handshake must succeed");
     assert_eq!(pre.status, PreflightStatus::ReadyForImplementation);
@@ -216,7 +221,8 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
     assert!(post_block.boundary_violation_count >= 1);
 
     // Stage 5: RecoveryPlanGeneration
-    let recovery_rep = recover_contract(&root, &pre.contract_id).expect("Recovery must generate structured plan");
+    let recovery_rep =
+        recover_contract(&root, &pre.contract_id).expect("Recovery must generate structured plan");
     assert_eq!(recovery_rep.attempt_count, 1);
     assert_eq!(recovery_rep.status, RecoveryStatus::InProgress);
     assert!(
@@ -232,7 +238,8 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
     fs::write(&forb_path, scenario.clean_repaired_content).unwrap();
 
     // Stage 7: PostflightGuardPass
-    let post_pass = postflight_check(&root, &post_opts).expect("Postflight check after repair must succeed");
+    let post_pass =
+        postflight_check(&root, &post_opts).expect("Postflight check after repair must succeed");
     assert_eq!(
         post_pass.verdict,
         PostflightVerdict::Pass,
@@ -261,13 +268,20 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
         &root,
         cand_id,
         "principal_engineer",
-        Some(&format!("Approved clean {} billing refund implementation", scenario.language)),
+        Some(&format!(
+            "Approved clean {} billing refund implementation",
+            scenario.language
+        )),
     )
     .expect("Human promotion must succeed");
     assert_eq!(promoted.lifecycle_state, MemoryLifecycleState::Durable);
 
     let mem_post = load_durable_memories(&root).unwrap();
-    assert_eq!(mem_post.memories.len(), 1, "Durable memory must contain promoted decision");
+    assert_eq!(
+        mem_post.memories.len(),
+        1,
+        "Durable memory must contain promoted decision"
+    );
 
     // Stage 9: RepositoryEvolution
     let _fix_commit = commit_all(&root, "Implement billing refund cleanly");
@@ -276,7 +290,10 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
     for i in 1..=6 {
         fs::write(
             &src_path,
-            format!("{}\n// governed evolution {}\n", scenario.authorized_mutation, i),
+            format!(
+                "{}\n// governed evolution {}\n",
+                scenario.authorized_mutation, i
+            ),
         )
         .unwrap();
         commit_all(&root, &format!("evolution commit {}", i));
@@ -289,7 +306,10 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
     };
     let drift_rep = analyze_drift(&root, &drift_opts).expect("Drift analysis must succeed");
     assert!(
-        drift_rep.stale_decisions.iter().any(|d| d.decision_id == promoted.id),
+        drift_rep
+            .stale_decisions
+            .iter()
+            .any(|d| d.decision_id == promoted.id),
         "Decision {} must be flagged STALE_REVIEW after 6 governed commits for {}",
         promoted.id,
         scenario.language
@@ -297,18 +317,20 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
 
     // Stage 11: DecisionRatification
     let rat_commit = commit_all(&root, "Touch point before ratification");
-    let re_rat = re_ratify_decision(
-        &root,
-        &promoted.id,
-        Some(&rat_commit),
-        "principal_engineer",
-    )
-    .expect("Re-ratification must succeed");
-    assert_eq!(re_rat.ratified_at_commit.as_deref(), Some(rat_commit.as_str()));
+    let re_rat = re_ratify_decision(&root, &promoted.id, Some(&rat_commit), "principal_engineer")
+        .expect("Re-ratification must succeed");
+    assert_eq!(
+        re_rat.ratified_at_commit.as_deref(),
+        Some(rat_commit.as_str())
+    );
 
-    let drift_rep_post = analyze_drift(&root, &drift_opts).expect("Drift analysis after ratification must succeed");
+    let drift_rep_post =
+        analyze_drift(&root, &drift_opts).expect("Drift analysis after ratification must succeed");
     assert!(
-        !drift_rep_post.stale_decisions.iter().any(|d| d.decision_id == promoted.id),
+        !drift_rep_post
+            .stale_decisions
+            .iter()
+            .any(|d| d.decision_id == promoted.id),
         "Decision must no longer be stale after explicit re-ratification"
     );
 
@@ -317,11 +339,15 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
         task: scenario.second_task.to_string(),
         token_budget: 1500,
         forbidden_boundaries: None,
+        planned_files: None,
     };
     let next_pre = preflight_task(&root, &next_pre_opts).expect("Next preflight must succeed");
     assert_eq!(next_pre.status, PreflightStatus::ReadyForImplementation);
     assert!(
-        next_pre.governing_policies.iter().any(|m| m.title.contains("billing refund") || m.id == promoted.id),
+        next_pre
+            .governing_policies
+            .iter()
+            .any(|m| m.title.contains("billing refund") || m.id == promoted.id),
         "Next preflight must ground previously promoted decision into context for {}",
         scenario.language
     );
@@ -343,12 +369,20 @@ fn run_single_scenario(scenario: &LanguageTestScenario) -> NorthStarLanguageResu
 #[test]
 fn test_north_star_1_1_seven_language_closed_loop_matrix() {
     let scenarios = get_all_scenarios();
-    assert_eq!(scenarios.len(), 7, "All 7 languages must be represented in North-Star 1.1");
+    assert_eq!(
+        scenarios.len(),
+        7,
+        "All 7 languages must be represented in North-Star 1.1"
+    );
 
     let mut results = Vec::new();
     for s in &scenarios {
         let res = run_single_scenario(s);
-        assert_eq!(res.stages_completed, 12, "All 12 stages must pass for {}", s.language);
+        assert_eq!(
+            res.stages_completed, 12,
+            "All 12 stages must pass for {}",
+            s.language
+        );
         assert!(res.recovery_success);
         assert!(res.zero_poisoning_verified);
         assert!(res.drift_detected);

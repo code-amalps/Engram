@@ -6,13 +6,17 @@ use std::path::PathBuf;
 use engram::analyzer::analyze;
 use engram::impact::compute_impact_cone;
 use engram::memory::{
-    detect_memory_conflicts, query_scoped_memories, record_scoped_decision, supersede_memory,
-    MemoryLifecycleState, MemoryScope, ScopeLevel,
+    MemoryLifecycleState, MemoryScope, ScopeLevel, detect_memory_conflicts, query_scoped_memories,
+    record_scoped_decision, supersede_memory,
 };
 use engram::storage::db;
 
 fn setup_temp_repo(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("engram_inspect_test_{}_{}", name, uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "engram_inspect_test_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     if root.exists() {
         let _ = fs::remove_dir_all(&root);
     }
@@ -26,11 +30,26 @@ fn setup_temp_repo(name: &str) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("service.go"), svc).unwrap();
 
-    let _ = std::process::Command::new("git").args(["init"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.name", "Tester"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["config", "user.email", "test@engram.dev"]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&root).output();
-    let _ = std::process::Command::new("git").args(["commit", "-m", "Init"]).current_dir(&root).output();
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Tester"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@engram.dev"])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "Init"])
+        .current_dir(&root)
+        .output();
 
     root
 }
@@ -129,7 +148,10 @@ fn test_inspect_memory_supersession_tree() {
     // 8. Conflict Detection across memories
     let conflicts = detect_memory_conflicts(&audit_memories);
     // Explicit supersession cleanly resolves ADR-014 and ADR-029; DEC-041 is orthogonal RFC formatting
-    assert!(conflicts.is_empty(), "No unresolved conflict should exist for cleanly superseded and orthogonal memories");
+    assert!(
+        conflicts.is_empty(),
+        "No unresolved conflict should exist for cleanly superseded and orthogonal memories"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }

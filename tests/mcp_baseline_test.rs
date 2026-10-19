@@ -13,7 +13,11 @@ struct McpFixture {
 
 impl McpFixture {
     fn new(fixture_name: &str) -> Self {
-        let temp_dir = std::env::temp_dir().join(format!("engram_mcp_bl_{}_{}", fixture_name, uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "engram_mcp_bl_{}_{}",
+            fixture_name,
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(temp_dir.join("src")).expect("failed to create temp workspace");
         std::fs::write(
             temp_dir.join("src/service.ts"),
@@ -79,9 +83,16 @@ impl McpFixture {
             .reader
             .read_line(&mut line)
             .expect("failed to read line from mcp stdout");
-        assert!(bytes_read > 0, "unexpected EOF when reading response from server");
+        assert!(
+            bytes_read > 0,
+            "unexpected EOF when reading response from server"
+        );
         serde_json::from_str(&line).unwrap_or_else(|e| {
-            panic!("failed to parse server line as JSON: '{}'. Error: {}", line.trim(), e)
+            panic!(
+                "failed to parse server line as JSON: '{}'. Error: {}",
+                line.trim(),
+                e
+            )
         })
     }
 }
@@ -113,7 +124,10 @@ fn test_bl_01_standard_handshake() {
     fixture.send_json(&req);
     let resp = fixture.read_json_response();
 
-    println!("[BL-01 Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-01 Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 1);
@@ -151,7 +165,10 @@ fn test_bl_02_initialized_notification() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-02 Ping After Notification]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-02 Ping After Notification]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     // Must be the response to ping (id: 2), proving notification was silently handled
     assert_eq!(resp["id"], 2);
@@ -168,7 +185,10 @@ fn test_bl_03_ping() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-03 Actual Ping Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-03 Actual Ping Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 42);
@@ -187,7 +207,9 @@ fn test_bl_04_tools_list() {
     }));
 
     let resp = fixture.read_json_response();
-    let tools = resp["result"]["tools"].as_array().expect("tools must be array");
+    let tools = resp["result"]["tools"]
+        .as_array()
+        .expect("tools must be array");
     println!("[BL-04 Tool Count]: {}", tools.len());
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
@@ -222,13 +244,17 @@ fn test_bl_05_tool_execution_success() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-05 Success Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-05 Success Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 201);
     assert!(resp["error"].is_null(), "must not be an error");
     assert!(resp["result"]["content"].is_array());
     let content_text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    let parsed_context: serde_json::Value = serde_json::from_str(content_text).expect("context text must be valid JSON");
+    let parsed_context: serde_json::Value =
+        serde_json::from_str(content_text).expect("context text must be valid JSON");
     assert_eq!(parsed_context["task"], "process order");
     assert_eq!(resp["result"]["isError"], false);
 }
@@ -251,13 +277,27 @@ fn test_bl_06_tool_execution_failure() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-06 Tool Failure Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-06 Tool Failure Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 202);
     // MCP 2024-11-05: tool failures must return isError: true inside result
-    assert!(resp["error"].is_null(), "must not return JSON-RPC protocol error");
-    assert_eq!(resp["result"]["isError"], true, "must return isError: true on tool failure");
-    assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("not found"));
+    assert!(
+        resp["error"].is_null(),
+        "must not return JSON-RPC protocol error"
+    );
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "must return isError: true on tool failure"
+    );
+    assert!(
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("not found")
+    );
 }
 
 #[test]
@@ -275,13 +315,27 @@ fn test_bl_07_unknown_tool_call() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-07 Unknown Tool Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-07 Unknown Tool Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 203);
     // MCP 2024-11-05: unknown tool must return isError: true inside result
-    assert!(resp["error"].is_null(), "must not return JSON-RPC protocol error");
-    assert_eq!(resp["result"]["isError"], true, "must return isError: true on unknown tool");
-    assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("Unknown tool"));
+    assert!(
+        resp["error"].is_null(),
+        "must not return JSON-RPC protocol error"
+    );
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "must return isError: true on unknown tool"
+    );
+    assert!(
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown tool")
+    );
 }
 
 #[test]
@@ -296,11 +350,22 @@ fn test_bl_08_unknown_method() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[BL-08 Unknown Method Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-08 Unknown Method Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 204);
-    assert_eq!(resp["error"]["code"], -32601, "unknown method must return standard JSON-RPC -32601");
-    assert!(resp["error"]["message"].as_str().unwrap().contains("Method not found"));
+    assert_eq!(
+        resp["error"]["code"], -32601,
+        "unknown method must return standard JSON-RPC -32601"
+    );
+    assert!(
+        resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Method not found")
+    );
 }
 
 #[test]
@@ -311,7 +376,10 @@ fn test_bl_09_malformed_json_syntax() {
     fixture.send_raw("{\"jsonrpc\": \"2.0\", \"id\": 300, \"method\": \n");
 
     let resp = fixture.read_json_response();
-    println!("[BL-09 Malformed JSON Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-09 Malformed JSON Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["error"]["code"], -32700);
@@ -324,11 +392,19 @@ fn test_bl_10_invalid_json_rpc_structure() {
     // Case A: Missing method but has id: {"id": 310, "hello": "world"}
     fixture.send_raw("{\"id\": 310, \"hello\": \"world\"}\n");
     let resp = fixture.read_json_response();
-    println!("[BL-10 With ID Actual Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-10 With ID Actual Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
     assert_eq!(resp["id"], 310);
     // JSON-RPC 2.0: invalid request structure returns -32600 Invalid Request
     assert_eq!(resp["error"]["code"], -32600);
-    assert!(resp["error"]["message"].as_str().unwrap().contains("Invalid Request"));
+    assert!(
+        resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid Request")
+    );
 
     // Case B: Completely missing id and method: {"hello": "world"}
     // Treated as notification (no response sent).
@@ -341,7 +417,10 @@ fn test_bl_10_invalid_json_rpc_structure() {
     }));
     let ping_resp = fixture.read_json_response();
     assert_eq!(ping_resp["id"], 311);
-    println!("[BL-10 Ping after notification-like invalid structure succeeded]: {}", ping_resp["id"]);
+    println!(
+        "[BL-10 Ping after notification-like invalid structure succeeded]: {}",
+        ping_resp["id"]
+    );
 }
 
 #[test]
@@ -353,7 +432,10 @@ fn test_bl_11_crlf_vs_lf() {
     let resp = fixture.read_json_response();
 
     assert_eq!(resp["id"], 401);
-    println!("[BL-11 CRLF Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[BL-11 CRLF Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 }
 
 #[test]
@@ -376,7 +458,10 @@ fn test_bl_12_pipelined_requests() {
     assert_eq!(resp1["id"], 501);
     assert_eq!(resp2["id"], 502);
     assert_eq!(resp3["id"], 503);
-    println!("[BL-12 Pipelined IDs matched]: {}, {}, {}", resp1["id"], resp2["id"], resp3["id"]);
+    println!(
+        "[BL-12 Pipelined IDs matched]: {}, {}, {}",
+        resp1["id"], resp2["id"], resp3["id"]
+    );
 }
 
 #[test]
@@ -409,8 +494,14 @@ fn test_bl_13_eof_client_disconnect() {
     let elapsed = start.elapsed();
 
     println!("[BL-13 EOF Exit Status]: {:?} in {:?}", status, elapsed);
-    assert!(status.success(), "Server should exit cleanly with code 0 upon stdin EOF");
-    assert!(elapsed < Duration::from_secs(3), "Server must terminate promptly upon EOF");
+    assert!(
+        status.success(),
+        "Server should exit cleanly with code 0 upon stdin EOF"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "Server must terminate promptly upon EOF"
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -427,13 +518,25 @@ fn test_p1_01_resources_list() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-01 Resources List]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-01 Resources List]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 601);
-    let resources = resp["result"]["resources"].as_array().expect("resources array");
-    assert_eq!(resources.len(), 4, "must expose exactly 4 canonical resources");
+    let resources = resp["result"]["resources"]
+        .as_array()
+        .expect("resources array");
+    assert_eq!(
+        resources.len(),
+        4,
+        "must expose exactly 4 canonical resources"
+    );
 
-    let uris: Vec<&str> = resources.iter().map(|r| r["uri"].as_str().unwrap()).collect();
+    let uris: Vec<&str> = resources
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
     assert!(uris.contains(&"engram://memories"));
     assert!(uris.contains(&"engram://constitution"));
     assert!(uris.contains(&"engram://contract/active"));
@@ -475,7 +578,10 @@ fn test_p1_02_resources_read_all() {
     }));
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 603);
-    assert_eq!(resp["result"]["contents"][0]["mimeType"], "application/json");
+    assert_eq!(
+        resp["result"]["contents"][0]["mimeType"],
+        "application/json"
+    );
 
     // 3. Read engram://contract/active (zero-state)
     fixture.send_json(&serde_json::json!({
@@ -498,7 +604,10 @@ fn test_p1_02_resources_read_all() {
     }));
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 605);
-    assert_eq!(resp["result"]["contents"][0]["mimeType"], "application/json");
+    assert_eq!(
+        resp["result"]["contents"][0]["mimeType"],
+        "application/json"
+    );
 }
 
 #[test]
@@ -514,7 +623,10 @@ fn test_p1_03_resources_read_unknown_uri() {
 
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 606);
-    assert_eq!(resp["error"]["code"], -32602, "unknown resource URI must return -32602 Invalid params");
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "unknown resource URI must return -32602 Invalid params"
+    );
 }
 
 #[test]
@@ -529,13 +641,19 @@ fn test_p1_04_prompts_list() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-04 Prompts List]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-04 Prompts List]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 701);
     let prompts = resp["result"]["prompts"].as_array().expect("prompts array");
     assert_eq!(prompts.len(), 2, "must expose exactly 2 approved prompts");
 
-    let prompt_names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    let prompt_names: Vec<&str> = prompts
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
     assert!(prompt_names.contains(&"engram_preflight_handshake"));
     assert!(prompt_names.contains(&"engram_postflight_audit"));
 }
@@ -556,7 +674,9 @@ fn test_p1_05_prompts_get() {
     }));
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 702);
-    let msg = resp["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    let msg = resp["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
     assert!(msg.contains("Add multi-currency billing"));
     assert!(msg.contains("engram_preflight"));
 
@@ -572,7 +692,9 @@ fn test_p1_05_prompts_get() {
     }));
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 703);
-    let msg = resp["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    let msg = resp["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
     assert!(msg.contains("contract_abc_999"));
     assert!(msg.contains("engram_postflight"));
 }
@@ -590,7 +712,10 @@ fn test_p1_06_prompts_get_unknown() {
 
     let resp = fixture.read_json_response();
     assert_eq!(resp["id"], 704);
-    assert_eq!(resp["error"]["code"], -32602, "unknown prompt name must return -32602 Invalid params");
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "unknown prompt name must return -32602 Invalid params"
+    );
 }
 
 #[test]
@@ -610,10 +735,16 @@ fn test_p1_07_path_traversal_rejected() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-07 Path Traversal Actual]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-07 Path Traversal Actual]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 801);
-    assert!(resp["error"].is_null(), "must return tool error, not protocol error");
+    assert!(
+        resp["error"].is_null(),
+        "must return tool error, not protocol error"
+    );
     assert_eq!(resp["result"]["isError"], true);
     let err_msg = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(err_msg.contains("prohibited") || err_msg.contains("escapes"));
@@ -642,7 +773,10 @@ fn test_p1_08_absolute_external_path_rejected() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-08 External Path Actual]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-08 External Path Actual]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 802);
     assert_eq!(resp["result"]["isError"], true);
@@ -694,7 +828,10 @@ fn test_p1_10_governed_provisional_decision() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-10 Decision Actual]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-10 Decision Actual]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 804);
     assert_eq!(resp["result"]["isError"], false);
@@ -703,8 +840,14 @@ fn test_p1_10_governed_provisional_decision() {
 
     // Verify PROVISIONAL state is strictly assigned
     assert_eq!(mem["lifecycle_state"], "PROVISIONAL");
-    assert!(mem["ratified_by"].is_null(), "ratified_by must be null until human CLI ratification");
-    assert!(mem["ratified_at"].is_null(), "ratified_at must be null until human CLI ratification");
+    assert!(
+        mem["ratified_by"].is_null(),
+        "ratified_by must be null until human CLI ratification"
+    );
+    assert!(
+        mem["ratified_at"].is_null(),
+        "ratified_at must be null until human CLI ratification"
+    );
 
     // Also inspect disk to ensure storage file reflects PROVISIONAL
     let yaml_path = fixture.temp_dir.join(".engram/memory.yaml");
@@ -719,7 +862,10 @@ fn test_p1_11_sibling_prefix_path_rejected() {
     // Construct a sibling path that shares the exact same string prefix as the workspace root:
     // e.g. root = "C:\Temp\engram_mcp_bl_p1_11_uuid"
     // sibling = "C:\Temp\engram_mcp_bl_p1_11_uuid_evil\secret.txt"
-    let sibling_path = format!("{}_evil/secret.txt", fixture.temp_dir.to_string_lossy().replace('\\', "/"));
+    let sibling_path = format!(
+        "{}_evil/secret.txt",
+        fixture.temp_dir.to_string_lossy().replace('\\', "/")
+    );
 
     fixture.send_json(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -734,11 +880,20 @@ fn test_p1_11_sibling_prefix_path_rejected() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-11 Sibling Prefix Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-11 Sibling Prefix Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 811);
-    assert!(resp["error"].is_null(), "must be tool result error, not JSON-RPC protocol error");
-    assert_eq!(resp["result"]["isError"], true, "sibling prefix path must be rejected");
+    assert!(
+        resp["error"].is_null(),
+        "must be tool result error, not JSON-RPC protocol error"
+    );
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "sibling prefix path must be rejected"
+    );
     let err_msg = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         err_msg.contains("outside workspace root") || err_msg.contains("escapes workspace root"),
@@ -770,7 +925,10 @@ fn test_p1_12_nonexistent_target_in_workspace_accepted() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-12 Nonexistent Target Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-12 Nonexistent Target Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 812);
     // Non-existent target file in a valid workspace path passes path containment validation and records decision
@@ -851,7 +1009,8 @@ fn test_p1_14_symlink_escape_rejected() {
     let mut fixture = McpFixture::new("p1_14");
 
     // Create an external secret file outside workspace
-    let external_dir = std::env::temp_dir().join(format!("engram_ext_sec_{}", uuid::Uuid::new_v4()));
+    let external_dir =
+        std::env::temp_dir().join(format!("engram_ext_sec_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&external_dir).unwrap();
     let external_secret = external_dir.join("secret_data.txt");
     std::fs::write(&external_secret, "CONFIDENTIAL_KEY=12345\n").unwrap();
@@ -868,10 +1027,18 @@ fn test_p1_14_symlink_escape_rejected() {
             // but can create directory junctions via mklink /J without elevation.
             let junc_link = fixture.temp_dir.join("src").join("external_junction");
             let junc_str = junc_link.to_string_lossy();
-            let clean_junc_raw = if junc_str.starts_with(r"\\?\") { &junc_str[4..] } else { &junc_str };
+            let clean_junc_raw = if junc_str.starts_with(r"\\?\") {
+                &junc_str[4..]
+            } else {
+                &junc_str
+            };
             let clean_junc = clean_junc_raw.replace('/', "\\");
             let ext_str = external_dir.to_string_lossy();
-            let clean_ext_raw = if ext_str.starts_with(r"\\?\") { &ext_str[4..] } else { &ext_str };
+            let clean_ext_raw = if ext_str.starts_with(r"\\?\") {
+                &ext_str[4..]
+            } else {
+                &ext_str
+            };
             let clean_ext = clean_ext_raw.replace('/', "\\");
             let status = std::process::Command::new("cmd")
                 .args(["/c", "mklink", "/J", &clean_junc, &clean_ext])
@@ -896,7 +1063,9 @@ fn test_p1_14_symlink_escape_rejected() {
 
     #[cfg(windows)]
     if !escape_created {
-        println!("[P1-14 NOTICE]: Neither symlink nor junction creation permitted by OS on this Windows runner. Gating test gracefully.");
+        println!(
+            "[P1-14 NOTICE]: Neither symlink nor junction creation permitted by OS on this Windows runner. Gating test gracefully."
+        );
         let _ = std::fs::remove_dir_all(&external_dir);
         return;
     }
@@ -915,21 +1084,37 @@ fn test_p1_14_symlink_escape_rejected() {
     }));
 
     let resp = fixture.read_json_response();
-    println!("[P1-14 Symlink Escape Response]: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "[P1-14 Symlink Escape Response]: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["id"], 814);
-    assert_eq!(resp["result"]["isError"], true, "symlink/junction pointing outside workspace root must be rejected");
+    assert_eq!(
+        resp["result"]["isError"], true,
+        "symlink/junction pointing outside workspace root must be rejected"
+    );
     let err_msg = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(err_msg.contains("escapes workspace root"), "Error must report workspace root escape, got: {}", err_msg);
+    assert!(
+        err_msg.contains("escapes workspace root"),
+        "Error must report workspace root escape, got: {}",
+        err_msg
+    );
 
     #[cfg(windows)]
     {
         let junc_link = fixture.temp_dir.join("src").join("external_junction");
         let junc_str = junc_link.to_string_lossy();
-        let clean_junc_raw = if junc_str.starts_with(r"\\?\") { &junc_str[4..] } else { &junc_str };
+        let clean_junc_raw = if junc_str.starts_with(r"\\?\") {
+            &junc_str[4..]
+        } else {
+            &junc_str
+        };
         let clean_junc = clean_junc_raw.replace('/', "\\");
         if junc_link.exists() {
-            let _ = std::process::Command::new("cmd").args(["/c", "rmdir", &clean_junc]).status();
+            let _ = std::process::Command::new("cmd")
+                .args(["/c", "rmdir", &clean_junc])
+                .status();
         }
     }
     let _ = std::fs::remove_dir_all(&external_dir);

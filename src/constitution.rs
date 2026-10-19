@@ -161,7 +161,12 @@ pub fn evaluate_rules(
                         for (idx, line) in content.lines().enumerate() {
                             if rx.is_match(line) {
                                 violations.push(RuleViolation {
-                                    violation_id: format!("{}-{}-L{}", rule.id, file.replace(['/', '\\'], "_"), idx + 1),
+                                    violation_id: format!(
+                                        "{}-{}-L{}",
+                                        rule.id,
+                                        file.replace(['/', '\\'], "_"),
+                                        idx + 1
+                                    ),
                                     rule_id: rule.id.clone(),
                                     rule_name: rule.name.clone(),
                                     severity: rule.severity.clone(),
@@ -205,7 +210,11 @@ pub fn evaluate_rules(
                         let (target, line) = row?;
                         if glob_matches(&target, forbidden_pattern) {
                             violations.push(RuleViolation {
-                                violation_id: format!("{}-{}-dep", rule.id, file.replace(['/', '\\'], "_")),
+                                violation_id: format!(
+                                    "{}-{}-dep",
+                                    rule.id,
+                                    file.replace(['/', '\\'], "_")
+                                ),
                                 rule_id: rule.id.clone(),
                                 rule_name: rule.name.clone(),
                                 severity: rule.severity.clone(),
@@ -224,17 +233,20 @@ pub fn evaluate_rules(
             }
             RuleType::Architecture => {
                 // Architectural relationship checks
-                if let (Some(source_kind), Some(forbidden_rel)) = (&rule.source_kind, &rule.forbidden_relationship) {
+                if let (Some(source_kind), Some(forbidden_rel)) =
+                    (&rule.source_kind, &rule.forbidden_relationship)
+                {
                     for file in modified_files {
                         let mut stmt = conn.prepare(
                             "SELECT r.target, r.line 
                              FROM relationships r
                              JOIN entity_versions ev ON ev.path = r.source_id
-                             WHERE r.source_id = ?1 AND ev.kind = ?2 AND r.kind = ?3"
+                             WHERE r.source_id = ?1 AND ev.kind = ?2 AND r.kind = ?3",
                         )?;
-                        let rows = stmt.query_map(rusqlite::params![file, source_kind, forbidden_rel], |r| {
-                            Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
-                        })?;
+                        let rows = stmt.query_map(
+                            rusqlite::params![file, source_kind, forbidden_rel],
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?)),
+                        )?;
                         for row in rows {
                             let (target, line) = row?;
                             violations.push(RuleViolation {

@@ -6,16 +6,13 @@
 //! - Non-intrusive `init` invariants (0 git hook / editor interference)
 //! - Prompt generation with boundaries & completeness tracking
 
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 use engram::instructions::{
-    self, ManagedBlockAction, START_MARKER, END_MARKER, DEFAULT_INSTRUCTION_BODY,
+    self, DEFAULT_INSTRUCTION_BODY, END_MARKER, ManagedBlockAction, START_MARKER,
 };
-use engram::setup::{self, SetupOptions};
 use engram::prompt::{self, PromptFormat};
+use engram::setup::{self, SetupOptions};
 
 fn temp_test_dir() -> PathBuf {
     let p = std::env::temp_dir().join(format!("engram_frictionless_test_{}", uuid::Uuid::new_v4()));
@@ -114,7 +111,10 @@ fn test_instruction_managed_block_updates_in_place_when_body_changes() {
 fn test_instruction_managed_block_refuses_malformed_missing_end_marker() {
     let dir = temp_test_dir();
     let file = dir.join(".windsurfrules");
-    let malformed = format!("# Rules\n{}\nSome instructions without end tag\n", START_MARKER);
+    let malformed = format!(
+        "# Rules\n{}\nSome instructions without end tag\n",
+        START_MARKER
+    );
     fs::write(&file, &malformed).unwrap();
 
     let res = instructions::sync_managed_block(&file, DEFAULT_INSTRUCTION_BODY, false);
@@ -253,7 +253,12 @@ fn test_mcp_config_detects_conflict_when_server_diverges() {
     };
     let apply_res = setup::orchestrate_setup(&dir, apply_opts);
     assert!(apply_res.is_err());
-    assert!(apply_res.unwrap_err().to_string().contains("Conflict detected"));
+    assert!(
+        apply_res
+            .unwrap_err()
+            .to_string()
+            .contains("Conflict detected")
+    );
 
     // File content must not have changed
     let after_text = fs::read_to_string(&mcp_path).unwrap();
@@ -290,8 +295,16 @@ fn test_prompt_generation_completeness_and_bounds() {
     // Initialize minimal repository
     let engram_dir = dir.join(".engram");
     fs::create_dir_all(&engram_dir).unwrap();
-    fs::write(engram_dir.join("constitution.yaml"), "schema_version: 1\nrules: []\n").unwrap();
-    fs::write(engram_dir.join("config.yaml"), "schema_version: 1\ndefault_token_budget: 1200\n").unwrap();
+    fs::write(
+        engram_dir.join("constitution.yaml"),
+        "schema_version: 1\nrules: []\n",
+    )
+    .unwrap();
+    fs::write(
+        engram_dir.join("config.yaml"),
+        "schema_version: 1\ndefault_token_budget: 1200\n",
+    )
+    .unwrap();
 
     let src_dir = dir.join("src");
     fs::create_dir_all(&src_dir).unwrap();
@@ -310,13 +323,22 @@ fn test_prompt_generation_completeness_and_bounds() {
         800,
         PromptFormat::Markdown,
         false,
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(prompt_out.task, "authenticate request with AuthService");
     assert!(prompt_out.content.contains("# Task"));
-    assert!(prompt_out.content.contains("## Relevant Context (AST Grounded)"));
+    assert!(
+        prompt_out
+            .content
+            .contains("## Relevant Context (AST Grounded)")
+    );
     assert!(prompt_out.content.contains("AuthService"));
-    assert!(prompt_out.content.contains("## Change Boundaries & Constraints"));
+    assert!(
+        prompt_out
+            .content
+            .contains("## Change Boundaries & Constraints")
+    );
     assert!(prompt_out.content.contains("## Context Completeness"));
     assert_eq!(prompt_out.completeness_status, "SUFFICIENT_GROUNDING");
 }
@@ -332,7 +354,10 @@ fn test_instructions_strip_managed_block_preserves_custom_content() {
 
     // Strip block
     let report = instructions::strip_managed_block(&file_path, false).unwrap();
-    assert_eq!(report.action, instructions::ManagedBlockAction::RemovedPreserved);
+    assert_eq!(
+        report.action,
+        instructions::ManagedBlockAction::RemovedPreserved
+    );
 
     let content_after = fs::read_to_string(&file_path).unwrap();
     // Engram block must be removed
@@ -354,7 +379,10 @@ fn test_instructions_strip_managed_block_deletes_empty_file() {
     fs::write(&file_path, initial).unwrap();
 
     let report = instructions::strip_managed_block(&file_path, false).unwrap();
-    assert_eq!(report.action, instructions::ManagedBlockAction::DeletedEmptyFile);
+    assert_eq!(
+        report.action,
+        instructions::ManagedBlockAction::DeletedEmptyFile
+    );
     // File must be deleted since it had no user content
     assert!(!file_path.exists());
 }
@@ -376,7 +404,8 @@ fn test_setup_remove_preserves_unrelated_mcp_servers() {
     let removed = setup::remove_mcp_config(&mcp_path).unwrap();
     assert!(removed);
 
-    let updated: serde_json::Value = serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
+    let updated: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
     let servers = updated["mcpServers"].as_object().unwrap();
     assert!(!servers.contains_key("engram"));
     assert!(servers.contains_key("weather"));
@@ -390,8 +419,16 @@ fn test_setup_remove_dry_run_vs_apply() {
     fs::create_dir_all(mcp_path.parent().unwrap()).unwrap();
     fs::create_dir_all(instruction_path.parent().unwrap()).unwrap();
 
-    fs::write(&mcp_path, r#"{"mcpServers":{"engram":{"command":"engram","args":["mcp"]}}}"#).unwrap();
-    fs::write(&instruction_path, "<!-- BEGIN ENGRAM MANAGED BLOCK -->\nEngram\n<!-- END ENGRAM MANAGED BLOCK -->\n").unwrap();
+    fs::write(
+        &mcp_path,
+        r#"{"mcpServers":{"engram":{"command":"engram","args":["mcp"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        &instruction_path,
+        "<!-- BEGIN ENGRAM MANAGED BLOCK -->\nEngram\n<!-- END ENGRAM MANAGED BLOCK -->\n",
+    )
+    .unwrap();
 
     // 1. Dry run removal
     let dry_opts = SetupOptions {
@@ -424,8 +461,14 @@ fn test_setup_remove_dry_run_vs_apply() {
     assert_eq!(apply_report.mode, "REMOVED");
     assert_eq!(apply_report.changes_applied, 2);
 
-    let mcp_after: serde_json::Value = serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
-    assert!(!mcp_after["mcpServers"].as_object().unwrap().contains_key("engram"));
+    let mcp_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&mcp_path).unwrap()).unwrap();
+    assert!(
+        !mcp_after["mcpServers"]
+            .as_object()
+            .unwrap()
+            .contains_key("engram")
+    );
     // Instruction file had only engram block, so it was cleanly deleted
     assert!(!instruction_path.exists());
 }

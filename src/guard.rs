@@ -1,18 +1,17 @@
 //! Change Guard: task tracking, Change Contracts, blast radius validation, and constitution rule checks.
 
-use anyhow::{Result, anyhow};
-use rusqlite::{OptionalExtension, params};
-use serde_json::{Value, json};
-use std::{
-    collections::HashSet,
-    path::Path,
-};
+use anyhow::{anyhow, Result};
+use rusqlite::{params, OptionalExtension};
+use serde_json::{json, Value};
+use std::{collections::HashSet, path::Path};
 use uuid::Uuid;
 
 use crate::analyzer::ensure_fresh;
-use crate::compiler::{ContextResult, context};
+use crate::compiler::{context, ContextResult};
 use crate::constitution::evaluate_rules;
-use crate::contract::{get_active_contract, get_contract, validate_contract_diff, FileValidationCategory};
+use crate::contract::{
+    get_active_contract, get_contract, validate_contract_diff, FileValidationCategory,
+};
 use crate::graph::GraphTraversal;
 use crate::storage::{db, git_changed, hash, now, revision, root_path};
 
@@ -26,7 +25,11 @@ pub fn analyze_task(root: &Path, task: &str, budget: usize) -> Result<(String, C
     let task_lower = task.to_ascii_lowercase();
     let words: Vec<&str> = task.split_whitespace().collect();
 
-    if words.len() <= 2 && (task_lower.contains("refactor") || task_lower.contains("auth") || task_lower.contains("database")) {
+    if words.len() <= 2
+        && (task_lower.contains("refactor")
+            || task_lower.contains("auth")
+            || task_lower.contains("database"))
+    {
         ctx.gaps.push(
             "GAP-AMBIGUOUS-SCOPE: Scope is broad or unspecified. Clarify which boundary or module should be changed."
                 .to_string(),
@@ -72,7 +75,7 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
             "SELECT name, kind, path 
              FROM entity_versions 
              WHERE path=?1 AND invalidated_at_revision IS NULL 
-             ORDER BY start_line"
+             ORDER BY start_line",
         )?;
         for file in &files {
             for row in stmt.query_map([file], |r| {
@@ -122,6 +125,66 @@ pub fn make_contract(root: &Path, id: &str) -> Result<Value> {
     Ok(contract)
 }
 
+enum ResolvedPathTarget {
+    Exact(String),
+    Ambiguous(Vec<String>),
+    NotFound(String),
+}
+
+fn resolve_target_path(conn: &rusqlite::Connection, raw_target: &str) -> Result<ResolvedPathTarget> {
+    let norm = crate::contract::normalize_rel_path(raw_target);
+    let clean = norm.trim().trim_start_matches('/');
+    if clean.is_empty() {
+        return Ok(ResolvedPathTarget::NotFound(raw_target.to_string()));
+    }
+
+    // 1. Qualified symbol: "path::symbol"
+    if let Some((file_part, sym_part)) = clean.split_once("::") {
+        let clean_file = file_part.trim_start_matches('/');
+        let mut exact_stmt = conn.prepare("SELECT path FROM files WHERE path = ?1")?;
+        let exact_opt: Option<String> = exact_stmt.query_row([clean_file], |r| r.get(0)).ok();
+        if let Some(exact_file) = exact_opt {
+            return Ok(ResolvedPathTarget::Exact(format!("{}::{}", exact_file, sym_part)));
+        }
+
+        let mut suffix_stmt = conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
+        let matches: Vec<String> = suffix_stmt
+            .query_map([clean_file], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if matches.len() > 1 {
+            return Ok(ResolvedPathTarget::Ambiguous(matches));
+        } else if let Some(matched_file) = matches.into_iter().next() {
+            return Ok(ResolvedPathTarget::Exact(format!("{}::{}", matched_file, sym_part)));
+        } else {
+            return Ok(ResolvedPathTarget::NotFound(format!("{}::{}", clean_file, sym_part)));
+        }
+    }
+
+    // 2. Exact match in files table
+    let mut exact_stmt = conn.prepare("SELECT path FROM files WHERE path = ?1")?;
+    let exact_opt: Option<String> = exact_stmt.query_row([clean], |r| r.get(0)).ok();
+    if let Some(exact) = exact_opt {
+        return Ok(ResolvedPathTarget::Exact(exact));
+    }
+
+    // 3. Suffix match in files table
+    let mut suffix_stmt = conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
+    let matches: Vec<String> = suffix_stmt
+        .query_map([clean], |r| r.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if matches.len() > 1 {
+        Ok(ResolvedPathTarget::Ambiguous(matches))
+    } else if let Some(matched) = matches.into_iter().next() {
+        Ok(ResolvedPathTarget::Exact(matched))
+    } else {
+        Ok(ResolvedPathTarget::NotFound(clean.to_string()))
+    }
+}
+
 pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
     let root = root_path(root)?;
     ensure_fresh(&root)?;
@@ -131,10 +194,28 @@ pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
     let is_task = id_or_symbol.starts_with("task_");
     if !is_task {
         // Reverse dependency query: "Who will break if I change this?"
+        let target_node = match resolve_target_path(&conn, id_or_symbol)? {
+            ResolvedPathTarget::Exact(resolved) => resolved,
+            ResolvedPathTarget::Ambiguous(matches) => {
+                return Ok(json!({
+                    "target": id_or_symbol,
+                    "ambiguous": true,
+                    "matches": matches,
+                    "reverse_dependencies": Vec::<Value>::new(),
+                    "message": format!(
+                        "Target '{}' is ambiguous and matches multiple files: {:?}. Specify the exact canonical path.",
+                        id_or_symbol, matches
+                    )
+                }));
+            }
+            ResolvedPathTarget::NotFound(raw) => raw,
+        };
+
         let traversal = GraphTraversal::new(&conn);
-        let callers = traversal.reverse_dependencies(id_or_symbol)?;
+        let callers = traversal.reverse_dependencies(&target_node)?;
         return Ok(json!({
             "target": id_or_symbol,
+            "resolved_target": target_node,
             "reverse_dependencies": callers.iter().map(|e| json!({
                 "source": e.source,
                 "relationship": e.kind,
@@ -188,7 +269,7 @@ pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
             "SELECT name, kind, start_line 
              FROM entity_versions 
              WHERE path=?1 AND invalidated_at_revision IS NULL 
-             ORDER BY start_line"
+             ORDER BY start_line",
         )?;
         for row in stmt.query_map([file], |r| {
             Ok((
@@ -200,7 +281,8 @@ pub fn impact(root: &Path, id_or_symbol: &str) -> Result<Value> {
             let (name, kind, line) = row?;
             symbols.push(json!({"path": file, "name": name, "kind": kind, "line": line}));
         }
-        if file.to_ascii_lowercase().contains("test") || file.to_ascii_lowercase().contains("spec") {
+        if file.to_ascii_lowercase().contains("test") || file.to_ascii_lowercase().contains("spec")
+        {
             tests.push(file.clone());
         }
     }
@@ -295,7 +377,11 @@ pub fn validate(root: &Path, id: &str) -> Result<Value> {
 
     let changed_files: Vec<String> = impact["actual"]["files"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_else(|| git_changed(&root));
 
     let mut contract_val_json = None;

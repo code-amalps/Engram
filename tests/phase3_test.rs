@@ -3,13 +3,12 @@ use std::path::PathBuf;
 
 use engram::analyzer::parse_file;
 use engram::contract::{
-    create_contract, reconcile_contract, validate_contract_diff,
-    FileValidationCategory,
+    FileValidationCategory, create_contract, reconcile_contract, validate_contract_diff,
 };
-use engram::git_history::{is_noise_file, CoChangeSignal};
+use engram::git_history::{CoChangeSignal, is_noise_file};
 use engram::memory::{
-    load_durable_memories, promote_candidate, query_relevant_memories, record_decision,
-    record_task_candidate, reject_candidate, MemoryLifecycleState,
+    MemoryLifecycleState, load_durable_memories, promote_candidate, query_relevant_memories,
+    record_decision, record_task_candidate, reject_candidate,
 };
 use engram::model::EvidenceTier;
 
@@ -34,7 +33,10 @@ fn test_change_contract_elastic_boundaries() {
             "src/orders/export/csv_exporter.rs".to_string(),
             "tests/order_export_test.rs".to_string(),
         ]),
-        Some(vec!["src/payments/**".to_string(), "payments/**".to_string()]),
+        Some(vec![
+            "src/payments/**".to_string(),
+            "payments/**".to_string(),
+        ]),
     )
     .unwrap();
 
@@ -65,17 +67,36 @@ fn test_change_contract_elastic_boundaries() {
     assert_eq!(result.summary.missing_count, 1);
 
     // Verify individual classifications
-    let billing = result.classifications.iter().find(|c| c.path == "src/payments/billing.rs").unwrap();
+    let billing = result
+        .classifications
+        .iter()
+        .find(|c| c.path == "src/payments/billing.rs")
+        .unwrap();
     assert_eq!(billing.category, FileValidationCategory::BoundaryViolation);
 
-    let serializer = result.classifications.iter().find(|c| c.path == "src/orders/export/csv_serializer.rs").unwrap();
-    assert_eq!(serializer.category, FileValidationCategory::ExpectedExpansion);
+    let serializer = result
+        .classifications
+        .iter()
+        .find(|c| c.path == "src/orders/export/csv_serializer.rs")
+        .unwrap();
+    assert_eq!(
+        serializer.category,
+        FileValidationCategory::ExpectedExpansion
+    );
 
-    let mailer = result.classifications.iter().find(|c| c.path == "src/notifications/mailer.rs").unwrap();
+    let mailer = result
+        .classifications
+        .iter()
+        .find(|c| c.path == "src/notifications/mailer.rs")
+        .unwrap();
     assert_eq!(mailer.category, FileValidationCategory::Unexpected);
 
     // Verify missing expected test was detected
-    assert!(result.missing_expected_changes.contains(&"tests/order_export_test.rs".to_string()));
+    assert!(
+        result
+            .missing_expected_changes
+            .contains(&"tests/order_export_test.rs".to_string())
+    );
 }
 
 #[test]
@@ -108,10 +129,18 @@ fn test_contract_reconciliation_human_intervention() {
     assert_eq!(reconciled.version, 2);
     assert_eq!(reconciled.reconciliation_history.len(), 1);
     assert_eq!(reconciled.reconciliation_history[0].actor, "Amal P S");
-    assert!(reconciled.boundary.expected_files.contains(&"src/payments/audit.rs".to_string()));
+    assert!(
+        reconciled
+            .boundary
+            .expected_files
+            .contains(&"src/payments/audit.rs".to_string())
+    );
 
     // Verify re-validation now treats src/payments/audit.rs as EXPECTED
-    let changed = vec!["src/orders/workflow.rs".to_string(), "src/payments/audit.rs".to_string()];
+    let changed = vec![
+        "src/orders/workflow.rs".to_string(),
+        "src/payments/audit.rs".to_string(),
+    ];
     let res = validate_contract_diff(&reconciled, &changed);
     assert!(res.is_valid);
     assert_eq!(res.summary.expected_count, 2);
@@ -169,7 +198,10 @@ fn test_memory_poisoning_protection_and_promotion_lifecycle() {
 
     // 2. CRITICAL POISONING CHECK: Durable memory must NOT automatically contain this candidate!
     let doc_before = load_durable_memories(root).unwrap();
-    assert!(doc_before.memories.is_empty(), "Memory poisoning! Agent edit was auto-promoted to durable memory.");
+    assert!(
+        doc_before.memories.is_empty(),
+        "Memory poisoning! Agent edit was auto-promoted to durable memory."
+    );
 
     // 3. Human rejects an unvetted candidate
     let bad_cand = record_task_candidate(
@@ -184,7 +216,13 @@ fn test_memory_poisoning_protection_and_promotion_lifecycle() {
     )
     .unwrap();
 
-    reject_candidate(root, &bad_cand.candidate_id, "Amal P S", "Security violation: raw SQL is forbidden").unwrap();
+    reject_candidate(
+        root,
+        &bad_cand.candidate_id,
+        "Amal P S",
+        "Security violation: raw SQL is forbidden",
+    )
+    .unwrap();
 
     // Verify rejection prevented promotion
     let doc_after_reject = load_durable_memories(root).unwrap();
@@ -207,7 +245,10 @@ fn test_memory_poisoning_protection_and_promotion_lifecycle() {
     let doc_after = load_durable_memories(root).unwrap();
     assert_eq!(doc_after.memories.len(), 1);
     assert_eq!(doc_after.memories[0].title, "Controllers return Result<T>");
-    assert_eq!(doc_after.memories[0].reason, "Centralizes HTTP transport error mapping across microservices");
+    assert_eq!(
+        doc_after.memories[0].reason,
+        "Centralizes HTTP transport error mapping across microservices"
+    );
 }
 
 #[test]
@@ -247,14 +288,37 @@ fn test_rust_tree_sitter_ast_extraction() {
     assert_eq!(record.language, "rust");
 
     // Verify symbol kinds
-    assert!(symbols.iter().any(|s| s.name == "orders" && s.kind == "MODULE"));
-    assert!(symbols.iter().any(|s| s.name == "OrderManager" && s.kind == "STRUCT"));
-    assert!(symbols.iter().any(|s| s.name == "OrderState" && s.kind == "ENUM"));
-    assert!(symbols.iter().any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
-    assert!(symbols.iter().any(|s| s.name == "cancel" && s.kind == "FUNCTION"));
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name == "orders" && s.kind == "MODULE")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name == "OrderManager" && s.kind == "STRUCT")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name == "OrderState" && s.kind == "ENUM")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name == "cancel" && s.kind == "FUNCTION")
+    );
 
     // Verify import relationships
-    assert!(rels.iter().any(|r| r.kind == "IMPORTS" && r.target.contains("std::collections::HashMap")));
+    assert!(
+        rels.iter()
+            .any(|r| r.kind == "IMPORTS" && r.target.contains("std::collections::HashMap"))
+    );
 }
 
 #[test]
@@ -276,7 +340,12 @@ fn test_north_star_e2e_flywheel() {
     .unwrap();
 
     // Step 2: Task grounding and memory retrieval for "Add CSV export to OrderService"
-    let memories = query_relevant_memories(root, "Add CSV export to OrderService", &["src/orders/order_service.rs".to_string()]).unwrap();
+    let memories = query_relevant_memories(
+        root,
+        "Add CSV export to OrderService",
+        &["src/orders/order_service.rs".to_string()],
+    )
+    .unwrap();
     assert_eq!(memories.len(), 1);
     assert_eq!(memories[0].title, "Order Export Location");
 
@@ -290,7 +359,10 @@ fn test_north_star_e2e_flywheel() {
             "src/orders/export/csv_exporter.rs".to_string(),
             "tests/order_export_test.rs".to_string(),
         ]),
-        Some(vec!["payments/**".to_string(), "src/payments/**".to_string()]),
+        Some(vec![
+            "payments/**".to_string(),
+            "src/payments/**".to_string(),
+        ]),
     )
     .unwrap();
 
@@ -348,7 +420,12 @@ fn test_north_star_e2e_flywheel() {
     promote_candidate(root, &cand.candidate_id, "Amal P S", None).unwrap();
 
     // Step 8: Next task begins: "Export orders to XML"
-    let next_task_memories = query_relevant_memories(root, "Export orders to XML", &["src/orders/order_service.rs".to_string()]).unwrap();
+    let next_task_memories = query_relevant_memories(
+        root,
+        "Export orders to XML",
+        &["src/orders/order_service.rs".to_string()],
+    )
+    .unwrap();
     // Both durable memories are retrieved!
     assert_eq!(next_task_memories.len(), 2);
 }

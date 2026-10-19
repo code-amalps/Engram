@@ -1,11 +1,7 @@
 //! Package and ecosystem intelligence: manifest & lockfile parsing, declared vs resolved versions.
 
 use anyhow::Result;
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-};
+use std::{collections::HashMap, fs, path::Path};
 
 use crate::model::{EcosystemReport, PackageInfo};
 
@@ -85,7 +81,8 @@ fn load_package_lock(root: &Path) -> HashMap<String, String> {
             if let Some(deps) = v.get("dependencies").and_then(|d| d.as_object()) {
                 for (pkg_name, val) in deps {
                     if let Some(ver) = val.get("version").and_then(|x| x.as_str()) {
-                        map.entry(pkg_name.clone()).or_insert_with(|| ver.to_string());
+                        map.entry(pkg_name.clone())
+                            .or_insert_with(|| ver.to_string());
                     }
                 }
             }
@@ -164,7 +161,11 @@ fn load_cargo_lock(root: &Path) -> HashMap<String, String> {
     map
 }
 
-fn parse_cargo_toml(content: &str, lock_map: &HashMap<String, String>, report: &mut EcosystemReport) {
+fn parse_cargo_toml(
+    content: &str,
+    lock_map: &HashMap<String, String>,
+    report: &mut EcosystemReport,
+) {
     let mut in_deps = false;
     let mut in_dev_deps = false;
     for line in content.lines() {
@@ -259,7 +260,10 @@ pub fn format_agent_guard(report: &EcosystemReport) -> String {
             out.push_str(&format!("  {}@{}\n", p.name, res));
         }
         if report.libraries.len() > 20 {
-            out.push_str(&format!("  ... (+{} more libraries)\n", report.libraries.len() - 20));
+            out.push_str(&format!(
+                "  ... (+{} more libraries)\n",
+                report.libraries.len() - 20
+            ));
         }
         if !report.scripts.is_empty() {
             out.push_str("AVAILABLE SCRIPTS:\n");
@@ -267,7 +271,9 @@ pub fn format_agent_guard(report: &EcosystemReport) -> String {
                 out.push_str(&format!("  {}: {}\n", k, v));
             }
         }
-        out.push_str("GUARD: Do NOT introduce or import packages not listed in the ecosystem manifest.\n");
+        out.push_str(
+            "GUARD: Do NOT introduce or import packages not listed in the ecosystem manifest.\n",
+        );
     }
     out
 }

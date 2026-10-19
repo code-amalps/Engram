@@ -28,9 +28,7 @@ pub struct GitChangedFile {
 
 /// Normalize relative repository paths (forward slashes, trimmed, unquoted).
 pub fn normalize_git_path(p: &str) -> String {
-    p.trim()
-        .trim_matches('"')
-        .replace('\\', "/")
+    p.trim().trim_matches('"').replace('\\', "/")
 }
 
 /// Check if a path is internal metadata (.git, local cache/sessions) that should be excluded from repository diffs.
@@ -152,7 +150,12 @@ pub fn verify_commit_exists(root: &Path, commit_sha: &str) -> bool {
     }
 
     let output = Command::new("git")
-        .args(["rev-parse", "--verify", "--quiet", &format!("{commit_sha}^{{commit}}")])
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{commit_sha}^{{commit}}"),
+        ])
         .current_dir(root)
         .output();
 
@@ -193,7 +196,12 @@ pub fn resolve_baseline(root: &Path, baseline: &str) -> Result<Result<String, St
 
     // Try resolving exact SHA
     let output = Command::new("git")
-        .args(["rev-parse", "--verify", "--quiet", &format!("{commit_target}^{{commit}}")])
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{commit_target}^{{commit}}"),
+        ])
         .current_dir(root)
         .output()?;
 
@@ -207,7 +215,9 @@ pub fn resolve_baseline(root: &Path, baseline: &str) -> Result<Result<String, St
         return Ok(Err(SHALLOW_HISTORY_TRUNCATED.to_string()));
     }
 
-    Ok(Err(format!("Baseline commit '{trimmed}' is unavailable in current Git history.")))
+    Ok(Err(format!(
+        "Baseline commit '{trimmed}' is unavailable in current Git history."
+    )))
 }
 
 /// Parse a single line from `git status --porcelain=v1`.
@@ -248,7 +258,9 @@ pub fn parse_porcelain_line(line: &str) -> Option<GitChangedFile> {
         ('?', '?') => GitFileDiffKind::Untracked,
         ('A', _) => GitFileDiffKind::Added,
         ('D', _) | (_, 'D') => GitFileDiffKind::Deleted,
-        ('C', _) => GitFileDiffKind::Copied { old_path: path.clone() },
+        ('C', _) => GitFileDiffKind::Copied {
+            old_path: path.clone(),
+        },
         _ => GitFileDiffKind::Modified,
     };
 
@@ -392,7 +404,8 @@ pub fn get_diff_changed_files(
     }
 
     // 2. Check baseline if provided
-    let has_baseline = baseline.is_some() && baseline != Some("WORKTREE") && !baseline.unwrap_or("").is_empty();
+    let has_baseline =
+        baseline.is_some() && baseline != Some("WORKTREE") && !baseline.unwrap_or("").is_empty();
     if let Some(b) = baseline {
         if has_baseline {
             match resolve_baseline(root, b)? {
@@ -407,12 +420,21 @@ pub fn get_diff_changed_files(
         let (args, desc) = if has_baseline {
             let b = baseline.unwrap();
             (
-                vec!["diff".to_string(), "--name-status".to_string(), "--cached".to_string(), b.to_string()],
+                vec![
+                    "diff".to_string(),
+                    "--name-status".to_string(),
+                    "--cached".to_string(),
+                    b.to_string(),
+                ],
                 format!("STAGED (baseline: {b})"),
             )
         } else {
             (
-                vec!["diff".to_string(), "--name-status".to_string(), "--cached".to_string()],
+                vec![
+                    "diff".to_string(),
+                    "--name-status".to_string(),
+                    "--cached".to_string(),
+                ],
                 "STAGED".to_string(),
             )
         };
@@ -491,10 +513,7 @@ pub fn get_diff_changed_files(
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    let files: Vec<GitChangedFile> = text
-        .lines()
-        .filter_map(parse_porcelain_line)
-        .collect();
+    let files: Vec<GitChangedFile> = text.lines().filter_map(parse_porcelain_line).collect();
 
     let files = expand_changed_files(root, files);
     Ok(Ok((files, "WORKING_TREE".to_string())))

@@ -3,7 +3,7 @@
 //! formulates structured repair plans without modifying source code, and enforces a strict
 //! 2-attempt exhaustion gate that blocks on the 3rd attempt awaiting human intervention.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;

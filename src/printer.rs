@@ -33,7 +33,10 @@ pub fn print_context_result(ctx: &ContextResult, explain: bool) {
     println!("──────────────────────────────────────────");
     println!("  Project:     {}", ctx.project);
     println!("  Confidence:  {}", ctx.confidence);
-    println!("  Budget:      {} / {} tokens", ctx.estimated_tokens, ctx.token_budget);
+    println!(
+        "  Budget:      {} / {} tokens",
+        ctx.estimated_tokens, ctx.token_budget
+    );
     println!("  Files:       {}", ctx.files.len());
     println!("──────────────────────────────────────────");
 
@@ -109,6 +112,18 @@ pub fn print_impact(val: &Value) {
     if let Some(target) = val.get("target").and_then(|t| t.as_str()) {
         println!("🔍 Reverse Dependency Impact: '{}'", target);
         println!("──────────────────────────────────────────");
+        if val.get("ambiguous").and_then(|a| a.as_bool()) == Some(true) {
+            println!("  ⚠ Ambiguous target: matches multiple files in repository:");
+            if let Some(matches) = val.get("matches").and_then(|m| m.as_array()) {
+                for m in matches {
+                    println!("    - {}", m.as_str().unwrap_or(""));
+                }
+            }
+            if let Some(msg) = val.get("message").and_then(|m| m.as_str()) {
+                println!("  {}", msg);
+            }
+            return;
+        }
         if let Some(revs) = val.get("reverse_dependencies").and_then(|r| r.as_array()) {
             if revs.is_empty() {
                 println!("  No dependent files or callers recorded in graph.");
@@ -129,9 +144,18 @@ pub fn print_impact(val: &Value) {
 
     println!("🛡️ Change Impact Summary");
     println!("──────────────────────────────────────────");
-    let actual_files = val["actual"]["files"].as_array().map(|a| a.len()).unwrap_or(0);
-    let expected_files = val["expected"]["files"].as_array().map(|a| a.len()).unwrap_or(0);
-    let unexpected = val["unexpected_files"].as_array().map(|a| a.len()).unwrap_or(0);
+    let actual_files = val["actual"]["files"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let expected_files = val["expected"]["files"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let unexpected = val["unexpected_files"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
 
     println!("  Expected Files:  {}", expected_files);
     println!("  Actual Files:    {}", actual_files);
@@ -149,7 +173,10 @@ pub fn print_validation(val: &Value) {
     println!("──────────────────────────────────────────");
 
     let is_valid = val.get("valid").and_then(|v| v.as_bool()).unwrap_or(true);
-    println!("  Advisory Check: {}", if is_valid { "PASSED" } else { "FAILED" });
+    println!(
+        "  Advisory Check: {}",
+        if is_valid { "PASSED" } else { "FAILED" }
+    );
 
     if let Some(violations) = val.get("rule_violations").and_then(|v| v.as_array()) {
         if !violations.is_empty() {
@@ -167,7 +194,11 @@ pub fn print_validation(val: &Value) {
         }
     }
 
-    if let Some(overrides) = val.get("overridden_violations").and_then(|v| v.as_array()).filter(|o| !o.is_empty()) {
+    if let Some(overrides) = val
+        .get("overridden_violations")
+        .and_then(|v| v.as_array())
+        .filter(|o| !o.is_empty())
+    {
         println!("\nAudited Overrides (Engineering Memory):");
         for o in overrides {
             println!(
@@ -186,15 +217,25 @@ pub fn print_incremental_summary(res: &crate::incremental::IncrementalAnalysisRe
     println!("  Protocol:          {}", res.protocol_version);
     println!("  Revision:          {}", res.revision);
     println!("  Total Files:       {}", res.total_files);
-    println!("  Tier 1 Reparsed:   {} file(s)", res.tier1_reparsed_files.len());
+    println!(
+        "  Tier 1 Reparsed:   {} file(s)",
+        res.tier1_reparsed_files.len()
+    );
     for f in &res.tier1_reparsed_files {
         println!("    • {}", f);
     }
-    println!("  Tier 1 Deleted:    {} file(s)", res.tier1_deleted_files.len());
+    println!(
+        "  Tier 1 Deleted:    {} file(s)",
+        res.tier1_deleted_files.len()
+    );
     for f in &res.tier1_deleted_files {
         println!("    • {}", f);
     }
-    println!("  Tier 2 Relinked:   {} file(s) ({} entities)", res.tier2_relinked_files.len(), res.tier2_relinked_entities);
+    println!(
+        "  Tier 2 Relinked:   {} file(s) ({} entities)",
+        res.tier2_relinked_files.len(),
+        res.tier2_relinked_entities
+    );
     for f in &res.tier2_relinked_files {
         println!("    • {}", f);
     }
@@ -208,4 +249,3 @@ pub fn print_incremental_summary(res: &crate::incremental::IncrementalAnalysisRe
 pub fn print_drift_report(report: &crate::drift::DriftReport) {
     print!("{}", crate::drift::format_drift_report(report));
 }
-

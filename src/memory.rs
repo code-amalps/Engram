@@ -1,6 +1,6 @@
 //! Durable Engineering Memory: human rationale, promotion lifecycle, poisoning protection, and Git persistence.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -291,7 +291,9 @@ pub fn save_durable_memories(root: &Path, doc: &DurableMemoryDocument) -> Result
             if let Err(e) = fs::rename(&tmp_path, &path) {
                 let _ = fs::rename(&bak_path, &path);
                 let _ = fs::remove_file(&tmp_path);
-                return Err(anyhow!("Failed to atomic rename temporary memory file: {e}"));
+                return Err(anyhow!(
+                    "Failed to atomic rename temporary memory file: {e}"
+                ));
             }
             let _ = fs::remove_file(&bak_path);
         } else {
@@ -1156,10 +1158,16 @@ impl std::fmt::Display for LifecycleError {
                 )
             }
             Self::MissingReviewer => {
-                write!(f, "Ratification rejected: reviewer ('by') must be non-empty")
+                write!(
+                    f,
+                    "Ratification rejected: reviewer ('by') must be non-empty"
+                )
             }
             Self::MissingReason => {
-                write!(f, "Ratification rejected: ratification reason must be non-empty")
+                write!(
+                    f,
+                    "Ratification rejected: ratification reason must be non-empty"
+                )
             }
             Self::ConsistencyError {
                 id,
@@ -1358,7 +1366,9 @@ pub fn reject_decision(
             id: decision_id.to_string(),
             from: MemoryLifecycleState::Durable,
             to: MemoryLifecycleState::Rejected,
-            reason: "Durable decisions must be superseded via 'engram memory supersede', not rejected".to_string(),
+            reason:
+                "Durable decisions must be superseded via 'engram memory supersede', not rejected"
+                    .to_string(),
         }
         .into());
     }

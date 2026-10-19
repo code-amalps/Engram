@@ -315,6 +315,7 @@ fn test_7_recovery_engine_telemetry_event_provenance() {
         task: "Update export".to_string(),
         token_budget: 1200,
         forbidden_boundaries: Some(vec!["internal/secrets/**".to_string()]),
+        planned_files: None,
     };
     let pre = preflight_task(&root, &pre_opts).unwrap();
     let contract_id = pre.contract_id.clone();

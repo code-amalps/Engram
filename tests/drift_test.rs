@@ -13,13 +13,13 @@ use uuid::Uuid;
 
 use engram::contract::create_contract;
 use engram::drift::{
-    analyze_drift, calculate_trend, format_drift_report, DriftOptions, TrendIndicator,
+    DriftOptions, TrendIndicator, analyze_drift, calculate_trend, format_drift_report,
 };
 use engram::git::SHALLOW_HISTORY_TRUNCATED;
 use engram::mcp::mcp_call;
 use engram::memory::{
-    load_durable_memories, re_ratify_decision, record_scoped_decision, MemoryLifecycleState,
-    MemoryScope, ScopeLevel,
+    MemoryLifecycleState, MemoryScope, ScopeLevel, load_durable_memories, re_ratify_decision,
+    record_scoped_decision,
 };
 
 fn setup_test_repo(prefix: &str) -> PathBuf {
@@ -134,10 +134,12 @@ fn test_1_scoped_staleness_ignores_unrelated_commits() {
     );
 
     // Decision is NOT in stale_decisions
-    assert!(!report
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        !report
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 
     // Durable memory in YAML remains Durable
     let doc = load_durable_memories(&root).unwrap();
@@ -238,9 +240,12 @@ fn test_2_governed_code_evolution_flags_stale_review_after_threshold() {
     );
 
     // Deterministic evidence includes STALE_DECISIONS
-    assert!(report.deterministic_evidence.iter().any(|e| {
-        e.evidence_type == "STALE_DECISIONS" && e.target.contains("dec_orders")
-    }));
+    assert!(
+        report
+            .deterministic_evidence
+            .iter()
+            .any(|e| { e.evidence_type == "STALE_DECISIONS" && e.target.contains("dec_orders") })
+    );
 }
 
 #[test]
@@ -306,15 +311,16 @@ fn test_3_decision_re_ratification_resets_mutations_and_clears_stale_review() {
 
     // Verify it is flagged STALE_REVIEW
     let report1 = analyze_drift(&root, &DriftOptions::default()).unwrap();
-    assert!(report1
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        report1
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 
     // Explicit re-ratification
     let head = engram::git::current_revision(&root).unwrap();
-    let updated =
-        re_ratify_decision(&root, "dec_orders", Some(&head), "lead_engineer").unwrap();
+    let updated = re_ratify_decision(&root, "dec_orders", Some(&head), "lead_engineer").unwrap();
     assert_eq!(updated.lifecycle_state, MemoryLifecycleState::Durable);
     assert_eq!(updated.ratified_at_commit.as_deref(), Some(head.as_str()));
     assert_eq!(updated.ratified_by.as_deref(), Some("lead_engineer"));
@@ -328,10 +334,12 @@ fn test_3_decision_re_ratification_resets_mutations_and_clears_stale_review() {
         .unwrap();
     assert_eq!(dd2.governed_mutations, 0);
     assert_eq!(dd2.status, "ACTIVE");
-    assert!(!report2
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        !report2
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 
     // Memory in YAML is Durable
     let doc = load_durable_memories(&root).unwrap();
@@ -495,10 +503,12 @@ fn test_6_shallow_git_fallback_outputs_truncated_gracefully() {
     // Graceful response with SHALLOW_HISTORY_TRUNCATED
     assert_eq!(report.status, SHALLOW_HISTORY_TRUNCATED);
     assert_eq!(report.repository_status, SHALLOW_HISTORY_TRUNCATED);
-    assert!(report
-        .warnings
-        .iter()
-        .any(|w| w.contains(SHALLOW_HISTORY_TRUNCATED)));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains(SHALLOW_HISTORY_TRUNCATED))
+    );
 
     // Formatted report includes SHALLOW_HISTORY_TRUNCATED
     let formatted = format_drift_report(&report);
@@ -584,10 +594,12 @@ fn test_7_docs_and_non_code_files_mentioning_symbol_do_not_trigger_staleness() {
         .expect("Decision drift record");
     assert_eq!(dd.governed_mutations, 0);
     assert_eq!(dd.status, "ACTIVE");
-    assert!(!report
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        !report
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 
     // State remains Durable
     let doc = load_durable_memories(&root).unwrap();
@@ -657,14 +669,15 @@ fn test_8_re_ratification_with_worktree_resets_mutations_and_clears_stale_review
     }
 
     let report1 = analyze_drift(&root, &DriftOptions::default()).unwrap();
-    assert!(report1
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        report1
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 
     // Re-ratify explicitly with WORKTREE
-    let updated =
-        re_ratify_decision(&root, "dec_orders", Some("WORKTREE"), "architect").unwrap();
+    let updated = re_ratify_decision(&root, "dec_orders", Some("WORKTREE"), "architect").unwrap();
     assert_eq!(updated.lifecycle_state, MemoryLifecycleState::Durable);
     assert_eq!(updated.ratified_at_commit.as_deref(), Some("WORKTREE"));
 
@@ -677,10 +690,12 @@ fn test_8_re_ratification_with_worktree_resets_mutations_and_clears_stale_review
         .unwrap();
     assert_eq!(dd2.governed_mutations, 0);
     assert_eq!(dd2.status, "ACTIVE");
-    assert!(!report2
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_orders"));
+    assert!(
+        !report2
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_orders")
+    );
 }
 
 #[test]
@@ -778,10 +793,12 @@ fn test_10_flat_single_file_module_matching() {
         .expect("Found dec_contract");
     assert_eq!(dd.governed_mutations, 5);
     assert_eq!(dd.status, "STALE_REVIEW");
-    assert!(report
-        .stale_decisions
-        .iter()
-        .any(|s| s.decision_id == "dec_contract"));
+    assert!(
+        report
+            .stale_decisions
+            .iter()
+            .any(|s| s.decision_id == "dec_contract")
+    );
 }
 
 #[test]
@@ -861,9 +878,6 @@ fn test_11_mcp_threshold_alias_and_module_filter() {
 
     assert_eq!(parsed["status"], "DRIFT_DETECTED");
     assert_eq!(parsed["stale_decisions"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        parsed["stale_decisions"][0]["decision_id"],
-        "dec_orders"
-    );
+    assert_eq!(parsed["stale_decisions"][0]["decision_id"], "dec_orders");
     assert_eq!(parsed["stale_decisions"][0]["threshold"], 3);
 }

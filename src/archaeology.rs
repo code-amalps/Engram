@@ -70,7 +70,10 @@ pub fn explain_why(root: &Path, target_symbol: &str) -> Result<ArchaeologyReport
 
     // 4. Formulate rationale summary
     let rationale_summary = if let Some(ref current) = current_governing {
-        format!("{}: {} (Rationale: {})", current.title, current.statement, current.reason)
+        format!(
+            "{}: {} (Rationale: {})",
+            current.title, current.statement, current.reason
+        )
     } else {
         "No explicit architectural decision governs this symbol directly.".to_string()
     };
@@ -110,7 +113,10 @@ pub fn explain_why(root: &Path, target_symbol: &str) -> Result<ArchaeologyReport
 pub fn format_archaeology_explanation(report: &ArchaeologyReport) -> String {
     let mut out = String::new();
     let file_label = report.target_file.as_deref().unwrap_or("unknown file");
-    out.push_str(&format!("ARCHAEOLOGY: {} ({})\n", report.target_symbol, file_label));
+    out.push_str(&format!(
+        "ARCHAEOLOGY: {} ({})\n",
+        report.target_symbol, file_label
+    ));
     out.push_str("──────────────────────────────────────────────────────────────────────────\n");
 
     if let Some(ref current) = report.current_governing_policy {
@@ -121,7 +127,11 @@ pub fn format_archaeology_explanation(report: &ArchaeologyReport) -> String {
             current.id, target_label, current.lifecycle_state
         ));
         out.push_str(&format!("    Scope:     {:?}\n", current.scope.level));
-        out.push_str(&format!("    Ratified:  {} by {}\n", current.accepted_at.format("%Y-%m-%d"), current.accepted_by));
+        out.push_str(&format!(
+            "    Ratified:  {} by {}\n",
+            current.accepted_at.format("%Y-%m-%d"),
+            current.accepted_by
+        ));
         out.push_str(&format!("    Statement: {}\n", current.statement));
         out.push_str(&format!("    Rationale: {}\n\n", current.reason));
     } else {
@@ -135,7 +145,10 @@ pub fn format_archaeology_explanation(report: &ArchaeologyReport) -> String {
             let branch = if is_last { "└──" } else { "├──" };
             let pipe = if is_last { "    " } else { "│   " };
             out.push_str(&format!("  {} {} ({})\n", branch, prev.id, prev.title));
-            out.push_str(&format!("  {}  Status:    {:?}\n", pipe, prev.lifecycle_state));
+            out.push_str(&format!(
+                "  {}  Status:    {:?}\n",
+                pipe, prev.lifecycle_state
+            ));
             out.push_str(&format!("  {}  Statement: {}\n", pipe, prev.statement));
             out.push_str(&format!("  {}  Rationale: {}\n", pipe, prev.reason));
             if !is_last {

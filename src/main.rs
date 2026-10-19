@@ -148,6 +148,65 @@ enum CommandLine {
         #[arg(long, alias = "disable")]
         remove: bool,
     },
+    /// Prepare task-aware context, lock preflight contract to baseline commit, and emit Turn-0 prompt
+    Prepare {
+        task: String,
+        #[arg(long, default_value_t = 1200)]
+        token_budget: usize,
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        /// Force machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        stdout: bool,
+        #[arg(long)]
+        no_clipboard: bool,
+        /// Also write task context packet to .engram/active_task.md
+        #[arg(long)]
+        write_file: bool,
+        /// Force the full Engram workflow even if the task is classified as trivial
+        #[arg(long)]
+        no_bypass: bool,
+        /// Inject Turn-0 task context and directives into workspace instruction files
+        #[arg(long)]
+        inject: bool,
+        /// Explicit target instruction file path for injection
+        #[arg(long)]
+        inject_target: Option<PathBuf>,
+        /// Client identifier for injection (vscode, cursor, claude, windsurf, all)
+        #[arg(long)]
+        inject_client: Option<String>,
+    },
+    /// Inject task-aware Turn-0 context and contract directives into workspace instruction files
+    Inject {
+        /// Task description and optional planned files
+        task: Option<String>,
+        /// AST context token budget
+        #[arg(long, default_value_t = 1200)]
+        token_budget: usize,
+        /// Explicit target instruction file path (defaults to detected workspace instruction files)
+        #[arg(long)]
+        target: Option<PathBuf>,
+        /// Client identifier (vscode, cursor, claude, windsurf, all)
+        #[arg(long)]
+        client: Option<String>,
+        /// Dry run: show planned injection without writing files
+        #[arg(long)]
+        dry_run: bool,
+        /// Revert task-specific injection back to standard Engram instructions
+        #[arg(long)]
+        clear: bool,
+        /// Strip the Engram managed block entirely from instruction files
+        #[arg(long)]
+        strip: bool,
+        /// Force full workflow even if the task is classified as trivial
+        #[arg(long)]
+        no_bypass: bool,
+        /// Force machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate structured prompt context with AST symbols, boundaries, and completeness tracking
     Prompt {
         task: String,
@@ -159,6 +218,9 @@ enum CommandLine {
         stdout: bool,
         #[arg(long)]
         no_clipboard: bool,
+        /// Lock preflight Change Contract to baseline commit and inject directives
+        #[arg(long)]
+        lock_contract: bool,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
     Mcp,
@@ -1021,34 +1083,267 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Some(CommandLine::Prompt {
+        Some(CommandLine::Prepare {
             task,
             token_budget,
             format,
+            json,
             stdout,
             no_clipboard,
+            write_file,
+            no_bypass,
+            inject,
+            inject_target,
+            inject_client,
         }) => {
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
                 _ => prompt::PromptFormat::Markdown,
             };
             let copy_clip = !no_clipboard && !stdout;
-            let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
-            if force_json {
+            let mut res = prompt::prepare_task_context_adaptive(
+                root,
+                &task,
+                token_budget,
+                fmt,
+                copy_clip,
+                write_file,
+                no_bypass,
+            )?;
+            if inject {
+                let reports = instructions::inject_task_instructions(
+                    root,
+                    &res,
+                    inject_target.as_deref(),
+                    inject_client.as_deref(),
+                    false,
+                )?;
+                res.injected_files = reports
+                    .into_iter()
+                    .map(|r| r.file.to_string_lossy().to_string())
+                    .collect();
+            }
+            if force_json || json {
                 print_json(&res)?;
             } else {
                 if stdout || !res.clipboard_copied {
                     println!("{}", res.content);
                 }
-                if res.clipboard_copied {
+                if res.bypass_active {
+                    eprintln!("⚡ Adaptive Bypass Active: Trivial task detected.");
+                    if let Some(ref sig) = res.classification_signals {
+                        eprintln!("  Reason: {}", sig.reason);
+                    }
+                    eprintln!("  Bypassed Change Contract and preflight round trips. Proceed directly to editing.");
+                } else if res.clipboard_copied {
                     eprintln!(
-                        "✓ Copied ~{} tokens of structured AST context to clipboard.",
-                        res.estimated_tokens
+                        "✓ Locked Change Contract '{}' and copied ~{} tokens of Turn-0 context to clipboard.",
+                        res.contract_id, res.estimated_tokens
                     );
                     eprintln!("  Status: {}", res.completeness_status);
                     eprintln!(
-                        "  Paste directly into your AI chat box (Cursor, Copilot, Visual Studio, ChatGPT)."
+                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
                     );
+                    eprintln!(
+                        "  Agent will skip get_context/preflight and start implementation directly."
+                    );
+                }
+                if let Some(ref path) = res.active_file_path {
+                    eprintln!("✓ Saved task packet to: {}", path);
+                }
+                for f in &res.injected_files {
+                    eprintln!("✓ Injected Turn-0 task directives into: {}", f);
+                }
+            }
+        }
+        Some(CommandLine::Inject {
+            task,
+            token_budget,
+            target,
+            client,
+            dry_run,
+            clear,
+            strip,
+            no_bypass,
+            json,
+        }) => {
+            if clear {
+                let reports = instructions::clear_task_instructions(
+                    root,
+                    target.as_deref(),
+                    client.as_deref(),
+                    dry_run,
+                )?;
+                if force_json || json {
+                    print_json(&reports)?;
+                } else {
+                    println!("🔄 Engram Instruction Reset");
+                    println!("──────────────────────────────────────────────────────────");
+                    for r in &reports {
+                        println!(
+                            "  ✓ Reset {} to default architectural principles ({:?})",
+                            r.file.display(),
+                            r.action
+                        );
+                    }
+                    if dry_run {
+                        println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
+                    }
+                }
+            } else if strip {
+                let reports = instructions::strip_task_instructions(
+                    root,
+                    target.as_deref(),
+                    client.as_deref(),
+                    dry_run,
+                )?;
+                if force_json || json {
+                    print_json(&reports)?;
+                } else {
+                    println!("🗑️ Engram Instruction Strip");
+                    println!("──────────────────────────────────────────────────────────");
+                    for r in &reports {
+                        println!(
+                            "  ✓ Stripped managed block from {} ({:?})",
+                            r.file.display(),
+                            r.action
+                        );
+                    }
+                    if dry_run {
+                        println!("  ℹ️ DRY-RUN ONLY. No files were modified.");
+                    }
+                }
+            } else {
+                let task_str = task.ok_or_else(|| {
+                    anyhow!("Task description required for injection. Provide a task string or use --clear / --strip.")
+                })?;
+                let mut res = prompt::prepare_task_context_adaptive(
+                    root,
+                    &task_str,
+                    token_budget,
+                    prompt::PromptFormat::Markdown,
+                    false,
+                    false,
+                    no_bypass,
+                )?;
+                let reports = instructions::inject_task_instructions(
+                    root,
+                    &res,
+                    target.as_deref(),
+                    client.as_deref(),
+                    dry_run,
+                )?;
+                res.injected_files = reports
+                    .iter()
+                    .map(|r| r.file.to_string_lossy().to_string())
+                    .collect();
+
+                if force_json || json {
+                    let out = json!({
+                        "task": res.task,
+                        "contract_id": res.contract_id,
+                        "contract_version": res.contract_version,
+                        "baseline_commit": res.baseline_commit,
+                        "status": res.status,
+                        "bypass_active": res.bypass_active,
+                        "estimated_tokens": res.estimated_tokens,
+                        "reports": reports,
+                        "dry_run": dry_run,
+                    });
+                    print_json(&out)?;
+                } else {
+                    println!("💉 Engram Turn-0 Instruction Injection");
+                    println!("──────────────────────────────────────────────────────────");
+                    if res.bypass_active {
+                        println!("  ⚡ Adaptive Bypass Active (Trivial task detected)");
+                        if let Some(ref sig) = res.classification_signals {
+                            println!("     Reason: {}", sig.reason);
+                        }
+                        println!("     Directive: 0 MCP tool calls. Edit file directly.");
+                    } else {
+                        println!("  ✓ Locked Change Contract: {}", res.contract_id);
+                        println!("     Baseline:            {}", res.baseline_commit);
+                        println!("     AST Context Tokens:  ~{}", res.estimated_tokens);
+                        println!("     Completeness:        {}", res.completeness_status);
+                    }
+                    println!("──────────────────────────────────────────────────────────");
+                    for r in &reports {
+                        let action_str = match r.action {
+                            instructions::ManagedBlockAction::Created => "Created",
+                            instructions::ManagedBlockAction::UpdatedInPlace => "Updated in-place",
+                            instructions::ManagedBlockAction::AppendedPreserved => {
+                                "Appended (preserved user content)"
+                            }
+                            instructions::ManagedBlockAction::Unchanged => "Unchanged",
+                            instructions::ManagedBlockAction::RemovedPreserved => {
+                                "Removed block (preserved user content)"
+                            }
+                            instructions::ManagedBlockAction::DeletedEmptyFile => {
+                                "Deleted empty file"
+                            }
+                            instructions::ManagedBlockAction::NotFound => "Not found",
+                        };
+                        println!("  ✓ {} -> {}", r.file.display(), action_str);
+                    }
+                    if dry_run {
+                        println!("  ℹ️ DRY-RUN ONLY. No files were written to disk.");
+                    } else {
+                        println!("  🚀 Turn-0 context ready. Agent will execute directly without get_context or preflight tool turns.");
+                    }
+                }
+            }
+        }
+        Some(CommandLine::Prompt {
+            task,
+            token_budget,
+            format,
+            stdout,
+            no_clipboard,
+            lock_contract,
+        }) => {
+            let fmt = match format.to_lowercase().as_str() {
+                "text" => prompt::PromptFormat::Text,
+                _ => prompt::PromptFormat::Markdown,
+            };
+            let copy_clip = !no_clipboard && !stdout;
+            if lock_contract {
+                let res =
+                    prompt::prepare_task_context(root, &task, token_budget, fmt, copy_clip, false)?;
+                if force_json {
+                    print_json(&res)?;
+                } else {
+                    if stdout || !res.clipboard_copied {
+                        println!("{}", res.content);
+                    }
+                    if res.clipboard_copied {
+                        eprintln!(
+                            "✓ Locked Change Contract '{}' and copied ~{} tokens of Turn-0 context to clipboard.",
+                            res.contract_id, res.estimated_tokens
+                        );
+                        eprintln!("  Status: {}", res.completeness_status);
+                        eprintln!(
+                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                        );
+                    }
+                }
+            } else {
+                let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
+                if force_json {
+                    print_json(&res)?;
+                } else {
+                    if stdout || !res.clipboard_copied {
+                        println!("{}", res.content);
+                    }
+                    if res.clipboard_copied {
+                        eprintln!(
+                            "✓ Copied ~{} tokens of structured AST context to clipboard.",
+                            res.estimated_tokens
+                        );
+                        eprintln!("  Status: {}", res.completeness_status);
+                        eprintln!(
+                            "  Paste directly into your AI chat box (Cursor, Copilot, Visual Studio, ChatGPT)."
+                        );
+                    }
                 }
             }
         }

@@ -36,8 +36,13 @@ describe('Extension Lifecycle & Command Registration Tests', () => {
     assert.ok(registeredCommands.has('engram.refreshMemories'), 'engram.refreshMemories should be registered');
     assert.ok(registeredCommands.has('engram.showMemoryDetails'), 'engram.showMemoryDetails should be registered');
 
+    // Verify Zero-Friction Setup command registrations
+    assert.ok(registeredCommands.has('engram.checkSetup'), 'engram.checkSetup should be registered');
+    assert.ok(registeredCommands.has('engram.fixSetup'), 'engram.fixSetup should be registered');
+    assert.ok(registeredCommands.has('engram.syncAgentInstructions'), 'engram.syncAgentInstructions should be registered');
+
     // Verify context subscriptions contains status bar, output channel, commands, watcher, tree views
-    assert.ok(subscriptions.length >= 8, 'Should register all disposables in context subscriptions');
+    assert.ok(subscriptions.length >= 10, 'Should register all disposables in context subscriptions');
   });
 
   it('should execute engram.refreshMemories without error', async () => {

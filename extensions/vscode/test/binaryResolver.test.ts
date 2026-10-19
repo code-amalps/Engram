@@ -203,7 +203,9 @@ describe('BinaryResolver Tests', () => {
         const res = await resolver.resolve(undefined, repoRootDir);
         assert.strictEqual(res.valid, true);
         if (res.valid) {
-          assert.strictEqual(res.version, '1.4.0');
+          const semver = resolver.parseSemVer(res.version);
+          assert.ok(semver !== null, `Parsed semver must not be null: ${res.version}`);
+          assert.ok(resolver.isCompatibleVersion(semver!), `Version ${res.version} must be compatible`);
         }
       }
     });

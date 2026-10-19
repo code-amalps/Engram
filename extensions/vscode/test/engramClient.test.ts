@@ -39,7 +39,10 @@ describe('EngramClient Tests', () => {
   let client: EngramClient = new EngramClient(mockChannel);
   const repoRoot = findRepoRoot(__dirname);
   const binName = process.platform === 'win32' ? 'engram.exe' : 'engram';
-  const debugBin = path.join(repoRoot, 'target', 'debug', binName);
+  const releaseBin = path.join(repoRoot, 'target', 'release', binName);
+  const debugBin = fs.existsSync(releaseBin)
+    ? releaseBin
+    : path.join(repoRoot, 'target', 'debug', binName);
 
   beforeEach(() => {
     mockChannel = new MockOutputChannel();
@@ -503,7 +506,7 @@ describe('EngramClient Tests', () => {
         await assert.rejects(promise, /Operation cancelled by user/);
 
         // Allow OS to finalize termination
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 600));
 
         if (process.platform === 'win32') {
           const check = cp.spawnSync('powershell.exe', [

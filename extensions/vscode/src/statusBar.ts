@@ -56,6 +56,50 @@ export class EngramStatusBar {
     );
   }
 
+  public updateWithSetupReport(report: import('./types').SetupDiagnosticReport): void {
+    if (report.state === 'READY') {
+      const version = report.binary.valid ? ` v${report.binary.version}` : '';
+      const toolInfo = report.health?.toolCount ? ` (${report.health.toolCount} tools)` : '';
+      this.statusBarItem.text = `$(shield) Engram: Ready${version}`;
+      this.statusBarItem.tooltip = new vscode.MarkdownString(
+        `**Engram: Ready for AI Agents**\n\n- Binary: \`${report.binary.valid ? report.binary.path : 'N/A'}\`\n- MCP Server: Active (${report.registration.path})\n- Governed Tools: ${report.health?.toolCount || 15} discovered\n- Workspace Projects: ${report.workspace?.detectedProjects.join(', ') || 'N/A'}\n\nClick to check setup details.`
+      );
+      this.statusBarItem.command = 'engram.checkSetup';
+      this.statusBarItem.backgroundColor = undefined;
+    } else if (report.state === 'SETUP_REQUIRED') {
+      this.statusBarItem.text = '$(tools) Engram: Setup Required';
+      const reason = !report.binary.valid
+        ? 'Engram CLI is not installed or not in PATH.'
+        : 'MCP server is not registered in this workspace.';
+      this.statusBarItem.tooltip = new vscode.MarkdownString(
+        `**Engram Setup Required**\n\n${reason}\n\nClick for 1-Click Setup & Repair.`
+      );
+      this.statusBarItem.command = 'engram.fixSetup';
+      this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+        'statusBarItem.warningBackground'
+      );
+    } else if (report.state === 'STARTING') {
+      this.statusBarItem.text = '$(sync~spin) Engram: Checking...';
+      this.statusBarItem.tooltip = 'Running Engram setup diagnostics and MCP handshake';
+      this.statusBarItem.command = 'engram.checkSetup';
+      this.statusBarItem.backgroundColor = undefined;
+    } else {
+      // ERROR
+      this.statusBarItem.text = '$(error) Engram: Setup Error';
+      const detail =
+        report.registration.details ||
+        report.health?.error ||
+        (!report.binary.valid ? report.binary.error : 'Setup error occurred.');
+      this.statusBarItem.tooltip = new vscode.MarkdownString(
+        `**Engram Setup Error**\n\n${detail}\n\nClick to repair setup.`
+      );
+      this.statusBarItem.command = 'engram.fixSetup';
+      this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+        'statusBarItem.errorBackground'
+      );
+    }
+  }
+
   public dispose(): void {
     this.statusBarItem.dispose();
   }

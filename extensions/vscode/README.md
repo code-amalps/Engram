@@ -4,15 +4,33 @@ Official Visual Studio Code extension for [Engram](https://github.com/code-amalp
 
 ## Overview
 
-The Engram extension connects your Visual Studio Code IDE to the authoritative, local `engram` Rust engine.
+The Engram extension provides **zero-friction AI agent integration** connecting Visual Studio Code to the authoritative local `engram` Rust engine.
 
-### Milestone 1 Features:
-- **Deterministic Binary Discovery:** Locates and validates an existing Engram binary across Windows, macOS, and Linux.
-- **Strict Compatibility Enforcement:** Verifies that the detected binary satisfies semantic version requirements (`>= 1.4.0, < 2.0.0`).
-- **Secure Process Execution:** Executes CLI commands using argument vectors with `shell: false` (zero shell interpolation).
-- **Native Status Bar:** Real-time visibility into the Engram binary status.
-- **Health Check Command:** Run `Engram: Check Health (Doctor)` to inspect memory liveness, scope resolution, and cryptographic hash chain integrity.
-- **Dedicated Output Channel:** Clean, structured logging with runtime sanitization.
+### Zero-Friction Features:
+- **Zero Manual Configuration:** When you open any supported project (Angular, .NET, Python, Rust, Go, Java, TypeScript), Engram automatically identifies the workspace and offers 1-click MCP setup.
+- **Native VS Code MCP Server Registration:** Automatically registers Engram in `.vscode/mcp.json` using VS Code's native `servers` schema and `${workspaceFolder}` workspace expansion.
+- **Idempotent Configuration Preservation:** Preserves all existing third-party MCP servers (GitHub Copilot, PostgreSQL, SQLite, etc.) and file comments with zero data loss.
+- **Live MCP Handshake Diagnostics:** Spawns and verifies the stdio MCP protocol (`2024-11-05`), validating that all 15 governed engineering memory tools are discovered and ready for agent invocation.
+- **1-Click Setup & Repair (`engram.fixSetup`):** Single-click automated repair diagnosing missing registrations, path mismatches, or corrupted configurations.
+- **Opt-in Copilot Instructions (`engram.syncAgentInstructions`):** Safely adds or updates bounded, reversible agent instructions in `.github/copilot-instructions.md`.
+- **Deterministic Binary Discovery:** Locates and validates the Engram binary across PATH, standard OS locations, environment variables, or explicit settings.
+- **Context Compilation & Memory Explorer:** Compile rich engineering context budgets and inspect durable architectural decisions directly from the Activity Bar.
+
+## Supported Coding Agents
+- **GitHub Copilot Agent Mode / VS Code MCP:** Direct integration via `.vscode/mcp.json` (`servers` stdio schema).
+- **Cursor IDE:** Compatible via `engram setup --client cursor` (`.cursor/mcp.json`).
+- **Windsurf IDE:** Compatible via `engram setup --client windsurf` (`mcp_config.json`).
+- **Claude Desktop:** Compatible via `engram setup --client claude` (`claude_desktop_config.json`).
+
+## Commands
+
+- `Engram: Check Setup & Agent Health` (`engram.checkSetup`) — Evaluates binary discovery, workspace detection, MCP registration, and live tool discovery.
+- `Engram: 1-Click Setup & Repair` (`engram.fixSetup`) — Automatically registers the MCP server and verifies live tool availability.
+- `Engram: Configure Copilot Instructions` (`engram.syncAgentInstructions`) — Configures bounded project guidelines for GitHub Copilot in `.github/copilot-instructions.md`.
+- `Engram: Compile Context` (`engram.compileContext`) — Compiles project context and invariants for a specific task.
+- `Engram: Check Health (Doctor)` (`engram.checkHealth`) — Inspects memory liveness, scope resolution, and cryptographic hash chain integrity.
+- `Engram: Locate Binary` (`engram.locateBinary`) — Re-runs binary discovery and displays the active version and path.
+- `Engram: Show Output Channel` (`engram.showOutputChannel`) — Opens detailed execution and diagnostic logs.
 
 ## Requirements
 
@@ -28,7 +46,7 @@ To install Engram:
   curl -fsSL https://github.com/code-amalps/Engram/releases/latest/download/install.sh | bash
   ```
 
-Alternatively, configure the explicit path in VS Code Settings:
+Alternatively, configure an explicit binary path in VS Code Settings:
 `"engram.binaryPath": "/absolute/path/to/engram"`
 
 ## Extension Settings

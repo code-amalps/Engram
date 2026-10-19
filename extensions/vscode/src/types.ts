@@ -137,3 +137,56 @@ export interface RecordDecisionOptions {
   files?: string[];
   acceptedBy?: string;
 }
+
+export type SetupState = 'READY' | 'SETUP_REQUIRED' | 'STARTING' | 'ERROR';
+
+export type ProjectSignature =
+  | 'angular'
+  | 'dotnet'
+  | 'python'
+  | 'rust'
+  | 'go'
+  | 'java'
+  | 'typescript'
+  | 'generic';
+
+export interface WorkspaceInfo {
+  root: string;
+  isInitialized: boolean;
+  detectedProjects: ProjectSignature[];
+  hasConfig: boolean;
+}
+
+export type McpRegistrationStatus =
+  | 'CONFIGURED_HEALTHY'
+  | 'NOT_CONFIGURED'
+  | 'CONFLICT'
+  | 'MALFORMED_JSON';
+
+export interface McpHealthCheckResult {
+  success: boolean;
+  latencyMs: number;
+  toolCount: number;
+  tools: string[];
+  protocolVersion: string;
+  serverName: string;
+  error?: string;
+}
+
+export interface SetupDiagnosticReport {
+  state: SetupState;
+  workspace?: WorkspaceInfo;
+  binary: BinaryResolutionResult;
+  registration: {
+    status: McpRegistrationStatus;
+    path: string;
+    details?: string;
+  };
+  health?: McpHealthCheckResult;
+  recommendedAction?:
+    | 'none'
+    | 'install_binary'
+    | 'register_mcp'
+    | 'repair_conflict'
+    | 'initialize_workspace';
+}

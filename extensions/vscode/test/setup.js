@@ -203,6 +203,32 @@ const mockVscode = {
     parse: (str) => ({ fsPath: str, scheme: 'https', toString: () => str }),
   },
   EventEmitter: MockEventEmitter,
+  LanguageModelTextPart: class MockLanguageModelTextPart {
+    constructor(value) {
+      this.value = value;
+    }
+  },
+  LanguageModelToolResult: class MockLanguageModelToolResult {
+    constructor(content) {
+      this.content = content;
+    }
+  },
+  lm: {
+    _registeredTools: new Map(),
+    registerTool: function (name, tool) {
+      this._registeredTools.set(name, tool);
+      return {
+        dispose: () => this._registeredTools.delete(name),
+      };
+    },
+    invokeTool: async function (name, options, token) {
+      const tool = this._registeredTools.get(name);
+      if (!tool) {
+        throw new Error(`Tool ${name} not registered`);
+      }
+      return tool.invoke(options, token);
+    },
+  },
 };
 
 // Intercept require('vscode')

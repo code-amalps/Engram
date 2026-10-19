@@ -83,7 +83,7 @@ fn test_mcp_protocol_handshake_and_tools() {
     assert!(tools.iter().any(|t| t["name"] == "engram_record_decision"));
     assert!(tools.iter().any(|t| t["name"] == "engram_inspect_symbol"));
 
-    // 3. Send tools/call for engram_get_context
+    // 3. Send tools/call for engram_get_context (default compact mode)
     line.clear();
     let call_req = serde_json::json!({
         "jsonrpc": "2.0",
@@ -103,8 +103,35 @@ fn test_mcp_protocol_handshake_and_tools() {
     reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(resp["id"], 3);
+    assert_eq!(resp["result"]["isError"], false);
     let content_text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(content_text.contains("PaymentService"));
+    assert!(content_text.contains("src/payment.py"));
+    assert!(content_text.contains("READY"));
+
+    // 4. Send tools/call for engram_get_context with details: true (verbose mode)
+    line.clear();
+    let verbose_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "engram_get_context",
+            "arguments": {
+                "task": "charge payment",
+                "token_budget": 800,
+                "details": true
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&verbose_req).unwrap()).unwrap();
+    stdin.flush().unwrap();
+
+    reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(resp["id"], 4);
+    assert_eq!(resp["result"]["isError"], false);
+    let verbose_text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(verbose_text.contains("PaymentService"));
 
     // Gracefully close
     drop(stdin);

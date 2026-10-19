@@ -14,6 +14,7 @@ pub mod git_history;
 pub mod go_parser;
 pub mod graph;
 pub mod guard;
+pub mod hook;
 pub mod impact;
 pub mod incremental;
 pub mod instructions;
@@ -320,6 +321,42 @@ enum CommandLine {
         #[arg(long)]
         uninstall_hook: bool,
         /// Dry run for hook operations
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Manage Git pre-commit hooks for automated change contract validation
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HookAction {
+    /// Execute Git pre-commit validation of staged changes
+    Run {
+        /// Enforce strict policy (treat unexpected expansions as blocking)
+        #[arg(long)]
+        strict: bool,
+        /// Path to custom policy configuration file (.toml)
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Explicit Change Contract JSON file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Force machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install pre-commit hook into .git/hooks/pre-commit
+    Install {
+        /// Dry run: show what would be installed without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Uninstall pre-commit hook from .git/hooks/pre-commit
+    Uninstall {
+        /// Dry run: show what would be uninstalled without modifying files
         #[arg(long)]
         dry_run: bool,
     },
@@ -1293,6 +1330,33 @@ fn run() -> Result<()> {
                 }
             }
         }
+        Some(CommandLine::Hook { action }) => match action {
+            HookAction::Run {
+                strict,
+                policy,
+                file,
+                json,
+            } => {
+                let code = hook::run_hook(
+                    root,
+                    strict,
+                    policy.as_deref(),
+                    file.as_deref(),
+                    force_json || json,
+                )?;
+                if code != 0 {
+                    std::process::exit(code);
+                }
+            }
+            HookAction::Install { dry_run } => {
+                let msg = hook::install_hook(root, dry_run)?;
+                println!("{msg}");
+            }
+            HookAction::Uninstall { dry_run } => {
+                let msg = hook::uninstall_hook(root, dry_run)?;
+                println!("{msg}");
+            }
+        },
         Some(CommandLine::Prompt {
             task,
             token_budget,

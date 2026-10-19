@@ -17,6 +17,7 @@ pub mod go_parser;
 pub mod java_parser;
 pub mod graph;
 pub mod guard;
+pub mod hook;
 pub mod impact;
 pub mod incremental;
 pub mod manifest;

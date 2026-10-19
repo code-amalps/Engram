@@ -1,0 +1,31 @@
+{
+  "scenario_id": "scen_py_memory_01",
+  "name": "Python 2-Turn Sequential ADR Memory Compounding",
+  "language": "python",
+  "task_description": "Turn 1 discovers streaming buffer anti-pattern and ratifies ADR-042; Turn 2 implements batch exporter honoring ADR-042 zero-shot.",
+  "ground_truth": {
+    "scenario_id": "scen_py_memory_01",
+    "relevant_files_to_read": [
+      "exporter.py",
+      "docs/adr/0042-streaming-buffer.md"
+    ],
+    "expected_files_to_modify": [
+      "exporter.py"
+    ],
+    "expected_files_to_create": [],
+    "expected_files_to_delete": [],
+    "impacted_symbols_or_files": [
+      "exporter.py::stream_records"
+    ],
+    "forbidden_boundaries": [
+      "secrets/**",
+      "legacy/**"
+    ]
+  },
+  "verification_command": [
+    "python",
+    "test_exporter.py"
+  ],
+  "max_turns": 6,
+  "token_budget": 1200
+}

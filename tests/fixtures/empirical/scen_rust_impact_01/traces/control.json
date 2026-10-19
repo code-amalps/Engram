@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "session_id": "sess-ctrl-rust-impact-01",
+  "task_id": "scen_rust_impact_01",
+  "arm": "Control",
+  "agent_model": "claude-3-7-sonnet-control",
+  "validity": "Valid",
+  "start_time": "2026-10-15T12:00:00Z",
+  "end_time": "2026-10-15T12:00:18Z",
+  "stated_duration_ms": 18000,
+  "turns_count": 5,
+  "token_usage": {
+    "prompt_tokens": 28000,
+    "completion_tokens": 3500,
+    "total_tokens": 31500
+  },
+  "tool_calls": [],
+  "file_interactions": {
+    "files_read": [
+      "src/tax.rs",
+      "src/lib.rs"
+    ],
+    "files_edited": [
+      "src/tax.rs"
+    ],
+    "files_created": [],
+    "files_deleted": []
+  },
+  "governed_operations": [],
+  "boundary_violations": [],
+  "test_suite_outcome": {
+    "total_tests": 2,
+    "passed_tests": 0,
+    "failed_tests": 2,
+    "test_names_broken": [
+      "test_pricing",
+      "test_invoice"
+    ],
+    "unrelated_tests_broken": []
+  },
+  "task_outcome": {
+    "Failed": {
+      "failure_reason": "Compilation failure: missing variants in pricing.rs and invoice.rs"
+    }
+  }
+}

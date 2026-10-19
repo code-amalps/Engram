@@ -1,0 +1,36 @@
+{
+  "scenario_id": "scen_rust_impact_01",
+  "name": "Rust TaxRate Enum Refactor & Blast Radius",
+  "language": "rust",
+  "task_description": "Refactor TaxRate enum variants from Flat to Tiered across all caller modules and verification test suites.",
+  "ground_truth": {
+    "scenario_id": "scen_rust_impact_01",
+    "relevant_files_to_read": [
+      "src/tax.rs",
+      "src/pricing.rs",
+      "src/invoice.rs"
+    ],
+    "expected_files_to_modify": [
+      "src/tax.rs",
+      "src/pricing.rs",
+      "src/invoice.rs"
+    ],
+    "expected_files_to_create": [],
+    "expected_files_to_delete": [],
+    "impacted_symbols_or_files": [
+      "src/tax.rs",
+      "src/pricing.rs",
+      "src/invoice.rs"
+    ],
+    "forbidden_boundaries": [
+      "secrets/**",
+      "legacy/**"
+    ]
+  },
+  "verification_command": [
+    "cargo",
+    "test"
+  ],
+  "max_turns": 6,
+  "token_budget": 1200
+}

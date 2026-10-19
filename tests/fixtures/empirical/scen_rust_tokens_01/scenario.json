@@ -1,0 +1,31 @@
+{
+  "scenario_id": "scen_rust_tokens_01",
+  "name": "Rust Ledger Currency Conversion Exploration",
+  "language": "rust",
+  "task_description": "Add foreign currency exchange fee calculation to LedgerEngine without breaking existing account balance invariants.",
+  "ground_truth": {
+    "scenario_id": "scen_rust_tokens_01",
+    "relevant_files_to_read": [
+      "src/ledger.rs",
+      "src/currency.rs"
+    ],
+    "expected_files_to_modify": [
+      "src/ledger.rs"
+    ],
+    "expected_files_to_create": [],
+    "expected_files_to_delete": [],
+    "impacted_symbols_or_files": [
+      "src/ledger.rs::calculate_fx_fee"
+    ],
+    "forbidden_boundaries": [
+      "secrets/**",
+      "legacy/**"
+    ]
+  },
+  "verification_command": [
+    "cargo",
+    "test"
+  ],
+  "max_turns": 6,
+  "token_budget": 1200
+}

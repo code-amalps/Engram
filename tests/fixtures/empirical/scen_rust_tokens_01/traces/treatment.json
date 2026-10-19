@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "session_id": "sess-treat-rust-tokens-01",
+  "task_id": "scen_rust_tokens_01",
+  "arm": "Treatment",
+  "agent_model": "claude-3-7-sonnet-engram",
+  "validity": "Valid",
+  "start_time": "2026-10-15T12:00:00Z",
+  "end_time": "2026-10-15T12:00:04.200Z",
+  "stated_duration_ms": 4200,
+  "turns_count": 2,
+  "token_usage": {
+    "prompt_tokens": 1100,
+    "completion_tokens": 250,
+    "total_tokens": 1350,
+    "cached_input_tokens": 400
+  },
+  "tool_calls": [],
+  "file_interactions": {
+    "files_read": [
+      "src/ledger.rs",
+      "src/currency.rs"
+    ],
+    "files_edited": [
+      "src/ledger.rs"
+    ],
+    "files_created": [],
+    "files_deleted": []
+  },
+  "governed_operations": [],
+  "boundary_violations": [],
+  "test_suite_outcome": {
+    "total_tests": 2,
+    "passed_tests": 2,
+    "failed_tests": 0,
+    "test_names_broken": [],
+    "unrelated_tests_broken": []
+  },
+  "task_outcome": "Passed"
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0.0",
+  "session_id": "sess-treat-rust-impact-01",
+  "task_id": "scen_rust_impact_01",
+  "arm": "Treatment",
+  "agent_model": "claude-3-7-sonnet-engram",
+  "validity": "Valid",
+  "start_time": "2026-10-15T12:00:00Z",
+  "end_time": "2026-10-15T12:00:06.500Z",
+  "stated_duration_ms": 6500,
+  "turns_count": 3,
+  "token_usage": {
+    "prompt_tokens": 2400,
+    "completion_tokens": 600,
+    "total_tokens": 3000,
+    "cached_input_tokens": 800
+  },
+  "tool_calls": [],
+  "file_interactions": {
+    "files_read": [
+      "src/tax.rs",
+      "src/pricing.rs",
+      "src/invoice.rs"
+    ],
+    "files_edited": [
+      "src/tax.rs",
+      "src/pricing.rs",
+      "src/invoice.rs"
+    ],
+    "files_created": [],
+    "files_deleted": []
+  },
+  "governed_operations": [],
+  "boundary_violations": [],
+  "test_suite_outcome": {
+    "total_tests": 2,
+    "passed_tests": 2,
+    "failed_tests": 0,
+    "test_names_broken": [],
+    "unrelated_tests_broken": []
+  },
+  "task_outcome": "Passed"
+}

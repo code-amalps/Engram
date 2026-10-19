@@ -10,3 +10,8 @@ graphify-out/
 benchmarks/matched-pair-harness/reports/runs/
 benchmarks/matched-pair-harness/**/__pycache__/
 
+# Release artifacts and local debug fixtures
+/engram-*.zip
+/engram-*.zip.sha256
+/engram-*.sha256
+/mcp_in.json

@@ -30,9 +30,12 @@ use engram::empirical_live::stats::{
     PILOT_VARIANCE_UPPER_80_MULTIPLIER, SecondaryHypothesis, calculate_confirmatory_sample_size,
     evaluate_itt_sensitivity, evaluate_paired_savings, holm_bonferroni_adjust, student_t_cdf,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
+
+/// Static mutex to serialize tests that mutate or rely on sensitive process-wide environment variables.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 // ============================================================================
 // 1. BudgetGuard: Pre-Flight Exhaustion Rejection
@@ -3886,6 +3889,7 @@ fn test_windows_job_object_kills_grandchild_processes() {
 
 #[test]
 fn test_child_process_environment_scrubs_secrets_proxies_and_git() {
+    let _env_lock = ENV_MUTEX.lock().unwrap();
     use engram::empirical_live::security::EnvironmentPolicy;
 
     let temp_dir = std::env::temp_dir().join(format!("engram_b5_env_{}", uuid::Uuid::new_v4()));
@@ -3975,11 +3979,15 @@ fn test_child_process_environment_redirects_caches() {
 
 #[test]
 fn test_trusted_executable_resolution_rejects_untrusted_relative_paths() {
+    let _env_lock = ENV_MUTEX.lock().unwrap();
     use engram::empirical_live::security::resolve_trusted_executable;
 
     // Standard tool resolution on host
     let cargo_res = resolve_trusted_executable("cargo");
-    assert!(cargo_res.is_ok(), "cargo should be found in system PATH");
+    assert!(
+        cargo_res.is_ok(),
+        "cargo should be found in system PATH: {cargo_res:?}"
+    );
     let cargo_path = cargo_res.unwrap();
     assert!(cargo_path.is_absolute());
     assert!(cargo_path.exists());
@@ -4001,43 +4009,89 @@ fn test_trusted_executable_resolution_rejects_untrusted_relative_paths() {
 fn test_network_egress_probe_classification() {
     use engram::empirical_live::security::{EgressProbeOutcome, NetworkEgressProbe};
 
-    // 1. Explicit policy rejection (WSAEACCES 10013 on Windows)
-    let wsaeacces_err = std::io::Error::from_raw_os_error(10013);
-    let outcome1 = NetworkEgressProbe::classify_io_error("p1", "1.1.1.1:53", &wsaeacces_err);
-    assert!(outcome1.is_active_rejection());
-    if let EgressProbeOutcome::ActiveRejectionVerified {
-        os_error_code,
-        rejection_policy,
-        ..
-    } = outcome1
+    #[cfg(windows)]
     {
-        assert_eq!(os_error_code, Some(10013));
-        assert!(rejection_policy.contains("WSAEACCES"));
-    } else {
-        panic!("Expected ActiveRejectionVerified");
+        // 1. Explicit policy rejection (WSAEACCES 10013 on Windows)
+        let wsaeacces_err = std::io::Error::from_raw_os_error(10013);
+        let outcome1 = NetworkEgressProbe::classify_io_error("p1", "1.1.1.1:53", &wsaeacces_err);
+        assert!(outcome1.is_active_rejection());
+        if let EgressProbeOutcome::ActiveRejectionVerified {
+            os_error_code,
+            rejection_policy,
+            ..
+        } = outcome1
+        {
+            assert_eq!(os_error_code, Some(10013));
+            assert!(rejection_policy.contains("WSAEACCES"));
+        } else {
+            panic!("Expected ActiveRejectionVerified");
+        }
+
+        // 2. Inconclusive connection refusal (WSAECONNREFUSED 10061 on Windows)
+        let wsaeconnrefused_err = std::io::Error::from_raw_os_error(10061);
+        let outcome2 =
+            NetworkEgressProbe::classify_io_error("p2", "127.0.0.1:9999", &wsaeconnrefused_err);
+        assert!(!outcome2.is_active_rejection());
+        assert!(!outcome2.is_leak());
+        if let EgressProbeOutcome::Unreachable { reason, .. } = outcome2 {
+            assert!(reason.contains("WSAECONNREFUSED"));
+        } else {
+            panic!("Expected Unreachable");
+        }
+
+        // 3. DNS failure (WSAHOST_NOT_FOUND 11001 on Windows)
+        let wsahost_err = std::io::Error::from_raw_os_error(11001);
+        let outcome3 =
+            NetworkEgressProbe::classify_io_error("p3", "invalid.domain.xyz:80", &wsahost_err);
+        assert!(!outcome3.is_active_rejection());
+        assert!(matches!(
+            outcome3,
+            EgressProbeOutcome::ResolutionFailed { .. }
+        ));
     }
 
-    // 2. Inconclusive connection refusal (WSAECONNREFUSED 10061 on Windows)
-    let wsaeconnrefused_err = std::io::Error::from_raw_os_error(10061);
-    let outcome2 =
-        NetworkEgressProbe::classify_io_error("p2", "127.0.0.1:9999", &wsaeconnrefused_err);
-    assert!(!outcome2.is_active_rejection());
-    assert!(!outcome2.is_leak());
-    if let EgressProbeOutcome::Unreachable { reason, .. } = outcome2 {
-        assert!(reason.contains("WSAECONNREFUSED"));
-    } else {
-        panic!("Expected Unreachable");
-    }
+    #[cfg(not(windows))]
+    {
+        // 1. Explicit policy rejection (EACCES 13 or EPERM 1 on Unix)
+        let eacces_err = std::io::Error::from_raw_os_error(13);
+        let outcome1 = NetworkEgressProbe::classify_io_error("p1", "1.1.1.1:53", &eacces_err);
+        assert!(outcome1.is_active_rejection());
+        if let EgressProbeOutcome::ActiveRejectionVerified {
+            os_error_code,
+            rejection_policy,
+            ..
+        } = outcome1
+        {
+            assert_eq!(os_error_code, Some(13));
+            assert!(rejection_policy.contains("EACCES") || rejection_policy.contains("EPERM"));
+        } else {
+            panic!("Expected ActiveRejectionVerified");
+        }
 
-    // 3. DNS failure (WSAHOST_NOT_FOUND 11001 on Windows)
-    let wsahost_err = std::io::Error::from_raw_os_error(11001);
-    let outcome3 =
-        NetworkEgressProbe::classify_io_error("p3", "invalid.domain.xyz:80", &wsahost_err);
-    assert!(!outcome3.is_active_rejection());
-    assert!(matches!(
-        outcome3,
-        EgressProbeOutcome::ResolutionFailed { .. }
-    ));
+        // 2. Inconclusive connection refusal (ECONNREFUSED: 111 on Linux, 61 on macOS)
+        #[cfg(target_os = "macos")]
+        let econnrefused_code = 61;
+        #[cfg(not(target_os = "macos"))]
+        let econnrefused_code = 111;
+
+        let econnrefused_err = std::io::Error::from_raw_os_error(econnrefused_code);
+        let outcome2 =
+            NetworkEgressProbe::classify_io_error("p2", "127.0.0.1:9999", &econnrefused_err);
+        assert!(!outcome2.is_active_rejection());
+        assert!(!outcome2.is_leak());
+        if let EgressProbeOutcome::Unreachable { reason, .. } = outcome2 {
+            assert!(reason.contains("ECONNREFUSED"));
+        } else {
+            panic!("Expected Unreachable");
+        }
+
+        // 3. Generic inconclusive network error
+        let generic_err = std::io::Error::new(std::io::ErrorKind::Other, "network unreachable");
+        let outcome3 =
+            NetworkEgressProbe::classify_io_error("p3", "invalid.domain.xyz:80", &generic_err);
+        assert!(!outcome3.is_active_rejection());
+        assert!(!outcome3.is_leak());
+    }
 }
 
 // ============================================================================
@@ -4115,21 +4169,49 @@ fn test_sandbox_tool_dispatcher_executes_contained_command() {
         &serde_json::json!({ "command": "cargo", "args": ["--version"] }),
     );
 
-    if let ContentBlock::ToolResult {
-        is_error, content, ..
-    } = res
+    #[cfg(windows)]
     {
-        assert!(
-            !is_error,
-            "Contained cargo execution should succeed: {content}"
-        );
-        assert!(
-            content.contains("cargo"),
-            "Output must contain cargo version string: {content}"
-        );
-        assert!(content.contains("Exit code: 0"));
-    } else {
-        panic!("Expected ToolResult");
+        if let ContentBlock::ToolResult {
+            is_error, content, ..
+        } = res
+        {
+            assert!(
+                !is_error,
+                "Contained cargo execution should succeed: {content}"
+            );
+            assert!(
+                content.contains("cargo"),
+                "Output must contain cargo version string: {content}"
+            );
+            assert!(content.contains("Exit code: 0"));
+        } else {
+            panic!("Expected ToolResult");
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        // On non-Windows platforms, Job Object process-tree containment is unsupported,
+        // and SandboxToolDispatcher strictly fails closed before spawning.
+        if let ContentBlock::ToolResult {
+            is_error, content, ..
+        } = res
+        {
+            assert!(
+                is_error,
+                "On non-Windows platforms, dispatcher must fail closed on unsupported process containment: {content}"
+            );
+            assert!(
+                content.contains("Platform containment unsupported"),
+                "Output must identify unsupported platform containment: {content}"
+            );
+            assert!(
+                content.contains("fail-closed"),
+                "Output must cite fail-closed policy: {content}"
+            );
+        } else {
+            panic!("Expected ToolResult");
+        }
     }
 
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -4142,6 +4224,7 @@ fn test_sandbox_tool_dispatcher_executes_contained_command() {
 
 #[test]
 fn test_curated_child_path_rejects_parent_path_injection_and_fake_utilities() {
+    let _env_lock = ENV_MUTEX.lock().unwrap();
     use engram::empirical_live::security::{
         EnvironmentPolicy, SecurityError, resolve_trusted_executable,
     };
@@ -4166,7 +4249,11 @@ fn test_curated_child_path_rejects_parent_path_injection_and_fake_utilities() {
 
     // 2. Seed the parent PATH with the attacker-controlled directory
     let original_path = std::env::var("PATH").unwrap_or_default();
-    let seeded_path = format!("{};{}", temp_dir.display(), original_path);
+    #[cfg(windows)]
+    let sep = ";";
+    #[cfg(not(windows))]
+    let sep = ":";
+    let seeded_path = format!("{}{sep}{}", temp_dir.display(), original_path);
     unsafe {
         std::env::set_var("PATH", &seeded_path);
     }

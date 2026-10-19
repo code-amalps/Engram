@@ -30,7 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run test suite
-        run: cargo test --verbose
+        run: cargo test --verbose -- --test-threads=1
 
       - name: Build release binary
         run: cargo build --release

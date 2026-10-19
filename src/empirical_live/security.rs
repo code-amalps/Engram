@@ -3770,10 +3770,28 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
 
     #[cfg(not(windows))]
     {
-        for p in &["/usr/bin", "/bin", "/usr/local/bin"] {
+        for p in &[
+            "/usr/bin",
+            "/bin",
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+        ] {
             let pb = PathBuf::from(p);
-            if pb.is_dir() {
+            if pb.is_dir() && !is_untrusted_directory(&pb) {
                 paths.push(pb);
+            }
+        }
+
+        // Rust / Cargo toolchain (mirrors Windows CARGO_HOME / USERPROFILE behavior)
+        if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
+            let cargo_bin = PathBuf::from(cargo_home).join("bin");
+            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+                paths.push(cargo_bin);
+            }
+        } else if let Ok(home) = std::env::var("HOME") {
+            let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
+            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+                paths.push(cargo_bin);
             }
         }
     }
@@ -4227,7 +4245,7 @@ impl NetworkEgressProbe {
                     rejection_policy: "POSIX Packet Filter / iptables rejection (EACCES/EPERM)"
                         .to_string(),
                 },
-                Some(111) => EgressProbeOutcome::Unreachable {
+                Some(111) | Some(61) => EgressProbeOutcome::Unreachable {
                     probe_id: probe_id.to_string(),
                     destination: destination.to_string(),
                     reason: "Connection refused (ECONNREFUSED) - inconclusive proof of containment"

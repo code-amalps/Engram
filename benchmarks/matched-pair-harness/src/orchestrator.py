@@ -24,7 +24,13 @@ from isolation import (
     FROZEN_ENGRAM_SHA256,
 )
 from telemetry import TelemetryParser, TelemetryMetrics
-from evaluator import Evaluator, GitImpact, CorrectnessResult
+from evaluator import (
+    Evaluator,
+    GitImpact,
+    CorrectnessResult,
+    FixturePreflightError,
+    validate_fixture_preflight,
+)
 from runner import CodexRunner, RunExecutionResult
 from schema_validator import validate_instance, SchemaValidationError
 
@@ -50,6 +56,7 @@ class Orchestrator:
         dependency_strategy: str = "copy",
         preserve_sandboxes: bool = False,
         seed: Optional[int] = None,
+        expected_treatment_sha256: Optional[str] = None,
     ):
         self.task_config_path = Path(task_config_path)
         with open(self.task_config_path, "r", encoding="utf-8") as f:
@@ -60,6 +67,7 @@ class Orchestrator:
         self.golden_repo = Path(golden_repo)
         self.codex_bin = Path(codex_bin)
         self.engram_bin = Path(engram_bin)
+        self.expected_treatment_sha256 = expected_treatment_sha256 or FROZEN_ENGRAM_SHA256
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.output_dir = output_dir or (HARNESS_ROOT / "reports" / "runs" / f"{self.task_id}_{self.pair_id}")
@@ -89,6 +97,9 @@ class Orchestrator:
 
         # Capture baseline golden dependency fingerprint
         self.golden_baseline_fingerprint = compute_dependency_fingerprint(self.golden_repo)
+
+        # Validate task fixture preflight against baseline golden repository
+        self.evaluator.validate_preflight(self.golden_repo)
 
     def run_pair(self) -> Dict[str, Any]:
         """Executes a matched pair with randomized arm order and pre/post dependency verification."""
@@ -646,9 +657,9 @@ class Orchestrator:
 
         run_id = f"{self.task_id}_{self.pair_id}_{arm}"
         run_vault = self.output_dir / arm
-        # 1. Verify frozen Engram binary immediately before treatment execution
+        # 1. Verify Engram binary immediately before treatment execution
         if arm == "treatment_B":
-            verify_frozen_binary(self.engram_bin, FROZEN_ENGRAM_SHA256)
+            verify_frozen_binary(self.engram_bin, self.expected_treatment_sha256)
 
         # 2. Strict Live-Run Guard: Junction mode is forbidden for live trials
         if not self.is_dry_run and self.dependency_strategy != "copy":
@@ -673,7 +684,10 @@ class Orchestrator:
         print(f"Sandbox created at: {sandbox_path}")
 
         try:
-            # 4. Execute agent
+            # 4.1 Validate fixture preflight in the actual provisioned sandbox
+            self.evaluator.validate_preflight(sandbox_path)
+
+            # 4.2 Execute agent
             prompt = self.task_config.get("prompt", "")
             events_jsonl_path = run_vault / "events.jsonl"
             exec_res = self.runner.run(
@@ -735,7 +749,7 @@ class Orchestrator:
                     "sandbox_path": str(sandbox_path),
                     "cold_start_verified": True,
                     "engram_enabled": (arm == "treatment_B"),
-                    "engram_binary_sha256": FROZEN_ENGRAM_SHA256,
+                    "engram_binary_sha256": self.expected_treatment_sha256,
                     "mcp_server_status": "ACTIVE" if arm == "treatment_B" else "DISABLED",
                     "dependency_fingerprint_verified": True,
                     "path_sanitized": exec_res.path_sanitized,
@@ -779,6 +793,7 @@ def main():
     parser.add_argument("--dependency-strategy", choices=["copy", "junction", "none"], default="copy", help="Dependency isolation mode (default: copy for full write isolation)")
     parser.add_argument("--preserve-sandboxes", action="store_true", help="Preserve sandbox folders")
     parser.add_argument("--seed", type=int, default=None, help="Randomization seed")
+    parser.add_argument("--expected-treatment-sha256", default=None, help="Explicit expected SHA-256 for treatment Engram binary (defaults to FROZEN_ENGRAM_SHA256)")
     args = parser.parse_args()
 
     task_path = Path(args.task)
@@ -796,7 +811,8 @@ def main():
         is_dry_run=args.dry_run,
         dependency_strategy=args.dependency_strategy,
         preserve_sandboxes=args.preserve_sandboxes,
-        seed=args.seed
+        seed=args.seed,
+        expected_treatment_sha256=args.expected_treatment_sha256
     )
 
     results = orchestrator.run_pair()

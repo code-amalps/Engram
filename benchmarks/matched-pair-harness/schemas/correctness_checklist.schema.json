@@ -82,6 +82,16 @@
           "criteria": { "type": "string" }
         }
       }
+    },
+    "fixture_preflight": {
+      "type": "object",
+      "required": ["target_file", "original_text", "expected_text"],
+      "properties": {
+        "target_file": { "type": "string" },
+        "original_text": { "type": "string" },
+        "expected_text": { "type": "string" },
+        "expected_occurrences": { "type": "integer" }
+      }
     }
   }
 }

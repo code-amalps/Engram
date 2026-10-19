@@ -221,12 +221,15 @@ def create_sandbox(
     - 'none': Omits node_modules linkage.
     """
     if runs_dir is None:
-        runs_dir = Path(tempfile.gettempdir()) / "engram_pilot" / "runs"
+        runs_dir = Path(tempfile.gettempdir()).resolve() / "engram_pilot" / "runs"
+    else:
+        runs_dir = Path(runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir = runs_dir.resolve()
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     sandbox_name = f"{task_id}_{pair_id}_{arm}_{timestamp}"
-    sandbox_path = runs_dir / sandbox_name
+    sandbox_path = (runs_dir / sandbox_name).resolve()
 
     # Safety check: Ensure target path is strictly inside engram_pilot/runs
     norm_path = str(sandbox_path.resolve()).lower()
@@ -238,6 +241,8 @@ def create_sandbox(
     res = subprocess.run(cmd, cwd=golden_repo, capture_output=True, text=True)
     if res.returncode != 0:
         raise IsolationError(f"Failed to create git worktree: {res.stderr}\n{res.stdout}")
+
+    sandbox_path = sandbox_path.resolve()
 
     golden_nm = golden_repo / "node_modules"
     sandbox_nm = sandbox_path / "node_modules"

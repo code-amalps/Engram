@@ -126,23 +126,34 @@ class CodexRunner:
                 error_message=None
             )
 
-        # Build command with explicit model and reasoning settings
-        esc_sandbox = str(sandbox_path).replace("\\", "\\\\")
+        # Build command with explicit model, reasoning, and canonical sandbox settings
+        canonical_sandbox = Path(sandbox_path).resolve()
+        sandbox_str = str(canonical_sandbox)
+        esc_sandbox = sandbox_str.replace("\\", "\\\\")
+        esc_sandbox_lower = sandbox_str.lower().replace("\\", "\\\\")
+        fwd_sandbox = sandbox_str.replace("\\", "/")
+        fwd_sandbox_lower = sandbox_str.lower().replace("\\", "/")
+
         cmd = [
             str(self.codex_executable),
             "exec",
             "--json",
             "-m", self.model,
             "-c", f'collaboration_mode.settings.reasoning_effort="{self.reasoning_effort}"',
-            "-C", str(sandbox_path),
+            "-s", "workspace-write",
+            "--add-dir", sandbox_str,
+            "-C", sandbox_str,
             "-c", f'projects."{esc_sandbox}".trust_level="trusted"',
+            "-c", f'projects."{esc_sandbox_lower}".trust_level="trusted"',
+            "-c", f'projects."{fwd_sandbox}".trust_level="trusted"',
+            "-c", f'projects."{fwd_sandbox_lower}".trust_level="trusted"',
         ]
 
         # Dynamic per-invocation MCP configuration
         if arm == "treatment_B":
             if not self.engram_executable or not self.engram_executable.exists():
                 raise FileNotFoundError(f"Engram executable missing: {self.engram_executable}")
-            esc_bin = str(self.engram_executable).replace("\\", "\\\\")
+            esc_bin = str(self.engram_executable.resolve()).replace("\\", "\\\\")
             cmd.extend([
                 "-c", f'mcp_servers.engram.command="{esc_bin}"',
                 "-c", f'mcp_servers.engram.args=["-C", "{esc_sandbox}", "mcp"]'
@@ -165,7 +176,7 @@ class CodexRunner:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                cwd=str(sandbox_path),
+                cwd=sandbox_str,
                 env=child_env
             )
 

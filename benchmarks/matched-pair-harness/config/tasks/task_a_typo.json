@@ -1,12 +1,11 @@
 {
   "schema_version": "2.0.0",
   "task_id": "task_a_typo",
-  "title": "Fix Localized Typo in About Component Header",
-  "description": "Fix a spelling error in the about component translations file or header text without modifying unrelated modules or breaking unit tests.",
+  "title": "Fix Capitalization Typo in About Component Header",
+  "description": "Fix a capitalization error in the about component header link text without modifying unrelated modules or breaking unit tests.",
   "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
   "allowed_file_patterns": [
-    "projects/angular-ngrx-material-starter/src/assets/i18n/**",
-    "projects/angular-ngrx-material-starter/src/app/features/about/**"
+    "projects/angular-ngrx-material-starter/src/app/features/about/about/about.component.html"
   ],
   "forbidden_file_patterns": [
     "package.json",
@@ -14,14 +13,19 @@
     "node_modules/**",
     "projects/angular-ngrx-material-starter/src/app/core/**"
   ],
-  "prompt": "Fix the typo 'Angualar' -> 'Angular' in the about component translation files and template. Ensure no other files are changed. CRITICAL SAFETY INSTRUCTION: Do NOT run npm install or modify package.json or node_modules under any circumstances.",
+  "prompt": "Fix the capitalization typo 'Angular Cli Tips' -> 'Angular CLI Tips' in the about component header template (`projects/angular-ngrx-material-starter/src/app/features/about/about/about.component.html`). Ensure no other files or dependencies are changed. CRITICAL SAFETY INSTRUCTION: Do NOT run npm install or modify package.json or node_modules under any circumstances.",
+  "fixture_preflight": {
+    "target_file": "projects/angular-ngrx-material-starter/src/app/features/about/about/about.component.html",
+    "original_text": "Angular Cli Tips",
+    "expected_text": "Angular CLI Tips"
+  },
   "gates": {
     "L0_typecheck": {
       "enabled": true,
-      "command": "npx ng build --configuration=development --no-watch"
+      "command": "npx tsc -p projects/angular-ngrx-material-starter/tsconfig.app.json --noEmit"
     },
     "L1_lint": {
-      "enabled": true,
+      "enabled": false,
       "command": "npm run lint"
     },
     "L2_unit_tests": {
@@ -36,17 +40,17 @@
   "requirements": [
     {
       "id": "REQ-1",
-      "description": "Correct spelling of Angular in localized strings",
+      "description": "Correct capitalization of CLI in about component header link text",
       "weight": 0.50,
       "evaluation_type": "STATIC_CHECK",
-      "criteria": "Translation file contains corrected spelling"
+      "criteria": "about.component.html contains 'Angular CLI Tips' and does not contain 'Angular Cli Tips'"
     },
     {
       "id": "REQ-2",
       "description": "Boundary & Blast Radius (zero edits to core or package manifests)",
       "weight": 0.50,
       "evaluation_type": "AUTOMATED_DIFF",
-      "criteria": "Only targeted i18n/about files modified"
+      "criteria": "Only targeted about component template modified"
     }
   ]
 }

@@ -3766,6 +3766,70 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                 }
             }
         }
+
+        // Hosted CI tool-cache Python (GitHub Actions and Azure Pipelines runner environments)
+        if let Ok(py_loc) = std::env::var("pythonLocation") {
+            let py_dir = PathBuf::from(py_loc);
+            if py_dir.is_dir() && !is_untrusted_directory(&py_dir) && !paths.contains(&py_dir) {
+                paths.push(py_dir);
+            }
+        }
+
+        let mut tool_cache_roots = Vec::new();
+        if let Ok(tc) = std::env::var("RUNNER_TOOL_CACHE") {
+            let pb = PathBuf::from(tc);
+            if !tool_cache_roots.contains(&pb) {
+                tool_cache_roots.push(pb);
+            }
+        }
+        if let Ok(atd) = std::env::var("AGENT_TOOLSDIRECTORY") {
+            let pb = PathBuf::from(atd);
+            if !tool_cache_roots.contains(&pb) {
+                tool_cache_roots.push(pb);
+            }
+        }
+        let fixed_hosted_cache = PathBuf::from("C:\\hostedtoolcache\\windows");
+        if fixed_hosted_cache.is_dir() && !tool_cache_roots.contains(&fixed_hosted_cache) {
+            tool_cache_roots.push(fixed_hosted_cache);
+        }
+
+        for tc_root in tool_cache_roots {
+            let py_cache = tc_root.join("Python");
+            if py_cache.is_dir() && !is_untrusted_directory(&py_cache) {
+                if let Ok(entries) = std::fs::read_dir(&py_cache) {
+                    for entry in entries.flatten() {
+                        let version_dir = entry.path();
+                        if version_dir.is_dir() {
+                            let x64 = version_dir.join("x64");
+                            if x64.is_dir() && !is_untrusted_directory(&x64) && !paths.contains(&x64) {
+                                paths.push(x64);
+                            }
+                            let x86 = version_dir.join("x86");
+                            if x86.is_dir() && !is_untrusted_directory(&x86) && !paths.contains(&x86) {
+                                paths.push(x86);
+                            }
+                            if !is_untrusted_directory(&version_dir) && !paths.contains(&version_dir) {
+                                paths.push(version_dir);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Standard Windows root Python installations (e.g. C:\Python313, C:\Python312, C:\tools\python)
+        for root_prefix in &[
+            "C:\\Python313",
+            "C:\\Python312",
+            "C:\\Python311",
+            "C:\\Python310",
+            "C:\\tools\\python",
+        ] {
+            let root_path = PathBuf::from(root_prefix);
+            if root_path.is_dir() && !is_untrusted_directory(&root_path) && !paths.contains(&root_path) {
+                paths.push(root_path);
+            }
+        }
     }
 
     #[cfg(not(windows))]
@@ -3792,6 +3856,33 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
             let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
             if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
                 paths.push(cargo_bin);
+            }
+        }
+
+        // Hosted CI Python tool cache (GitHub Actions / Azure Pipelines on Linux/macOS)
+        if let Ok(py_loc) = std::env::var("pythonLocation") {
+            let py_dir = PathBuf::from(py_loc);
+            let py_bin = py_dir.join("bin");
+            if py_bin.is_dir() && !is_untrusted_directory(&py_bin) && !paths.contains(&py_bin) {
+                paths.push(py_bin);
+            } else if py_dir.is_dir() && !is_untrusted_directory(&py_dir) && !paths.contains(&py_dir) {
+                paths.push(py_dir);
+            }
+        }
+        if let Ok(tc) = std::env::var("RUNNER_TOOL_CACHE") {
+            let py_cache = PathBuf::from(tc).join("Python");
+            if py_cache.is_dir() && !is_untrusted_directory(&py_cache) {
+                if let Ok(entries) = std::fs::read_dir(&py_cache) {
+                    for entry in entries.flatten() {
+                        let version_dir = entry.path();
+                        if version_dir.is_dir() {
+                            let x64_bin = version_dir.join("x64").join("bin");
+                            if x64_bin.is_dir() && !is_untrusted_directory(&x64_bin) && !paths.contains(&x64_bin) {
+                                paths.push(x64_bin);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -205,9 +205,29 @@ fn test_subprocess_timeout_watchdog_and_cleanup() {
     let sandbox = Sandbox::new("test_timeout").expect("Create sandbox");
     let sandbox_path = sandbox.path.clone();
 
-    // Spawning cargo with a 1-millisecond timeout is guaranteed to trigger the watchdog
+    // Create a minimal valid Rust project with a test that sleeps for 60s,
+    // guaranteeing that the child process reliably remains alive past the configured watchdog deadline
+    // on all platforms (avoiding sub-millisecond instant exit when no Cargo.toml exists).
+    let cargo_toml = r#"
+[package]
+name = "timeout_fixture"
+version = "0.1.0"
+edition = "2021"
+"#;
+    std::fs::write(sandbox.path.join("Cargo.toml"), cargo_toml).expect("write Cargo.toml");
+
+    let src_dir = sandbox.path.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    let lib_rs = r#"
+#[test]
+fn test_hangs() {
+    std::thread::sleep(std::time::Duration::from_secs(60));
+}
+"#;
+    std::fs::write(src_dir.join("lib.rs"), lib_rs).expect("write lib.rs");
+
     let cmd = vec!["cargo".to_string(), "test".to_string()];
-    let res = sandbox.run_verification_command(&cmd, Duration::from_millis(1));
+    let res = sandbox.run_verification_command(&cmd, Duration::from_millis(50));
 
     assert!(
         matches!(

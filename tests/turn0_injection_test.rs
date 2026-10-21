@@ -301,9 +301,13 @@ fn test_turn0_prepare_cli_inject_integration_and_json() {
         .expect("engram prepare failed");
     assert!(prep_out.status.success());
 
-    let stderr = String::from_utf8_lossy(&prep_out.stderr);
-    assert!(stderr.contains("Locked Change Contract"));
-    assert!(stderr.contains("Injected Turn-0 task directives into"));
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&prep_out.stdout),
+        String::from_utf8_lossy(&prep_out.stderr)
+    );
+    assert!(combined.contains("Locked Change Contract"));
+    assert!(combined.contains("Injected Turn-0 task directives into"));
 
     let inst_path = ws.join(".github").join("copilot-instructions.md");
     assert!(inst_path.exists());

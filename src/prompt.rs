@@ -762,6 +762,10 @@ pub fn prepare_task_context(
                 "- **Baseline Revision:** `{}`\n",
                 preflight.baseline_commit
             ));
+            body.push_str(&format!(
+                "- **Provenance:** Compiled locally from repository AST index at revision `{}`.\n",
+                preflight.baseline_commit
+            ));
             if !preflight.expected_files.is_empty() {
                 body.push_str(&format!(
                     "- **Authorized Targets:** {}\n",
@@ -840,6 +844,13 @@ pub fn prepare_task_context(
                     body.push_str(&format!("  - `{}`: {}\n", path, reason));
                 }
             }
+
+            body.push_str("\n## Verification & Quality Guidance\n");
+            body.push_str("- **Targeted Tests:** Run project test suites (e.g. unit/integration tests) for modified modules before finishing.\n");
+            body.push_str(&format!(
+                "- **Change Compliance:** When code edits are complete, run `engram postflight` with contract `{}` to verify conformance against authorized boundaries.\n",
+                preflight.contract_id
+            ));
         }
         PromptFormat::Text => {
             body.push_str(&format!("=== TASK ===\n{}\n\n", core_task));
@@ -860,10 +871,16 @@ pub fn prepare_task_context(
             if let Some(eco) = &ctx.ecosystem_guard {
                 body.push_str(&format!("• ECOSYSTEM POLICY: {}\n", eco));
             }
+
+            body.push_str("\n=== VERIFICATION GUIDANCE ===\n");
+            body.push_str("• Run targeted test suites for modified components.\n");
+            body.push_str(&format!("• Call engram_postflight with contract {} upon completion.\n", preflight.contract_id));
         }
     }
 
-    let completeness_status = if ctx.excluded_files.is_empty() {
+    let completeness_status = if ctx.files.is_empty() {
+        "UNRESOLVED_CONTEXT (0 matching files or symbols found in repository index)".to_string()
+    } else if ctx.excluded_files.is_empty() {
         "SUFFICIENT_GROUNDING".to_string()
     } else {
         format!(

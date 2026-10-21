@@ -356,6 +356,10 @@ pub fn format_task_instruction_body(prep: &crate::prompt::PreparedTaskOutput) ->
         "- **Baseline Revision:** `{}`\n",
         prep.baseline_commit
     ));
+    body.push_str(&format!(
+        "- **Provenance:** Generated locally by Engram from repository index at baseline revision `{}`.\n",
+        prep.baseline_commit
+    ));
     if !prep.expected_files.is_empty() {
         body.push_str(&format!(
             "- **Authorized Target Files:** {}\n",
@@ -376,9 +380,10 @@ pub fn format_task_instruction_body(prep: &crate::prompt::PreparedTaskOutput) ->
     ));
     body.push_str("2. **BOUNDARY COMPLIANCE:** Confine code edits strictly to authorized target files. Do not modify files in forbidden boundaries or make unrequested cosmetic refactors.\n");
     body.push_str(&format!(
-        "3. **POSTFLIGHT AUDIT:** When code edits and unit tests are complete, call `engram_postflight` with `contract_id: \"{}\"` to audit compliance.\n\n",
+        "3. **POSTFLIGHT AUDIT:** When code edits and unit tests are complete, call `engram_postflight` with `contract_id: \"{}\"` to audit compliance.\n",
         prep.contract_id
     ));
+    body.push_str("4. **VERIFICATION GUIDANCE:** Run targeted test suites for modified components. Ensure no compiler or test regressions are introduced.\n\n");
 
     // Append the grounded context and constraints from prep.content
     if let Some(idx) = prep.content.find("## Relevant Context") {

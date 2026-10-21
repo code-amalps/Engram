@@ -151,7 +151,11 @@ enum CommandLine {
     },
     /// Prepare task-aware context, lock preflight contract to baseline commit, and emit Turn-0 prompt
     Prepare {
-        task: String,
+        /// Task description and optional planned files (can be passed via --task or as positional argument)
+        #[arg(long, short = 't')]
+        task: Option<String>,
+        #[arg(value_name = "TASK")]
+        task_pos: Option<String>,
         #[arg(long, default_value_t = 1200)]
         token_budget: usize,
         #[arg(long, default_value = "markdown")]
@@ -178,6 +182,9 @@ enum CommandLine {
         /// Client identifier for injection (vscode, cursor, claude, windsurf, all)
         #[arg(long)]
         inject_client: Option<String>,
+        /// Dry run: show planned preparation and injection without modifying files or clipboard
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Inject task-aware Turn-0 context and contract directives into workspace instruction files
     Inject {
@@ -1130,6 +1137,7 @@ fn run() -> Result<()> {
         }
         Some(CommandLine::Prepare {
             task,
+            task_pos,
             token_budget,
             format,
             json,
@@ -1140,19 +1148,24 @@ fn run() -> Result<()> {
             inject,
             inject_target,
             inject_client,
+            dry_run,
         }) => {
+            let task_str = task.or(task_pos).ok_or_else(|| {
+                anyhow!("Task description required. Provide --task \"<goal>\" or pass task as an argument.")
+            })?;
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
                 _ => prompt::PromptFormat::Markdown,
             };
-            let copy_clip = !no_clipboard && !stdout;
+            let copy_clip = !no_clipboard && !stdout && !dry_run;
+            let write_f = write_file && !dry_run;
             let mut res = prompt::prepare_task_context_adaptive(
                 root,
-                &task,
+                &task_str,
                 token_budget,
                 fmt,
                 copy_clip,
-                write_file,
+                write_f,
                 no_bypass,
             )?;
             if inject {
@@ -1161,7 +1174,7 @@ fn run() -> Result<()> {
                     &res,
                     inject_target.as_deref(),
                     inject_client.as_deref(),
-                    false,
+                    dry_run,
                 )?;
                 res.injected_files = reports
                     .into_iter()
@@ -1173,6 +1186,9 @@ fn run() -> Result<()> {
             } else {
                 if stdout || !res.clipboard_copied {
                     println!("{}", res.content);
+                }
+                if dry_run {
+                    eprintln!("ℹ️ DRY-RUN ONLY. No files or clipboard were modified.");
                 }
                 if res.bypass_active {
                     eprintln!("⚡ Adaptive Bypass Active: Trivial task detected.");

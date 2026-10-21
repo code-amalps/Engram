@@ -1192,6 +1192,12 @@ fn run() -> Result<()> {
                     eprintln!(
                         "  Agent will skip get_context/preflight and start implementation directly."
                     );
+                } else {
+                    eprintln!(
+                        "✓ Locked Change Contract '{}' (~{} tokens).",
+                        res.contract_id, res.estimated_tokens
+                    );
+                    eprintln!("  Status: {}", res.completeness_status);
                 }
                 if let Some(ref path) = res.active_file_path {
                     eprintln!("✓ Saved task packet to: {}", path);

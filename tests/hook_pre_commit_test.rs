@@ -684,11 +684,21 @@ fn test_hook_prefers_repository_target_over_outdated_path() {
     let hook_path = hooks_dir.join("pre-commit");
     let script = format!("#!/bin/sh\n{}\n", engram::hook::HOOK_SCRIPT_BODY);
     fs::write(&hook_path, &script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755));
+    }
 
     let target_debug = ws.join("target").join("debug");
     fs::create_dir_all(&target_debug).unwrap();
     let target_bin = target_debug.join(if cfg!(windows) { "engram.exe" } else { "engram" });
     fs::copy(bin, &target_bin).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&target_bin, fs::Permissions::from_mode(0o755));
+    }
 
     let _ = Command::new(bin)
         .arg("-C")
@@ -738,6 +748,11 @@ fn test_hook_outdated_binary_without_fallback_diagnostics() {
     let hook_path = hooks_dir.join("pre-commit");
     let script = format!("#!/bin/sh\n{}\n", engram::hook::HOOK_SCRIPT_BODY);
     fs::write(&hook_path, &script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755));
+    }
 
     let mock_bin_dir = ws.join("mock_bin");
     fs::create_dir_all(&mock_bin_dir).unwrap();
@@ -747,6 +762,11 @@ fn test_hook_outdated_binary_without_fallback_diagnostics() {
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"engram 1.4.0\"; exit 0; fi\necho \"error: unrecognized subcommand '$1'\" >&2\nexit 1\n",
     )
     .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&mock_engram, fs::Permissions::from_mode(0o755));
+    }
 
     let src_dir = ws.join("src");
     fs::create_dir_all(&src_dir).unwrap();

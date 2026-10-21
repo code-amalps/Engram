@@ -262,7 +262,7 @@ export class McpClient {
             capabilities: {},
             clientInfo: {
               name: 'engram-vscode-extension',
-              version: '1.5.1',
+              version: '1.5.2',
             },
           },
         };
@@ -396,7 +396,7 @@ export class McpClient {
           params: {
             protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: 'engram-vscode-extension', version: '1.5.1' },
+            clientInfo: { name: 'engram-vscode-extension', version: '1.5.2' },
           },
         };
         stdin.write(JSON.stringify(initReq) + '\n');

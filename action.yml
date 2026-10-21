@@ -33,7 +33,7 @@ inputs:
   version:
     description: "Engram binary release tag to install"
     required: false
-    default: "v1.4.0"
+    default: "v1.5.2"
   github-token:
     description: "GitHub Token for authenticated API downloads and annotations"
     required: false

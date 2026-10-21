@@ -2,7 +2,7 @@
   "name": "engram",
   "displayName": "Engram — Engineering Memory & Change Intelligence",
   "description": "Local engineering memory, context compilation, and Change Contract guard for AI coding agents.",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "type": "commonjs",
   "publisher": "code-amalps",
   "license": "AGPL-3.0-or-later",

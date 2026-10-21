@@ -354,10 +354,14 @@ enum CommandLine {
 #[derive(Subcommand)]
 pub enum HookAction {
     /// Execute Git pre-commit validation of staged changes
-    Run {
+    #[command(name = "pre-commit", alias = "run")]
+    PreCommit {
         /// Enforce strict policy (treat unexpected expansions as blocking)
         #[arg(long)]
         strict: bool,
+        /// Explicitly require an active Change Contract (fail if none exists)
+        #[arg(long)]
+        enforce_contract: bool,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -368,13 +372,13 @@ pub enum HookAction {
         #[arg(long)]
         json: bool,
     },
-    /// Install pre-commit hook into .git/hooks/pre-commit
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
     Install {
         /// Dry run: show what would be installed without modifying files
         #[arg(long)]
         dry_run: bool,
     },
-    /// Uninstall pre-commit hook from .git/hooks/pre-commit
+    /// Uninstall pre-commit hook from Git hooks directory
     Uninstall {
         /// Dry run: show what would be uninstalled without modifying files
         #[arg(long)]
@@ -1361,8 +1365,9 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Hook { action }) => match action {
-            HookAction::Run {
+            HookAction::PreCommit {
                 strict,
+                enforce_contract,
                 policy,
                 file,
                 json,
@@ -1370,6 +1375,7 @@ fn run() -> Result<()> {
                 let code = hook::run_hook(
                     root,
                     strict,
+                    enforce_contract,
                     policy.as_deref(),
                     file.as_deref(),
                     force_json || json,
@@ -1631,6 +1637,7 @@ fn run() -> Result<()> {
                 contract_file: file,
                 staged,
                 strict,
+                enforce_contract: false,
                 diagnostic,
             };
 

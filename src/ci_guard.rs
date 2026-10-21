@@ -116,6 +116,7 @@ pub struct GuardOptions {
     pub contract_file: Option<String>,
     pub staged: bool,
     pub strict: bool,
+    pub enforce_contract: bool,
     pub diagnostic: bool,
 }
 
@@ -475,7 +476,11 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
         }
     };
 
-    let baseline_ref = options.base_commit.as_deref().unwrap_or("HEAD");
+    let baseline_ref = if options.staged && options.base_commit.is_none() {
+        "WORKTREE"
+    } else {
+        options.base_commit.as_deref().unwrap_or("HEAD")
+    };
 
     // 2. Discover changed files
     let check_opts = CheckOptions {
@@ -602,13 +607,78 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
         } else {
-            crate::contract::get_active_contract(&resolved_root).unwrap_or(None)
+            match crate::contract::get_active_contract(&resolved_root) {
+                Ok(opt) => opt,
+                Err(e) => {
+                    findings.push(GuardFinding {
+                        rule_id: "GUARD-CONTRACT-001".to_string(),
+                        severity: FindingSeverity::Block,
+                        message: format!("Active Change Contract is malformed, corrupt, or unreadable: {e}"),
+                        path: None,
+                        remediation: Some(
+                            "Re-create the active contract with 'engram preflight \"<task>\"' or repair the contract JSON file."
+                                .to_string(),
+                        ),
+                    });
+                    None
+                }
+            }
         };
 
         match contract_opt {
             Some(contract) => {
                 contract_id_used = Some(contract.contract_id.clone());
                 checks_executed.push("contracts".to_string());
+
+                // Contract status validation
+                if contract.status == crate::contract::ContractStatus::BlockedAwaitingHuman {
+                    findings.push(GuardFinding {
+                        rule_id: "GUARD-CONTRACT-006".to_string(),
+                        severity: FindingSeverity::Block,
+                        message: format!(
+                            "Change Contract '{}' is BLOCKED_AWAITING_HUMAN. Human reconciliation required before changes can be accepted.",
+                            contract.contract_id
+                        ),
+                        path: None,
+                        remediation: Some(format!(
+                            "Run 'engram contract ratify {} --reason \"<human rationale>\"' or re-run preflight.",
+                            contract.contract_id
+                        )),
+                    });
+                }
+
+                // Contract baseline validation
+                if contract.baseline_revision != "WORKTREE" && !contract.baseline_revision.is_empty() {
+                    match crate::git::resolve_baseline(&resolved_root, &contract.baseline_revision) {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-CONTRACT-007".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!(
+                                    "Change Contract baseline commit '{}' is invalid or unavailable in current repository: {}",
+                                    contract.baseline_revision, err
+                                ),
+                                path: None,
+                                remediation: Some(
+                                    "Re-anchor contract baseline to current HEAD using 'engram preflight \"<task>\"' or update contract baseline.".to_string(),
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-CONTRACT-007".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!(
+                                    "Failed verifying Change Contract baseline commit '{}': {}",
+                                    contract.baseline_revision, e
+                                ),
+                                path: None,
+                                remediation: Some("Verify Git repository health and baseline commit.".to_string()),
+                            });
+                        }
+                    }
+                }
 
                 let (classifications, missing_changes, _summary) =
                     validate_contract_diff_with_constitution_and_base(
@@ -691,11 +761,11 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
             None => {
-                if policy.checks.contracts.required {
+                if policy.checks.contracts.required || options.enforce_contract {
                     findings.push(GuardFinding {
                         rule_id: "GUARD-CONTRACT-001".to_string(),
                         severity: FindingSeverity::Block,
-                        message: "No active Change Contract found and policy requires a contract"
+                        message: "No active Change Contract found and contract enforcement is enabled"
                             .to_string(),
                         path: None,
                         remediation: Some(
@@ -709,7 +779,7 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                         name: "contracts".to_string(),
                         status: "not_applicable".to_string(),
                         reason: Some(
-                            "No active Change Contract present (optional in policy)".to_string(),
+                            "No active Change Contract present (optional in policy: permissive mode permitted)".to_string(),
                         ),
                     });
                 }

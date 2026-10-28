@@ -313,6 +313,8 @@ enum CommandLine {
     },
     /// Policy-driven Change Guard for local Git and CI pull-request workflows
     Guard {
+        #[command(subcommand)]
+        action: Option<GuardAction>,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -348,6 +350,47 @@ enum CommandLine {
     Hook {
         #[command(subcommand)]
         action: HookAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GuardAction {
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
+    Install {
+        /// Dry run: show what would be installed without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Uninstall pre-commit hook from Git hooks directory
+    Uninstall {
+        /// Dry run: show what would be uninstalled without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Execute Git pre-commit validation of staged changes
+    #[command(name = "check", alias = "run")]
+    Check {
+        /// Path to custom policy configuration file (.toml)
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Base commit or ref to compare against (e.g. origin/main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Explicit Change Contract JSON file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Check staged index changes only (pre-commit mode)
+        #[arg(long)]
+        staged: bool,
+        /// Enforce strict policy (treat unexpected expansions as blocking)
+        #[arg(long)]
+        strict: bool,
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Detailed diagnostic mode explaining checks executed and skipped
+        #[arg(long, alias = "explain")]
+        diagnostic: bool,
     },
 }
 
@@ -1611,6 +1654,7 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Guard {
+            action,
             policy,
             base,
             file,
@@ -1622,6 +1666,51 @@ fn run() -> Result<()> {
             uninstall_hook,
             dry_run,
         }) => {
+            if let Some(act) = action {
+                match act {
+                    GuardAction::Install { dry_run: dr } => {
+                        let msg = ci_guard::install_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Uninstall { dry_run: dr } => {
+                        let msg = ci_guard::uninstall_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Check {
+                        policy: p,
+                        base: b,
+                        file: f,
+                        staged: s,
+                        strict: st,
+                        format: fmt,
+                        diagnostic: diag,
+                    } => {
+                        let opts = ci_guard::GuardOptions {
+                            policy_path: p.or(policy),
+                            base_commit: b.or(base),
+                            contract_file: f.or(file),
+                            staged: s || staged,
+                            strict: st || strict,
+                            enforce_contract: false,
+                            diagnostic: diag || diagnostic,
+                        };
+                        let res = ci_guard::run_guard(root, &opts);
+                        let is_json = force_json || fmt.to_ascii_lowercase() == "json" || format.to_ascii_lowercase() == "json";
+                        if is_json {
+                            print_json(&res)?;
+                        } else {
+                            print!("{}", ci_guard::format_guard_terminal(&res, opts.diagnostic));
+                        }
+                        if res.exit_code != 0 {
+                            std::process::exit(res.exit_code);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
             if install_hook {
                 let msg = ci_guard::install_guard_hook(root, dry_run)?;
                 println!("{msg}");

@@ -1337,7 +1337,7 @@ fi
 
 /// Safe opt-in pre-commit hook installer
 pub fn install_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
-    let hooks_dir = root.join(".git").join("hooks");
+    let hooks_dir = crate::hook::resolve_hooks_dir(root)?;
     if !hooks_dir.exists() && !dry_run {
         fs::create_dir_all(&hooks_dir)?;
     }
@@ -1403,7 +1403,8 @@ pub fn install_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
 
 /// Safe pre-commit hook uninstaller
 pub fn uninstall_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
-    let hook_path = root.join(".git").join("hooks").join("pre-commit");
+    let hooks_dir = crate::hook::resolve_hooks_dir(root)?;
+    let hook_path = hooks_dir.join("pre-commit");
     if !hook_path.exists() {
         return Ok(format!(
             "No pre-commit hook found at {}",

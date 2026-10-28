@@ -696,65 +696,146 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let contract_id = args["contract_id"].as_str().map(str::to_string);
             let strict = args["strict"].as_bool().unwrap_or(false);
             let staged = args["staged"].as_bool().unwrap_or(false);
+            let test_evidence = args["test_evidence"]
+                .as_bool()
+                .or_else(|| args["test_passed"].as_bool());
+            let build_evidence = args["build_evidence"]
+                .as_bool()
+                .or_else(|| args["build_passed"].as_bool());
             let details = args["details"]
                 .as_bool()
                 .or_else(|| args["verbose"].as_bool())
                 .unwrap_or(false);
-            let opts = crate::flywheel::PostflightOptions {
+
+            let opts = crate::flywheel::LocalPostflightOptions {
                 contract_id,
-                strict,
                 staged,
-                base_commit: None,
-                ci_mode: false,
+                strict,
+                test_evidence,
+                build_evidence,
             };
-            let res = crate::flywheel::postflight_check(&root, &opts)?;
-            if details {
-                Ok(json_result(serde_json::to_value(res)?))
-            } else {
-                let verdict_str = match res.verdict {
-                    crate::flywheel::PostflightVerdict::Pass => "PASS",
-                    crate::flywheel::PostflightVerdict::BlockedBoundaryViolation => {
-                        "BLOCKED_BOUNDARY_VIOLATION"
-                    }
-                    crate::flywheel::PostflightVerdict::ReviewUnexpectedExpansion => {
-                        "REVIEW_UNEXPECTED_EXPANSION"
-                    }
-                    crate::flywheel::PostflightVerdict::BlockedConstitutionRule => {
-                        "BLOCKED_CONSTITUTION_RULE"
-                    }
-                };
-                let violations: Vec<Value> = res
-                    .classifications
-                    .iter()
-                    .filter(|c| {
-                        c.category != crate::contract::FileValidationCategory::Expected
-                            && c.category
-                                != crate::contract::FileValidationCategory::ExpectedExpansion
-                    })
-                    .map(|c| {
-                        json!({
-                            "path": c.path,
-                            "category": format!("{:?}", c.category),
-                            "reason": c.reason,
-                        })
-                    })
-                    .collect();
-                let next_action = if res.verdict == crate::flywheel::PostflightVerdict::Pass {
-                    "All changes compliant with Change Contract. Ready to commit / create PR."
-                } else {
+            let res = crate::flywheel::validate_local_postflight(&root, &opts)?;
+
+            let verdict_str = match res.verdict {
+                crate::flywheel::LocalPostflightVerdict::Pass => "PASS",
+                crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified => {
+                    "PASS_SCOPE_ONLY_UNVERIFIED"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedScopeViolation => {
+                    "BLOCKED_SCOPE_VIOLATION"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedConstitutionRule => {
+                    "BLOCKED_CONSTITUTION_RULE"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedValidationFailed => {
+                    "BLOCKED_VALIDATION_FAILED"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedStaleContract => {
+                    "BLOCKED_STALE_CONTRACT"
+                }
+                crate::flywheel::LocalPostflightVerdict::IndeterminateGitUnavailable => {
+                    "INDETERMINATE_GIT_UNAVAILABLE"
+                }
+            };
+
+            let mut violations: Vec<Value> = Vec::new();
+            for bv in &res.boundary_violations {
+                violations.push(json!({
+                    "path": bv,
+                    "category": "BoundaryViolation",
+                    "reason": "Forbidden file modified",
+                }));
+            }
+            for uv in &res.unexpected_files {
+                violations.push(json!({
+                    "path": uv,
+                    "category": "Unexpected",
+                    "reason": "File modified outside expected contract boundary",
+                }));
+            }
+            for cv in &res.constitution_violations {
+                violations.push(json!({
+                    "rule": cv,
+                    "category": "ConstitutionViolation",
+                    "reason": "Architectural constitution rule violation",
+                }));
+            }
+
+            let next_action = match res.verdict {
+                crate::flywheel::LocalPostflightVerdict::Pass => {
+                    "All changes compliant with Change Contract and verified by validation evidence. Ready to commit / create PR."
+                }
+                crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified => {
+                    "All changes compliant with Change Contract boundaries (scope only). Test evidence was not supplied. Run tests before committing."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedValidationFailed => {
+                    "Validation tests explicitly failed. Resolve failing tests before committing code."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedStaleContract => {
+                    "Contract baseline diverged from Git HEAD. Run engram_prepare_task to re-ground and rebase the active contract."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedScopeViolation => {
                     "Revert violating/unexpected files or invoke engram_recover for structured remediation."
-                };
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedConstitutionRule => {
+                    "Reconcile architectural constitution rule violations before modifying code or request human override."
+                }
+                crate::flywheel::LocalPostflightVerdict::IndeterminateGitUnavailable => {
+                    "Ensure git repository is initialized and accessible."
+                }
+            };
+
+            let is_compliant = res.scope_status == crate::flywheel::LocalScopeStatus::Compliant;
+
+            if details {
                 Ok(json_result(json!({
-                    "verdict": verdict_str,
+                    "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
+                        "PASS"
+                    } else {
+                        verdict_str
+                    },
+                    "local_verdict": verdict_str,
                     "contract_id": res.contract_id,
-                    "status": if res.verdict == crate::flywheel::PostflightVerdict::Pass { "COMPLIANT" } else { "VIOLATION_DETECTED" },
-                    "total_changed_files": res.total_changed_files,
-                    "expected_count": res.expected_count,
-                    "expansion_count": res.expansion_count,
-                    "unexpected_count": res.unexpected_count,
-                    "boundary_violation_count": res.boundary_violation_count,
+                    "baseline_commit": res.baseline_commit,
+                    "current_head": res.current_head,
+                    "status": if is_compliant { "COMPLIANT" } else { "VIOLATION_DETECTED" },
+                    "scope_status": serde_json::to_value(res.scope_status)?,
+                    "evidence_status": serde_json::to_value(res.evidence_status)?,
+                    "staleness_status": serde_json::to_value(res.staleness_status)?,
+                    "total_changed_files": res.changed_files.len(),
+                    "changed_files": res.changed_files,
+                    "expected_count": res.expected_files.len(),
+                    "expected_files": res.expected_files,
+                    "unexpected_count": res.unexpected_files.len(),
+                    "unexpected_files": res.unexpected_files,
+                    "boundary_violation_count": res.boundary_violations.len(),
+                    "boundary_violations": res.boundary_violations,
+                    "constitution_violations": res.constitution_violations,
                     "violations": violations,
-                    "constitution_passed": res.constitution_passed,
+                    "constitution_passed": res.constitution_violations.is_empty(),
+                    "summary": res.summary,
+                    "exit_code": res.exit_code,
+                    "next_action": next_action,
+                    "report": serde_json::to_value(&res)?,
+                })))
+            } else {
+                Ok(json_result(json!({
+                    "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
+                        "PASS"
+                    } else {
+                        verdict_str
+                    },
+                    "contract_id": res.contract_id,
+                    "status": if is_compliant { "COMPLIANT" } else { "VIOLATION_DETECTED" },
+                    "scope_status": serde_json::to_value(res.scope_status)?,
+                    "evidence_status": serde_json::to_value(res.evidence_status)?,
+                    "staleness_status": serde_json::to_value(res.staleness_status)?,
+                    "total_changed_files": res.changed_files.len(),
+                    "expected_count": res.expected_files.len(),
+                    "unexpected_count": res.unexpected_files.len(),
+                    "boundary_violation_count": res.boundary_violations.len(),
+                    "violations": violations,
+                    "constitution_passed": res.constitution_violations.is_empty(),
                     "summary": res.summary,
                     "next_action": next_action,
                 })))
@@ -967,14 +1048,16 @@ pub fn tools_definitions() -> Value {
         },
         {
             "name": "engram_postflight",
-            "description": "Orchestrated Post-Flight Guard Check: evaluate mutation against Change Contract boundaries, enforce zero poisoning, and synthesize candidate memory.",
+            "description": "Deterministic Local Post-Flight Guard Check: evaluate mutation against Change Contract boundaries, constitution rules, git diffs, and test evidence without external LLM dependencies.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against" },
-                    "strict": { "type": "boolean", "description": "Fail if unexpected files are modified" },
+                    "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against (defaults to active contract)" },
+                    "strict": { "type": "boolean", "description": "Fail if unexpected files are modified outside expected boundaries" },
                     "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" },
-                    "details": { "type": "boolean", "description": "Return full verbose payload with all file classification objects (default false for compact token-efficient payload)" }
+                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed (true/false, optional)" },
+                    "build_evidence": { "type": "boolean", "description": "Whether compilation/build succeeded (true/false, optional)" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload with all classification objects (default false for compact token-efficient payload)" }
                 }
             }
         },

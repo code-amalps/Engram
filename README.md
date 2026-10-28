@@ -207,19 +207,33 @@ Engram supports both MCP-connected IDEs and non-MCP environments through a non-d
 
 ### Step 1: Install Engram Binary
 
-No compiler, Node.js, or Python runtime required. Downloads the self-contained binary, verifies SHA256 integrity, and adds Engram to your `PATH`:
+No compiler, Node.js, or Python runtime required.
 
-**Windows (PowerShell):**
+#### Windows Installation
+
+**Option A: 1-Click GUI Installer (`.exe`) [Recommended for Windows & Factory.ai]**
+Download and run [**`EngramSetup.exe`**](https://github.com/code-amalps/Engram/releases/latest/download/EngramSetup.exe) (available under latest [GitHub Releases](https://github.com/code-amalps/Engram/releases/latest)):
+- **Privacy & Governance Agreement:** Embedded Privacy Notice confirms 100% local-first data processing.
+- **Automatic User PATH Setup:** Safely adds `%LOCALAPPDATA%\Programs\Engram\bin` to User PATH.
+- **Immediate Process Broadcast (`WM_SETTINGCHANGE`):** Notifies external agent runners (e.g. Factory.ai, VS Code, Cursor) without requiring a system reboot.
+- **Clean Uninstaller:** Registers standard Windows Add/Remove Programs uninstaller.
+
+**Option B: PowerShell One-Liner (Automated Script)**
 ```powershell
 iwr -useb https://raw.githubusercontent.com/code-amalps/Engram/main/install.ps1 | iex
 ```
+*(Includes fail-closed SHA-256 checksum verification, GitHub API rate-limit resilience, and automatic PATH broadcasting)*
 
-**macOS & Linux (Bash):**
+#### macOS & Linux Installation
 ```bash
 curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
 ```
 
 *(Or build from source with `cargo build --release`)*
+
+> [!TIP]
+> **Testing with Factory.ai or External Agent Runners:**  
+> If Factory.ai or your terminal was already open during installation, restart the Factory.ai app or open a new terminal window to pick up the updated PATH. Verify anywhere by running `engram --version`.
 
 ---
 
@@ -443,6 +457,7 @@ rules:
 
 ## 10. Security & Privacy
 
+- **Privacy Notice & Data Governance:** Review the complete [`installer/PRIVACY_NOTICE.txt`](installer/PRIVACY_NOTICE.txt) embedded in `EngramSetup.exe`. Engram never uploads source code, task prompts, or architectural decisions to any third party.
 - **100% Local Execution:** Engram makes **zero outbound network calls** and contains no cloud telemetry. Source code, tokens, and context payloads never leave your workstation.
 - **Deterministic Secret Redaction:** Regex pattern matching redacts API keys (`sk-...`, `ghp_...`, `AKIA...`), passwords, connection URIs (`postgres://`, `mongodb://`), and emails before file excerpts enter SQLite storage.
 - **Smart Ignores:** Automatically excludes `.env*`, `*.pem`, `*.key`, `.git/`, dependency folders (`node_modules/`, `vendor/`), and build output (`target/`, `dist/`).

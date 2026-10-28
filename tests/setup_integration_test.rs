@@ -22,7 +22,7 @@ fn temp_workspace(name: &str) -> PathBuf {
 #[test]
 fn test_setup_providers_target_matrix_and_scopes() {
     let providers = all_providers();
-    assert_eq!(providers.len(), 4, "Must have exactly 4 providers");
+    assert_eq!(providers.len(), 5, "Must have exactly 5 providers");
 
     let cursor = get_provider("cursor").expect("cursor provider must exist");
     assert_eq!(cursor.id(), "cursor");
@@ -45,10 +45,19 @@ fn test_setup_providers_target_matrix_and_scopes() {
     assert_eq!(windsurf.scope(), SetupScope::User);
     assert!(windsurf.capabilities().user_mcp);
 
+    let droid = get_provider("droid").expect("droid provider must exist");
+    assert_eq!(droid.id(), "droid");
+    assert_eq!(droid.scope(), SetupScope::Project);
+    assert!(droid.capabilities().project_mcp);
+    assert!(!droid.capabilities().user_mcp);
+
+    let factory_alias = get_provider("factory").expect("factory alias must resolve to droid provider");
+    assert_eq!(factory_alias.id(), "droid");
+
     // List targets output
     let list = list_targets();
     let supp = list["supported"].as_array().unwrap();
-    assert_eq!(supp.len(), 4);
+    assert_eq!(supp.len(), 5);
 
     // Verify instruction file paths strictly target project workspace root
     let dummy_root = PathBuf::from(if cfg!(windows) {
@@ -72,6 +81,10 @@ fn test_setup_providers_target_matrix_and_scopes() {
         windsurf.default_instruction_path(&dummy_root).unwrap(),
         dummy_root.join(".windsurfrules")
     );
+    assert_eq!(
+        droid.default_instruction_path(&dummy_root).unwrap(),
+        dummy_root.join("AGENTS.md")
+    );
 
     assert!(
         cursor
@@ -93,6 +106,12 @@ fn test_setup_providers_target_matrix_and_scopes() {
     );
     assert!(
         windsurf
+            .default_instruction_path(&dummy_root)
+            .unwrap()
+            .starts_with(&dummy_root)
+    );
+    assert!(
+        droid
             .default_instruction_path(&dummy_root)
             .unwrap()
             .starts_with(&dummy_root)
@@ -210,6 +229,113 @@ fn test_cursor_setup_lifecycle_dry_run_apply_and_remove() {
     assert!(
         !rules_file.exists(),
         ".cursorrules should be cleaned as it had zero user content"
+    );
+}
+
+#[test]
+fn test_factory_droid_setup_lifecycle_dry_run_apply_and_remove() {
+    let ws = temp_workspace("droid_lifecycle");
+    let factory_dir = ws.join(".factory");
+    fs::create_dir_all(&factory_dir).unwrap();
+    let mcp_file = factory_dir.join("mcp.json");
+    let agents_file = ws.join("AGENTS.md");
+
+    // 1. Dry run on clean workspace: must not modify disk
+    let dry_res = setup_client(&ws, "droid", true, false, false).unwrap();
+    assert_eq!(dry_res["dry_run"], true);
+    assert!(!mcp_file.exists(), "Dry run must not create config file");
+
+    let dry_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("factory".to_string()),
+            check: false,
+            dry_run: true,
+            apply: false,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(dry_orch.mode, "DRY_RUN");
+    assert_eq!(dry_orch.changes_applied, 0);
+    assert!(!mcp_file.exists());
+    assert!(!agents_file.exists());
+
+    // 2. Apply on clean workspace: creates .factory/mcp.json and AGENTS.md
+    let apply_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("droid".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(apply_orch.mode, "APPLIED");
+    assert_eq!(apply_orch.changes_applied, 2); // 1 mcp + 1 instruction
+    assert!(mcp_file.exists(), ".factory/mcp.json must be created");
+    assert!(agents_file.exists(), "AGENTS.md must be created");
+
+    let mcp_content = fs::read_to_string(&mcp_file).unwrap();
+    let mcp_json: serde_json::Value = serde_json::from_str(&mcp_content).unwrap();
+    assert!(mcp_json["mcpServers"]["engram"].is_object());
+    assert_eq!(
+        mcp_json["mcpServers"]["engram"]["args"].as_array().unwrap()[2],
+        "mcp"
+    );
+
+    let agents_content = fs::read_to_string(&agents_file).unwrap();
+    assert!(agents_content.contains(START_MARKER));
+    assert!(agents_content.contains(END_MARKER));
+    assert!(agents_content.contains("engram_preflight"));
+
+    // 3. Repeated Apply: Strict Idempotency
+    let reapply_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("factory".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        reapply_orch.changes_applied, 0,
+        "Repeated apply must be strictly idempotent"
+    );
+
+    let agents_reapply = fs::read_to_string(&agents_file).unwrap();
+    assert_eq!(agents_reapply.matches(START_MARKER).count(), 1);
+    assert_eq!(agents_reapply.matches(END_MARKER).count(), 1);
+
+    // 4. Surgical Remove
+    let remove_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("droid".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(remove_orch.mode, "REMOVED");
+    assert!(
+        !agents_file.exists(),
+        "AGENTS.md should be cleaned as it had zero user content"
     );
 }
 

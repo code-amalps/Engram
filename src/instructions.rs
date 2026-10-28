@@ -1,5 +1,5 @@
 //! Safe, non-destructive instruction file manager using managed delimiter blocks.
-//! Supports .github/copilot-instructions.md, .cursorrules, .windsurfrules, and CLAUDE.md.
+//! Supports .github/copilot-instructions.md, .cursorrules, .windsurfrules, CLAUDE.md, and AGENTS.md.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -326,6 +326,7 @@ pub const KNOWN_INSTRUCTION_FILES: &[(&str, &str)] = &[
     ("cursor", ".cursorrules"),
     ("windsurf", ".windsurfrules"),
     ("claude", "CLAUDE.md"),
+    ("droid", "AGENTS.md"),
 ];
 
 /// Formats a Turn-0 task-aware instruction body from a prepared task output.
@@ -419,7 +420,10 @@ pub fn resolve_instruction_targets(
                 .collect();
         }
         for (id, rel) in KNOWN_INSTRUCTION_FILES {
-            if c_lower == *id || (c_lower == "copilot" && *id == "vscode") {
+            if c_lower == *id
+                || (c_lower == "copilot" && *id == "vscode")
+                || ((c_lower == "factory" || c_lower == "factoryai") && *id == "droid")
+            {
                 return vec![root.join(rel)];
             }
         }

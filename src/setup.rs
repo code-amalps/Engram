@@ -1,5 +1,5 @@
 //! Safe, verified, capability-based editor and MCP setup for AI coding assistants.
-//! Supports Cursor, VS Code, Claude Desktop, and Windsurf through a provider/adapter architecture,
+//! Supports Cursor, VS Code, Claude Desktop, Windsurf, and Factory AI (Droid) through a provider/adapter architecture,
 //! with safe JSON merge, managed instruction blocks, conflict detection, and dry-run planning.
 
 use anyhow::{anyhow, bail, Result};
@@ -254,19 +254,57 @@ impl EditorProvider for WindsurfProvider {
     }
 }
 
+pub struct FactoryDroidProvider;
+impl EditorProvider for FactoryDroidProvider {
+    fn id(&self) -> &'static str {
+        "droid"
+    }
+    fn display_name(&self) -> &'static str {
+        "Factory AI (Droid)"
+    }
+    fn scope(&self) -> SetupScope {
+        SetupScope::Project
+    }
+    fn capabilities(&self) -> EditorCapabilities {
+        EditorCapabilities {
+            project_mcp: true,
+            user_mcp: false,
+            instruction_files: true,
+            supports_stdio: true,
+        }
+    }
+    fn default_config_path(&self, root: &Path) -> PathBuf {
+        root.join(".factory").join("mcp.json")
+    }
+    fn default_instruction_path(&self, root: &Path) -> Option<PathBuf> {
+        Some(root.join("AGENTS.md"))
+    }
+    fn detect(&self, root: &Path) -> DetectionConfidence {
+        if root.join(".factory").exists() || root.join("AGENTS.md").exists() {
+            DetectionConfidence::Confirmed
+        } else {
+            DetectionConfidence::NotDetected
+        }
+    }
+}
+
 pub fn all_providers() -> Vec<Box<dyn EditorProvider>> {
     vec![
         Box::new(CursorProvider),
         Box::new(VsCodeProvider),
         Box::new(ClaudeDesktopProvider),
         Box::new(WindsurfProvider),
+        Box::new(FactoryDroidProvider),
     ]
 }
 
 pub fn get_provider(id: &str) -> Option<Box<dyn EditorProvider>> {
+    let id_lower = id.to_lowercase();
     all_providers().into_iter().find(|p| {
         p.id().eq_ignore_ascii_case(id)
-            || p.display_name().to_lowercase().contains(&id.to_lowercase())
+            || p.display_name().to_lowercase().contains(&id_lower)
+            || (p.id() == "droid"
+                && (id_lower == "factory" || id_lower == "factoryai" || id_lower == "factory.ai"))
     })
 }
 
@@ -343,6 +381,21 @@ pub const SUPPORTED_TARGETS: &[EditorIntegration] = &[
         }),
         detect_fn: |root| WindsurfProvider.detect(root),
     },
+    EditorIntegration {
+        id: "droid",
+        display_name: "Factory AI (Droid)",
+        capabilities: EditorCapabilities {
+            project_mcp: true,
+            user_mcp: false,
+            instruction_files: true,
+            supports_stdio: true,
+        },
+        default_config_path: |root| FactoryDroidProvider.default_config_path(root),
+        default_instruction_path: Some(|root| {
+            FactoryDroidProvider.default_instruction_path(root).unwrap()
+        }),
+        detect_fn: |root| FactoryDroidProvider.detect(root),
+    },
 ];
 
 pub fn get_engram_binary_path() -> String {
@@ -357,7 +410,8 @@ pub fn list_targets() -> Value {
             "cursor (Cursor IDE: .cursor/mcp.json + .cursorrules)",
             "vscode (VS Code: .vscode/mcp.json + .github/copilot-instructions.md)",
             "claude (Claude Desktop: claude_desktop_config.json + CLAUDE.md)",
-            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)"
+            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)",
+            "droid / factory (Factory AI: .factory/mcp.json + AGENTS.md)"
         ]
     })
 }
@@ -371,7 +425,7 @@ pub fn setup_client(
 ) -> Result<Value> {
     let provider = get_provider(client).ok_or_else(|| {
         anyhow!(
-            "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
+            "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf, droid. Run 'engram setup --list' for details.",
             client
         )
     })?;
@@ -518,7 +572,7 @@ pub fn orchestrate_setup(root: &Path, opts: SetupOptions) -> Result<SetupReport>
     let providers: Vec<Box<dyn EditorProvider>> = if let Some(client) = &opts.client {
         vec![get_provider(client).ok_or_else(|| {
             anyhow!(
-                "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf. Run 'engram setup --list' for details.",
+                "Unsupported client '{}'. Supported: cursor, vscode, claude, windsurf, droid. Run 'engram setup --list' for details.",
                 client
             )
         })?]

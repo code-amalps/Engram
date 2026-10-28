@@ -191,6 +191,7 @@ Engram supports both MCP-connected IDEs and non-MCP environments through a non-d
 
 | Editor / Tool | MCP Protocol Target | Instruction Mechanism | Non-MCP Fallback |
 |---|---|---|---|
+| **Factory AI (Droid)** | `.factory/mcp.json` | `AGENTS.md` (managed block) | `engram prompt` |
 | **Cursor** | `.cursor/mcp.json` | `.cursorrules` (managed block) | `engram prompt` |
 | **VS Code (Copilot / Cline / Roo)** | `.vscode/mcp.json` | `.github/copilot-instructions.md` | `engram prompt` |
 | **Claude Desktop / Claude Code** | `claude_desktop_config.json` | `CLAUDE.md` (managed block) | `engram prompt` |
@@ -278,6 +279,7 @@ engram setup --check
 engram setup --apply
 
 # Or configure a specific editor explicitly:
+engram setup droid --apply     # Factory AI (Droid): writes .factory/mcp.json + AGENTS.md
 engram setup vscode --apply
 engram setup cursor --apply
 engram setup claude --apply
@@ -288,9 +290,32 @@ engram setup --remove          # Dry-run preview of removing Engram
 engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks
 ```
 
+> [!TIP]
+> ### 🤖 3-Step Foolproof Workflow for Factory AI / Droid (Non-Technical)
+> If you are using the **Factory AI desktop app**, simply open your project in a terminal and run these 3 commands:
+> 
+> ```bash
+> # Step 1: Initialize local governance & memory layer
+> engram init
+> 
+> # Step 2: Build local AST code graph (instant 1-3 second scan)
+> engram .
+> 
+> # Step 3: Connect Engram to Factory AI automatically
+> engram setup droid --apply
+> ```
+> 
+> *(Note: `engram setup factory --apply` also works identically)*
+> 
+> **Then restart your Factory AI app (or reopen your workspace folder).**  
+> 
+> **Why this solves high token consumption:**  
+> - Without Engram, Droid scans or dumps entire files across your codebase to answer queries, burning thousands of unnecessary tokens.
+> - With Engram connected, `AGENTS.md` and `.factory/mcp.json` give Droid precise, zero-turn AST context via `engram_preflight` and `engram_inspect_symbol`. Droid queries only the exact functions and types it needs, cutting token usage by over 80%.
+
 #### How Engram Protects Your Existing Files:
-- **Zero Rule Loss (Managed Blocks):** If `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
-- **Surgical JSON Merging:** When configuring `.vscode/mcp.json` or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
+- **Zero Rule Loss (Managed Blocks):** If `AGENTS.md`, `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
+- **Surgical JSON Merging:** When configuring `.factory/mcp.json`, `.vscode/mcp.json`, or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
 - **Clean Reversibility (`--remove`):** Running `engram setup --remove --apply` surgically removes the `"engram"` server entry without touching other servers, strips only the managed block from your instruction files without touching user content, and leaves 0 leftover artifacts.
 
 ---

@@ -1,5 +1,5 @@
 #define MyAppName "Engram"
-#define MyAppVersion "1.5.3"
+#define MyAppVersion "1.5.4"
 #define MyAppPublisher "Engram Team"
 #define MyAppURL "https://github.com/code-amalps/Engram"
 #define MyAppExeName "engram.exe"

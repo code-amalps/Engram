@@ -131,7 +131,7 @@ enum CommandLine {
     UpdateMemory { task_id: String },
     /// Inspect declared and resolved ecosystem packages and scripts
     Ecosystem,
-    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf)
+    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf, Factory AI)
     Setup {
         client: Option<String>,
         #[arg(long)]
@@ -179,7 +179,7 @@ enum CommandLine {
         /// Explicit target instruction file path for injection
         #[arg(long)]
         inject_target: Option<PathBuf>,
-        /// Client identifier for injection (vscode, cursor, claude, windsurf, all)
+        /// Client identifier for injection (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         inject_client: Option<String>,
         /// Dry run: show planned preparation and injection without modifying files or clipboard
@@ -196,7 +196,7 @@ enum CommandLine {
         /// Explicit target instruction file path (defaults to detected workspace instruction files)
         #[arg(long)]
         target: Option<PathBuf>,
-        /// Client identifier (vscode, cursor, claude, windsurf, all)
+        /// Client identifier (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         client: Option<String>,
         /// Dry run: show planned injection without writing files
@@ -1038,7 +1038,8 @@ fn run() -> Result<()> {
                             "cursor (Cursor IDE: .cursor/mcp.json + .cursorrules)",
                             "vscode (VS Code: .vscode/mcp.json + .github/copilot-instructions.md)",
                             "claude (Claude Desktop: claude_desktop_config.json + CLAUDE.md)",
-                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)"
+                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)",
+                            "droid / factory (Factory AI: .factory/mcp.json + AGENTS.md)"
                         ]
                     }))?;
                 } else {
@@ -1049,6 +1050,7 @@ fn run() -> Result<()> {
                     );
                     println!("  ✓ Claude:   claude_desktop_config.json     | CLAUDE.md");
                     println!("  ✓ Windsurf: mcp_config.json                | .windsurfrules");
+                    println!("  ✓ Factory:  .factory/mcp.json              | AGENTS.md");
                     println!("\nCommands:");
                     println!(
                         "  engram setup                   # Read-only auto-detection and dry-run plan"
@@ -1207,7 +1209,7 @@ fn run() -> Result<()> {
                     );
                     eprintln!("  Status: {}", res.completeness_status);
                     eprintln!(
-                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                     );
                     eprintln!(
                         "  Agent will skip get_context/preflight and start implementation directly."
@@ -1422,7 +1424,7 @@ fn run() -> Result<()> {
                         );
                         eprintln!("  Status: {}", res.completeness_status);
                         eprintln!(
-                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                         );
                     }
                 }

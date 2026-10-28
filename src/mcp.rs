@@ -215,19 +215,28 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     .collect()
             });
 
-            if let Some(ref pf) = planned_files_raw {
-                for p in pf {
-                    validate_workspace_path(&root, p)
-                        .map_err(|e| anyhow!("Planned file validation failed: {}", e))?;
-                }
+            // 1. Resolve planned files: extract explicitly supplied files or parse declarations directly
+            // from task prompt. Under NO circumstances seed authorized edit targets from ambient read context files.
+            let (core_task, parsed_planned) =
+                crate::flywheel::parse_task_and_planned_files(task, planned_files_raw);
+
+            for p in &parsed_planned {
+                validate_workspace_path(&root, p)
+                    .map_err(|e| anyhow!("Planned file validation failed: {}", e))?;
             }
 
+            let effective_planned = if parsed_planned.is_empty() {
+                None
+            } else {
+                Some(parsed_planned)
+            };
+
             // Adaptive bypass evaluation for small/trivial leaf tasks
-            let signals = crate::prompt::classify_task_complexity(task);
+            let signals = crate::prompt::classify_task_complexity(&core_task);
             if signals.classification == crate::prompt::TaskComplexity::Trivial && !no_bypass {
                 return Ok(json_result(json!({
                     "status": "BYPASS_TRIVIAL",
-                    "task": task,
+                    "task": core_task,
                     "classification": "TRIVIAL",
                     "reason": signals.reason,
                     "contract_id": Value::Null,
@@ -254,29 +263,15 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 })));
             }
 
-            // 1. Context compilation
-            let ctx = context(&root, task, budget)?;
-
-            // 2. Resolve planned files: if not explicitly supplied, seed from top context files (up to 5)
-            let mut effective_planned = planned_files_raw.unwrap_or_default();
-            if effective_planned.is_empty() {
-                for f in ctx.files.iter().take(5) {
-                    if !effective_planned.contains(&f.path) {
-                        effective_planned.push(f.path.clone());
-                    }
-                }
-            }
+            // 2. Context compilation
+            let ctx = context(&root, &core_task, budget)?;
 
             // 3. Preflight handshake and contract locking
             let preflight_opts = crate::flywheel::PreflightOptions {
-                task: task.to_string(),
+                task: core_task,
                 token_budget: budget,
                 forbidden_boundaries: forbidden,
-                planned_files: if effective_planned.is_empty() {
-                    None
-                } else {
-                    Some(effective_planned)
-                },
+                planned_files: effective_planned,
             };
             let preflight_res = crate::flywheel::preflight_task(&root, &preflight_opts)?;
 

@@ -1,6 +1,7 @@
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
+pub mod budget;
 pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
@@ -8,6 +9,7 @@ pub mod contract;
 pub mod doctor;
 pub mod drift;
 pub mod flywheel;
+pub mod frameworks;
 pub mod gc;
 pub mod git;
 pub mod git_history;
@@ -41,7 +43,7 @@ use std::{
 };
 
 use analyzer::analyze;
-use compiler::context;
+use compiler::context_scoped;
 use guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
 use manifest::detect_ecosystem;
 use mcp::mcp;
@@ -83,6 +85,12 @@ enum CommandLine {
         token_budget: usize,
         #[arg(long)]
         explain: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Ground a task, detect gaps, and generate task record
     AnalyzeTask {
@@ -131,7 +139,7 @@ enum CommandLine {
     UpdateMemory { task_id: String },
     /// Inspect declared and resolved ecosystem packages and scripts
     Ecosystem,
-    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf)
+    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf, Factory AI)
     Setup {
         client: Option<String>,
         #[arg(long)]
@@ -151,7 +159,11 @@ enum CommandLine {
     },
     /// Prepare task-aware context, lock preflight contract to baseline commit, and emit Turn-0 prompt
     Prepare {
-        task: String,
+        /// Task description and optional planned files (can be passed via --task or as positional argument)
+        #[arg(long, short = 't')]
+        task: Option<String>,
+        #[arg(value_name = "TASK")]
+        task_pos: Option<String>,
         #[arg(long, default_value_t = 1200)]
         token_budget: usize,
         #[arg(long, default_value = "markdown")]
@@ -175,9 +187,12 @@ enum CommandLine {
         /// Explicit target instruction file path for injection
         #[arg(long)]
         inject_target: Option<PathBuf>,
-        /// Client identifier for injection (vscode, cursor, claude, windsurf, all)
+        /// Client identifier for injection (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         inject_client: Option<String>,
+        /// Dry run: show planned preparation and injection without modifying files or clipboard
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Inject task-aware Turn-0 context and contract directives into workspace instruction files
     Inject {
@@ -189,7 +204,7 @@ enum CommandLine {
         /// Explicit target instruction file path (defaults to detected workspace instruction files)
         #[arg(long)]
         target: Option<PathBuf>,
-        /// Client identifier (vscode, cursor, claude, windsurf, all)
+        /// Client identifier (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         client: Option<String>,
         /// Dry run: show planned injection without writing files
@@ -222,9 +237,19 @@ enum CommandLine {
         /// Lock preflight Change Contract to baseline commit and inject directives
         #[arg(long)]
         lock_contract: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
-    Mcp,
+    Mcp {
+        /// Expose all 16 specialist tools instead of the lean default 4-tool surface
+        #[arg(long)]
+        all_tools: bool,
+    },
     /// Run scientific empirical benchmarks evaluating discovery, grounding, contracts, and memory lift
     Bench {
         #[arg(long, short = 'v')]
@@ -306,6 +331,8 @@ enum CommandLine {
     },
     /// Policy-driven Change Guard for local Git and CI pull-request workflows
     Guard {
+        #[command(subcommand)]
+        action: Option<GuardAction>,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -344,13 +371,58 @@ enum CommandLine {
     },
 }
 
-#[derive(Subcommand)]
-pub enum HookAction {
+#[derive(Subcommand, Debug, Clone)]
+pub enum GuardAction {
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
+    Install {
+        /// Dry run: show what would be installed without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Uninstall pre-commit hook from Git hooks directory
+    Uninstall {
+        /// Dry run: show what would be uninstalled without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Execute Git pre-commit validation of staged changes
-    Run {
+    #[command(name = "check", alias = "run")]
+    Check {
+        /// Path to custom policy configuration file (.toml)
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Base commit or ref to compare against (e.g. origin/main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Explicit Change Contract JSON file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Check staged index changes only (pre-commit mode)
+        #[arg(long)]
+        staged: bool,
         /// Enforce strict policy (treat unexpected expansions as blocking)
         #[arg(long)]
         strict: bool,
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Detailed diagnostic mode explaining checks executed and skipped
+        #[arg(long, alias = "explain")]
+        diagnostic: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HookAction {
+    /// Execute Git pre-commit validation of staged changes
+    #[command(name = "pre-commit", alias = "run")]
+    PreCommit {
+        /// Enforce strict policy (treat unexpected expansions as blocking)
+        #[arg(long)]
+        strict: bool,
+        /// Explicitly require an active Change Contract (fail if none exists)
+        #[arg(long)]
+        enforce_contract: bool,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -361,13 +433,13 @@ pub enum HookAction {
         #[arg(long)]
         json: bool,
     },
-    /// Install pre-commit hook into .git/hooks/pre-commit
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
     Install {
         /// Dry run: show what would be installed without modifying files
         #[arg(long)]
         dry_run: bool,
     },
-    /// Uninstall pre-commit hook from .git/hooks/pre-commit
+    /// Uninstall pre-commit hook from Git hooks directory
     Uninstall {
         /// Dry run: show what would be uninstalled without modifying files
         #[arg(long)]
@@ -583,8 +655,16 @@ fn run() -> Result<()> {
             task,
             token_budget,
             explain,
+            subpath,
+            language,
         }) => {
-            let res = context(root, &task, token_budget)?;
+            let res = context_scoped(
+                root,
+                &task,
+                token_budget,
+                subpath.as_deref(),
+                language.as_deref(),
+            )?;
             if force_json {
                 print_json(res)?;
             } else {
@@ -1027,7 +1107,8 @@ fn run() -> Result<()> {
                             "cursor (Cursor IDE: .cursor/mcp.json + .cursorrules)",
                             "vscode (VS Code: .vscode/mcp.json + .github/copilot-instructions.md)",
                             "claude (Claude Desktop: claude_desktop_config.json + CLAUDE.md)",
-                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)"
+                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)",
+                            "droid / factory (Factory AI: .factory/mcp.json + AGENTS.md)"
                         ]
                     }))?;
                 } else {
@@ -1038,6 +1119,7 @@ fn run() -> Result<()> {
                     );
                     println!("  ✓ Claude:   claude_desktop_config.json     | CLAUDE.md");
                     println!("  ✓ Windsurf: mcp_config.json                | .windsurfrules");
+                    println!("  ✓ Factory:  .factory/mcp.json              | AGENTS.md");
                     println!("\nCommands:");
                     println!(
                         "  engram setup                   # Read-only auto-detection and dry-run plan"
@@ -1130,6 +1212,7 @@ fn run() -> Result<()> {
         }
         Some(CommandLine::Prepare {
             task,
+            task_pos,
             token_budget,
             format,
             json,
@@ -1140,19 +1223,24 @@ fn run() -> Result<()> {
             inject,
             inject_target,
             inject_client,
+            dry_run,
         }) => {
+            let task_str = task.or(task_pos).ok_or_else(|| {
+                anyhow!("Task description required. Provide --task \"<goal>\" or pass task as an argument.")
+            })?;
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
                 _ => prompt::PromptFormat::Markdown,
             };
-            let copy_clip = !no_clipboard && !stdout;
+            let copy_clip = !no_clipboard && !stdout && !dry_run;
+            let write_f = write_file && !dry_run;
             let mut res = prompt::prepare_task_context_adaptive(
                 root,
-                &task,
+                &task_str,
                 token_budget,
                 fmt,
                 copy_clip,
-                write_file,
+                write_f,
                 no_bypass,
             )?;
             if inject {
@@ -1161,7 +1249,7 @@ fn run() -> Result<()> {
                     &res,
                     inject_target.as_deref(),
                     inject_client.as_deref(),
-                    false,
+                    dry_run,
                 )?;
                 res.injected_files = reports
                     .into_iter()
@@ -1173,6 +1261,9 @@ fn run() -> Result<()> {
             } else {
                 if stdout || !res.clipboard_copied {
                     println!("{}", res.content);
+                }
+                if dry_run {
+                    eprintln!("ℹ️ DRY-RUN ONLY. No files or clipboard were modified.");
                 }
                 if res.bypass_active {
                     eprintln!("⚡ Adaptive Bypass Active: Trivial task detected.");
@@ -1187,7 +1278,7 @@ fn run() -> Result<()> {
                     );
                     eprintln!("  Status: {}", res.completeness_status);
                     eprintln!(
-                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                     );
                     eprintln!(
                         "  Agent will skip get_context/preflight and start implementation directly."
@@ -1345,8 +1436,9 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Hook { action }) => match action {
-            HookAction::Run {
+            HookAction::PreCommit {
                 strict,
+                enforce_contract,
                 policy,
                 file,
                 json,
@@ -1354,6 +1446,7 @@ fn run() -> Result<()> {
                 let code = hook::run_hook(
                     root,
                     strict,
+                    enforce_contract,
                     policy.as_deref(),
                     file.as_deref(),
                     force_json || json,
@@ -1378,6 +1471,8 @@ fn run() -> Result<()> {
             stdout,
             no_clipboard,
             lock_contract,
+            subpath,
+            language,
         }) => {
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
@@ -1385,8 +1480,16 @@ fn run() -> Result<()> {
             };
             let copy_clip = !no_clipboard && !stdout;
             if lock_contract {
-                let res =
-                    prompt::prepare_task_context(root, &task, token_budget, fmt, copy_clip, false)?;
+                let res = prompt::prepare_task_context_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    false,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1400,12 +1503,20 @@ fn run() -> Result<()> {
                         );
                         eprintln!("  Status: {}", res.completeness_status);
                         eprintln!(
-                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                         );
                     }
                 }
             } else {
-                let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
+                let res = prompt::generate_prompt_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1425,7 +1536,14 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Some(CommandLine::Mcp) => mcp(root)?,
+        Some(CommandLine::Mcp { all_tools }) => {
+            if all_tools {
+                unsafe {
+                    std::env::set_var("ENGRAM_SPECIALIST_TOOLS", "1");
+                }
+            }
+            mcp(root)?;
+        }
         Some(CommandLine::Bench { verbose, external }) => {
             if let Some(ext_path) = external {
                 let results = bench::run_external_benchmark(&ext_path)?;
@@ -1587,6 +1705,7 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Guard {
+            action,
             policy,
             base,
             file,
@@ -1598,6 +1717,53 @@ fn run() -> Result<()> {
             uninstall_hook,
             dry_run,
         }) => {
+            if let Some(act) = action {
+                match act {
+                    GuardAction::Install { dry_run: dr } => {
+                        let msg = ci_guard::install_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Uninstall { dry_run: dr } => {
+                        let msg = ci_guard::uninstall_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Check {
+                        policy: p,
+                        base: b,
+                        file: f,
+                        staged: s,
+                        strict: st,
+                        format: fmt,
+                        diagnostic: diag,
+                    } => {
+                        let opts = ci_guard::GuardOptions {
+                            policy_path: p.or(policy),
+                            base_commit: b.or(base),
+                            contract_file: f.or(file),
+                            staged: s || staged,
+                            strict: st || strict,
+                            enforce_contract: false,
+                            diagnostic: diag || diagnostic,
+                        };
+                        let res = ci_guard::run_guard(root, &opts);
+                        let is_json = force_json
+                            || fmt.to_ascii_lowercase() == "json"
+                            || format.to_ascii_lowercase() == "json";
+                        if is_json {
+                            print_json(&res)?;
+                        } else {
+                            print!("{}", ci_guard::format_guard_terminal(&res, opts.diagnostic));
+                        }
+                        if res.exit_code != 0 {
+                            std::process::exit(res.exit_code);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
             if install_hook {
                 let msg = ci_guard::install_guard_hook(root, dry_run)?;
                 println!("{msg}");
@@ -1615,6 +1781,7 @@ fn run() -> Result<()> {
                 contract_file: file,
                 staged,
                 strict,
+                enforce_contract: false,
                 diagnostic,
             };
 

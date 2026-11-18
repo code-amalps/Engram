@@ -191,6 +191,7 @@ Engram supports both MCP-connected IDEs and non-MCP environments through a non-d
 
 | Editor / Tool | MCP Protocol Target | Instruction Mechanism | Non-MCP Fallback |
 |---|---|---|---|
+| **Factory AI (Droid)** | `.factory/mcp.json` | `AGENTS.md` (managed block) | `engram prompt` |
 | **Cursor** | `.cursor/mcp.json` | `.cursorrules` (managed block) | `engram prompt` |
 | **VS Code (Copilot / Cline / Roo)** | `.vscode/mcp.json` | `.github/copilot-instructions.md` | `engram prompt` |
 | **Claude Desktop / Claude Code** | `claude_desktop_config.json` | `CLAUDE.md` (managed block) | `engram prompt` |
@@ -207,19 +208,33 @@ Engram supports both MCP-connected IDEs and non-MCP environments through a non-d
 
 ### Step 1: Install Engram Binary
 
-No compiler, Node.js, or Python runtime required. Downloads the self-contained binary, verifies SHA256 integrity, and adds Engram to your `PATH`:
+No compiler, Node.js, or Python runtime required.
 
-**Windows (PowerShell):**
+#### Windows Installation
+
+**Option A: 1-Click GUI Installer (`.exe`) [Recommended for Windows & Factory.ai]**
+Download and run [**`EngramSetup.exe`**](https://github.com/code-amalps/Engram/releases/latest/download/EngramSetup.exe) (available under latest [GitHub Releases](https://github.com/code-amalps/Engram/releases/latest)):
+- **Privacy & Governance Agreement:** Embedded Privacy Notice confirms 100% local-first data processing.
+- **Automatic User PATH Setup:** Safely adds `%LOCALAPPDATA%\Programs\Engram\bin` to User PATH.
+- **Immediate Process Broadcast (`WM_SETTINGCHANGE`):** Notifies external agent runners (e.g. Factory.ai, VS Code, Cursor) without requiring a system reboot.
+- **Clean Uninstaller:** Registers standard Windows Add/Remove Programs uninstaller.
+
+**Option B: PowerShell One-Liner (Automated Script)**
 ```powershell
 iwr -useb https://raw.githubusercontent.com/code-amalps/Engram/main/install.ps1 | iex
 ```
+*(Includes fail-closed SHA-256 checksum verification, GitHub API rate-limit resilience, and automatic PATH broadcasting)*
 
-**macOS & Linux (Bash):**
+#### macOS & Linux Installation
 ```bash
 curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
 ```
 
 *(Or build from source with `cargo build --release`)*
+
+> [!TIP]
+> **Testing with Factory.ai or External Agent Runners:**  
+> If Factory.ai or your terminal was already open during installation, restart the Factory.ai app or open a new terminal window to pick up the updated PATH. Verify anywhere by running `engram --version`.
 
 ---
 
@@ -264,6 +279,7 @@ engram setup --check
 engram setup --apply
 
 # Or configure a specific editor explicitly:
+engram setup droid --apply     # Factory AI (Droid): writes .factory/mcp.json + AGENTS.md
 engram setup vscode --apply
 engram setup cursor --apply
 engram setup claude --apply
@@ -274,9 +290,32 @@ engram setup --remove          # Dry-run preview of removing Engram
 engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks
 ```
 
+> [!TIP]
+> ### 🤖 3-Step Foolproof Workflow for Factory AI / Droid (Non-Technical)
+> If you are using the **Factory AI desktop app**, simply open your project in a terminal and run these 3 commands:
+> 
+> ```bash
+> # Step 1: Initialize local governance & memory layer
+> engram init
+> 
+> # Step 2: Build local AST code graph (instant 1-3 second scan)
+> engram .
+> 
+> # Step 3: Connect Engram to Factory AI automatically
+> engram setup droid --apply
+> ```
+> 
+> *(Note: `engram setup factory --apply` also works identically)*
+> 
+> **Then restart your Factory AI app (or reopen your workspace folder).**  
+> 
+> **Why this solves high token consumption:**  
+> - Without Engram, Droid scans or dumps entire files across your codebase to answer queries, burning thousands of unnecessary tokens.
+> - With Engram connected, `AGENTS.md` and `.factory/mcp.json` give Droid precise, zero-turn AST context via `engram_preflight` and `engram_inspect_symbol`. Droid queries only the exact functions and types it needs, cutting token usage by over 80%.
+
 #### How Engram Protects Your Existing Files:
-- **Zero Rule Loss (Managed Blocks):** If `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
-- **Surgical JSON Merging:** When configuring `.vscode/mcp.json` or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
+- **Zero Rule Loss (Managed Blocks):** If `AGENTS.md`, `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
+- **Surgical JSON Merging:** When configuring `.factory/mcp.json`, `.vscode/mcp.json`, or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
 - **Clean Reversibility (`--remove`):** Running `engram setup --remove --apply` surgically removes the `"engram"` server entry without touching other servers, strips only the managed block from your instruction files without touching user content, and leaves 0 leftover artifacts.
 
 ---
@@ -443,6 +482,7 @@ rules:
 
 ## 10. Security & Privacy
 
+- **Privacy Notice & Data Governance:** Review the complete [`installer/PRIVACY_NOTICE.txt`](installer/PRIVACY_NOTICE.txt) embedded in `EngramSetup.exe`. Engram never uploads source code, task prompts, or architectural decisions to any third party.
 - **100% Local Execution:** Engram makes **zero outbound network calls** and contains no cloud telemetry. Source code, tokens, and context payloads never leave your workstation.
 - **Deterministic Secret Redaction:** Regex pattern matching redacts API keys (`sk-...`, `ghp_...`, `AKIA...`), passwords, connection URIs (`postgres://`, `mongodb://`), and emails before file excerpts enter SQLite storage.
 - **Smart Ignores:** Automatically excludes `.env*`, `*.pem`, `*.key`, `.git/`, dependency folders (`node_modules/`, `vendor/`), and build output (`target/`, `dist/`).

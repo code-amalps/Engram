@@ -889,6 +889,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 PackageOrigin::External => ("EXTERNAL", 0.95),
             };
 
+            let is_external = crate::analyzer::is_external_target(&target);
             rels.push(Relationship {
                 source: rel_path.to_string(),
                 target,
@@ -896,6 +897,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 evidence: evidence.to_string(),
                 confidence,
                 line: imp.line,
+                is_external,
             });
         }
     }
@@ -925,6 +927,7 @@ pub fn convert_go_ast_to_engram_with_root(
                     evidence: "EXTRACTED".to_string(),
                     confidence: 0.95,
                     line: iface.line,
+                    is_external: false,
                 });
             }
         }
@@ -940,6 +943,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 evidence: "NAMING_CONVENTION".to_string(),
                 confidence: 0.95,
                 line: 1,
+                is_external: false,
             });
         }
     }
@@ -987,6 +991,7 @@ pub fn infer_cross_file_go_interfaces(files: &[(&str, &GoFileAst)]) -> Vec<Relat
                             evidence: "EXTRACTED".to_string(),
                             confidence: 0.95,
                             line,
+                            is_external: false,
                         });
                     }
                 }

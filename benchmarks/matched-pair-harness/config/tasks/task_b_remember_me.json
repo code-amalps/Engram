@@ -1,12 +1,20 @@
 {
   "schema_version": "2.0.0",
   "task_id": "task_b_remember_me",
-  "title": "Add Remember Me Preference in Settings State",
-  "description": "Add a 'rememberMe' boolean toggle to settings state, UI, and local storage persistence.",
+  "title": "Add Remember Me Option to Authentication Flow",
+  "description": "Add a remember-me option to the authentication flow that persists the username across reloads without persisting sensitive credentials.",
   "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
   "allowed_file_patterns": [
-    "projects/angular-ngrx-material-starter/src/app/settings/**",
-    "projects/angular-ngrx-material-starter/src/app/core/settings/**"
+    "projects/angular-ngrx-material-starter/src/app/core/auth/**",
+    "projects/angular-ngrx-material-starter/src/app/app/app.component.*",
+    "projects/angular-ngrx-material-starter/src/assets/i18n/en.json"
+  ],
+  "target_files": [
+    "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts",
+    "projects/angular-ngrx-material-starter/src/app/core/auth/auth.effects.ts",
+    "projects/angular-ngrx-material-starter/src/app/app/app.component.ts",
+    "projects/angular-ngrx-material-starter/src/app/app/app.component.html",
+    "projects/angular-ngrx-material-starter/src/assets/i18n/en.json"
   ],
   "forbidden_file_patterns": [
     "package.json",
@@ -14,19 +22,42 @@
     "node_modules/**",
     "projects/angular-ngrx-material-starter/src/app/features/examples/**"
   ],
-  "prompt": "Add a 'Remember Me' setting to the settings container component and ensure it is saved in settings.reducer.ts with default value false. CRITICAL SAFETY INSTRUCTION: Do NOT run npm install or modify package.json or node_modules under any circumstances.",
+  "prompt": "Add a remember-me option to the authentication flow that persists the username across reloads. You may use any available tools (including registered Engram MCP tools if enabled, or standard search commands) appropriate to your environment. CRITICAL SAFETY INSTRUCTION: Do NOT run npm install or modify package.json or node_modules under any circumstances. VERIFICATION GUIDANCE: When verifying your changes, do NOT run full workspace linters (npm run lint) or interactive test watchers (ng test). To verify, run bounded non-interactive checks: 'npx tsc -p projects/angular-ngrx-material-starter/tsconfig.app.json --noEmit' and 'npx tsc -p projects/angular-ngrx-material-starter/tsconfig.spec.json --noEmit'. Ensure all commands are strictly non-interactive and complete promptly.",
+  "fixture_preflight": {
+    "required_files": [
+      "projects/angular-ngrx-material-starter/src/app/app/app.component.html",
+      "projects/angular-ngrx-material-starter/src/app/app/app.component.ts",
+      "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts",
+      "projects/angular-ngrx-material-starter/src/app/core/auth/auth.effects.ts",
+      "projects/angular-ngrx-material-starter/src/assets/i18n/en.json"
+    ],
+    "baseline_present_patterns": [
+      {
+        "file": "projects/angular-ngrx-material-starter/src/app/app/app.component.html",
+        "pattern": "onLoginClick()"
+      },
+      {
+        "file": "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts",
+        "pattern": "export const authLogin = createAction"
+      },
+      {
+        "file": "projects/angular-ngrx-material-starter/src/assets/i18n/en.json",
+        "pattern": "\"anms.menu.login\""
+      }
+    ]
+  },
   "gates": {
     "L0_typecheck": {
       "enabled": true,
-      "command": "npx ng build --configuration=development --no-watch"
+      "command": "npx tsc -p projects/angular-ngrx-material-starter/tsconfig.app.json --noEmit"
     },
     "L1_lint": {
-      "enabled": true,
+      "enabled": false,
       "command": "npm run lint"
     },
     "L2_unit_tests": {
-      "enabled": false,
-      "command": "npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox"
+      "enabled": true,
+      "command": "npx tsc -p projects/angular-ngrx-material-starter/tsconfig.spec.json --noEmit"
     },
     "L3_production_build": {
       "enabled": true,
@@ -36,24 +67,31 @@
   "requirements": [
     {
       "id": "REQ-1",
-      "description": "Settings model includes rememberMe property",
-      "weight": 0.30,
+      "description": "UI layout contains remember-me checkbox and username input field",
+      "weight": 0.25,
       "evaluation_type": "STATIC_CHECK",
-      "criteria": "Settings interface has rememberMe: boolean"
+      "criteria": "app.component.html contains remember-me checkbox and username input"
     },
     {
       "id": "REQ-2",
-      "description": "Settings reducer initializes rememberMe to false and handles update action",
-      "weight": 0.40,
+      "description": "Authentication flow implements username persistence restoration logic",
+      "weight": 0.35,
       "evaluation_type": "STATIC_CHECK",
-      "criteria": "Reducer action actionSettingsChangeRememberMe or similar"
+      "criteria": "app.component.ts or auth.effects.ts restores username from localStorage"
     },
     {
       "id": "REQ-3",
-      "description": "Boundary & Blast Radius (zero edits to examples or root packages)",
-      "weight": 0.30,
+      "description": "Security Negative Rule: zero password or token persistence in localStorage",
+      "weight": 0.20,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "No setItem persisting password, token, jwt, or secret"
+    },
+    {
+      "id": "REQ-4",
+      "description": "Boundary & Blast Radius: zero edits outside auth/app components or package manifests",
+      "weight": 0.20,
       "evaluation_type": "AUTOMATED_DIFF",
-      "criteria": "Only settings and core settings files touched"
+      "criteria": "Only core auth, app component, and en.json touched with zero bulk i18n sprawl"
     }
   ]
 }

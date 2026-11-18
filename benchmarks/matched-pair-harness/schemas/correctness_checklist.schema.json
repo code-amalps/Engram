@@ -19,6 +19,8 @@
     "task_id": { "type": "string" },
     "title": { "type": "string" },
     "description": { "type": "string" },
+    "read_only": { "type": "boolean" },
+    "requires_dependencies": { "type": "boolean" },
     "baseline_commit": { "type": "string" },
     "allowed_file_patterns": {
       "type": "array",
@@ -85,12 +87,37 @@
     },
     "fixture_preflight": {
       "type": "object",
-      "required": ["target_file", "original_text", "expected_text"],
       "properties": {
         "target_file": { "type": "string" },
         "original_text": { "type": "string" },
         "expected_text": { "type": "string" },
-        "expected_occurrences": { "type": "integer" }
+        "expected_occurrences": { "type": "integer" },
+        "required_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "baseline_present_patterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "pattern"],
+            "properties": {
+              "file": { "type": "string" },
+              "pattern": { "type": "string" }
+            }
+          }
+        },
+        "baseline_absent_patterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "pattern"],
+            "properties": {
+              "file": { "type": "string" },
+              "pattern": { "type": "string" }
+            }
+          }
+        }
       }
     }
   }

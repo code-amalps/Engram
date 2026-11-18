@@ -589,15 +589,25 @@ impl SandboxToolDispatcher {
                 }
 
                 // If rustup home exists, grant read/execute access so cargo can locate toolchains
-                if let Ok(rustup) = std::env::var("RUSTUP_HOME") {
-                    let rpath = PathBuf::from(rustup);
+                let rustup_path = std::env::var("RUSTUP_HOME")
+                    .map(PathBuf::from)
+                    .ok()
+                    .or_else(|| {
+                        std::env::var("USERPROFILE")
+                            .map(|u| PathBuf::from(u).join(".rustup"))
+                            .ok()
+                    });
+                if let Some(rpath) = rustup_path {
                     if rpath.exists() {
                         let _ = profile.grant_path_access(&rpath, GENERIC_READ_EXECUTE);
-                    }
-                } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
-                    let default_rustup = PathBuf::from(userprofile).join(".rustup");
-                    if default_rustup.exists() {
-                        let _ = profile.grant_path_access(&default_rustup, GENERIC_READ_EXECUTE);
+                        let settings_file = rpath.join("settings.toml");
+                        if settings_file.exists() {
+                            let _ = profile.grant_path_access(&settings_file, GENERIC_READ_EXECUTE);
+                        }
+                        let toolchains_dir = rpath.join("toolchains");
+                        if toolchains_dir.exists() {
+                            let _ = profile.grant_path_access(&toolchains_dir, GENERIC_READ_EXECUTE);
+                        }
                     }
                 }
 

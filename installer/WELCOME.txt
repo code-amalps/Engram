@@ -1,0 +1,19 @@
+================================================================================
+Welcome to Engram Setup
+================================================================================
+
+Engram delivers local engineering intelligence, architectural guardrails,
+and single-shot task preparation for AI coding agents (Factory.ai, Copilot,
+Cursor, Windsurf).
+
+What this installer will do:
+  1. Install engram.exe into your user profile:
+     %LOCALAPPDATA%\Programs\Engram\bin\engram.exe
+  2. Permanently add Engram to your Windows User PATH environment variable.
+  3. Broadcast environment changes so all new terminal windows, command
+     prompts, and AI agents (such as Factory.ai) immediately recognize
+     the `engram` command without requiring a computer reboot.
+  4. Register a clean uninstaller in Windows Settings / Add or Remove Programs.
+
+No administrator privileges or UAC elevation required.
+================================================================================

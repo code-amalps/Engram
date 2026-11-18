@@ -175,7 +175,7 @@ pub fn tool_error(msg: impl Into<String>) -> Value {
 pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
     let root = root_path(root)?;
     match name {
-        "engram_get_context" => {
+        "engram_prepare_task" | "engram_prepare" => {
             let task = args["task"].as_str().unwrap_or("").trim();
             if task.is_empty() {
                 bail!("Task description must not be empty");
@@ -184,11 +184,231 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if budget == 0 {
                 bail!("Token budget must be greater than 0");
             }
+            let no_bypass = args["no_bypass"]
+                .as_bool()
+                .or_else(|| args["force_no_bypass"].as_bool())
+                .unwrap_or(false);
             let details = args["details"]
                 .as_bool()
                 .or_else(|| args["verbose"].as_bool())
                 .unwrap_or(false);
-            let ctx = context(&root, task, budget)?;
+
+            let forbidden_raw: Option<Vec<String>> = args["forbidden"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            });
+
+            let forbidden = if let Some(fb) = forbidden_raw {
+                for p in &fb {
+                    validate_workspace_path(&root, p)
+                        .map_err(|e| anyhow!("Forbidden boundary validation failed: {}", e))?;
+                }
+                Some(fb)
+            } else {
+                None
+            };
+
+            let planned_files_raw: Option<Vec<String>> =
+                args["planned_files"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                });
+
+            // 1. Resolve planned files: extract explicitly supplied files or parse declarations directly
+            // from task prompt. Under NO circumstances seed authorized edit targets from ambient read context files.
+            let (core_task, parsed_planned) =
+                crate::flywheel::parse_task_and_planned_files(task, planned_files_raw);
+
+            for p in &parsed_planned {
+                validate_workspace_path(&root, p)
+                    .map_err(|e| anyhow!("Planned file validation failed: {}", e))?;
+            }
+
+            let effective_planned = if parsed_planned.is_empty() {
+                None
+            } else {
+                Some(parsed_planned)
+            };
+
+            // Adaptive bypass evaluation for small/trivial leaf tasks
+            let signals = crate::prompt::classify_task_complexity(&core_task);
+            if signals.classification == crate::prompt::TaskComplexity::Trivial && !no_bypass {
+                return Ok(json_result(json!({
+                    "status": "BYPASS_TRIVIAL",
+                    "task": core_task,
+                    "classification": "TRIVIAL",
+                    "reason": signals.reason,
+                    "contract_id": Value::Null,
+                    "contract_version": Value::Null,
+                    "baseline_commit": Value::Null,
+                    "boundaries": {
+                        "expected_files": Value::Array(Vec::new()),
+                        "expected_modules": Value::Array(Vec::new()),
+                        "forbidden_boundaries": Value::Array(Vec::new()),
+                    },
+                    "context": {
+                        "target_files": Value::Array(Vec::new()),
+                        "governing_rules": Value::Array(Vec::new()),
+                        "cochange_warnings": Value::Array(Vec::new()),
+                        "relevant_decisions": Value::Array(Vec::new()),
+                        "ambiguity_gaps": Value::Array(Vec::new()),
+                        "token_budget": budget,
+                        "estimated_tokens": 0,
+                    },
+                    "blocking_violations": Value::Array(Vec::new()),
+                    "is_reused_contract": false,
+                    "reused_reason": Value::Null,
+                    "next_action": "Task classified as trivial leaf edit. Proceed directly to implementation without Change Contract overhead. Call engram_postflight only if compliance audit is desired."
+                })));
+            }
+
+            // 2. Context compilation
+            let ctx = context(&root, &core_task, budget)?;
+
+            // 3. Preflight handshake and contract locking
+            let preflight_opts = crate::flywheel::PreflightOptions {
+                task: core_task,
+                token_budget: budget,
+                forbidden_boundaries: forbidden,
+                planned_files: effective_planned,
+            };
+            let preflight_res = crate::flywheel::preflight_task(&root, &preflight_opts)?;
+
+            // 4. Return structured response
+            if details {
+                Ok(json_result(json!({
+                    "status": match preflight_res.status {
+                        crate::flywheel::PreflightStatus::ReadyForImplementation => "READY",
+                        crate::flywheel::PreflightStatus::Blocked => "BLOCKED",
+                    },
+                    "contract_id": preflight_res.contract_id,
+                    "contract_version": preflight_res.contract_version,
+                    "baseline_commit": preflight_res.baseline_commit,
+                    "task_goal": preflight_res.task_goal,
+                    "preflight": serde_json::to_value(&preflight_res)?,
+                    "context": serde_json::to_value(&ctx)?,
+                    "is_reused_contract": preflight_res.is_reused_contract,
+                    "reused_reason": preflight_res.reused_reason,
+                    "next_action": if preflight_res.status == crate::flywheel::PreflightStatus::Blocked {
+                        "Reconcile blocking violations before modifying code or request human override."
+                    } else if preflight_res.is_reused_contract {
+                        "Valid Change Contract active. Proceed to edit expected files."
+                    } else {
+                        "Change Contract locked. Proceed to edit expected files. Re-run engram_prepare_task if new files are needed."
+                    }
+                })))
+            } else {
+                let status_str = match preflight_res.status {
+                    crate::flywheel::PreflightStatus::ReadyForImplementation => "READY",
+                    crate::flywheel::PreflightStatus::Blocked => "BLOCKED",
+                };
+                let target_files: Vec<Value> = ctx
+                    .files
+                    .iter()
+                    .take(8)
+                    .map(|f| {
+                        json!({
+                            "path": f.path,
+                            "level": f.level,
+                            "score": (f.score * 100.0).round() / 100.0,
+                        })
+                    })
+                    .collect();
+                let governing_rules: Vec<String> = preflight_res
+                    .governing_policies
+                    .iter()
+                    .take(5)
+                    .map(|p| format!("{}: {}", p.id, p.title))
+                    .collect();
+                let cochange_warnings: Vec<String> =
+                    ctx.cochange_alerts.iter().take(5).cloned().collect();
+                let relevant_decisions: Vec<String> =
+                    ctx.relevant_memories.iter().take(5).cloned().collect();
+                let blocking_violations =
+                    if preflight_res.status == crate::flywheel::PreflightStatus::Blocked {
+                        preflight_res.ambiguity_gaps.clone()
+                    } else {
+                        Vec::new()
+                    };
+                let next_action = if preflight_res.status
+                    == crate::flywheel::PreflightStatus::Blocked
+                {
+                    "Reconcile blocking violations before modifying code or request human override."
+                } else if preflight_res.is_reused_contract {
+                    "Valid Change Contract active. Proceed to edit expected files."
+                } else {
+                    "Change Contract locked. Proceed to edit expected files. Re-run engram_prepare_task if new files are needed."
+                };
+
+                Ok(json_result(json!({
+                    "status": status_str,
+                    "contract_id": preflight_res.contract_id,
+                    "contract_version": preflight_res.contract_version,
+                    "baseline_commit": preflight_res.baseline_commit,
+                    "task_goal": preflight_res.task_goal,
+                    "boundaries": {
+                        "expected_files": preflight_res.expected_files,
+                        "expected_modules": preflight_res.expected_modules,
+                        "forbidden_boundaries": preflight_res.forbidden_boundaries,
+                    },
+                    "context": {
+                        "target_files": target_files,
+                        "governing_rules": governing_rules,
+                        "cochange_warnings": cochange_warnings,
+                        "relevant_decisions": relevant_decisions,
+                        "ambiguity_gaps": ctx.gaps,
+                        "token_budget": ctx.token_budget,
+                        "estimated_tokens": ctx.estimated_tokens,
+                    },
+                    "blocking_violations": blocking_violations,
+                    "is_reused_contract": preflight_res.is_reused_contract,
+                    "reused_reason": preflight_res.reused_reason,
+                    "next_action": next_action,
+                })))
+            }
+        }
+        "engram_get_context" => {
+            let task = args["task"].as_str().unwrap_or("").trim();
+            if task.is_empty() {
+                bail!("Task description must not be empty");
+            }
+            let budget = args["token_budget"]
+                .as_u64()
+                .or_else(|| args["budget_tokens"].as_u64())
+                .unwrap_or(2000) as usize;
+            if budget == 0 {
+                bail!("Token budget must be greater than 0");
+            }
+            let detail_level_str = args["detail_level"].as_str().unwrap_or("");
+            let full_blocks = args["full_blocks"]
+                .as_bool()
+                .or_else(|| args["include_bodies"].as_bool())
+                .unwrap_or_else(|| detail_level_str.eq_ignore_ascii_case("full"));
+            let details = args["details"]
+                .as_bool()
+                .or_else(|| args["verbose"].as_bool())
+                .unwrap_or(false);
+
+            let detail_level = if full_blocks || details {
+                crate::budget::DetailLevel::Full
+            } else {
+                crate::budget::DetailLevel::Contracted
+            };
+
+            let subpath = args["subpath"].as_str();
+            let language = args["language"].as_str();
+
+            let ctx = crate::compiler::context_scoped_with_detail(
+                &root,
+                task,
+                budget,
+                subpath,
+                language,
+                detail_level,
+            )?;
+
             if details {
                 Ok(json_result(serde_json::to_value(ctx)?))
             } else {
@@ -200,6 +420,8 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                             "path": f.path,
                             "level": f.level,
                             "score": (f.score * 100.0).round() / 100.0,
+                            "provenance": f.provenance,
+                            "content": f.content,
                         })
                     })
                     .collect();
@@ -219,6 +441,8 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "ambiguity_gaps": ctx.gaps,
                     "token_budget": ctx.token_budget,
                     "estimated_tokens": ctx.estimated_tokens,
+                    "confidence": ctx.confidence,
+                    "omission_manifest": ctx.omission_manifest,
                     "next_action": "Plan changes within target files and run engram_preflight with planned_files."
                 })))
             }
@@ -256,9 +480,37 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             .unwrap_or_default();
             let memory_conflicts = crate::memory::detect_memory_conflicts(&audit_memories);
 
+            let mut code_excerpt = None;
+            let mut line_range = None;
+            let mut completeness = "NOT_AVAILABLE";
+            if let Some(ref tf) = cone.target_file {
+                if let Ok(mut s) = conn.prepare("SELECT entity_id, start_line, end_line, signature FROM entity_versions WHERE (name=?1 OR path=?1) AND path=?2 AND invalidated_at_revision IS NULL LIMIT 1") {
+                    if let Ok(row) = s.query_row(rusqlite::params![target, tf], |r| Ok((r.get::<_, String>(0)?, r.get::<_, usize>(1)?, r.get::<_, usize>(2)?, r.get::<_, String>(3)?))) {
+                        let (ent_id, start_line, end_line, sig) = row;
+                        line_range = Some(vec![start_line, end_line]);
+                        if let Ok(file_content) = std::fs::read_to_string(root.join(tf)) {
+                            let lines: Vec<&str> = file_content.lines().collect();
+                            let members = crate::storage::get_entity_members(&conn, &ent_id).unwrap_or_default();
+                            let (excerpt_str, comp_str) = crate::analyzer::generate_bounded_excerpt(
+                                &lines,
+                                start_line,
+                                end_line,
+                                &members,
+                                "typescript",
+                            );
+                            code_excerpt = Some(format!("// Signature: {}\n{}", sig, excerpt_str));
+                            completeness = comp_str;
+                        }
+                    }
+                }
+            }
+
             Ok(json_result(json!({
                 "target": cone.target_symbol,
                 "target_file": cone.target_file,
+                "line_range": line_range,
+                "code_excerpt": code_excerpt,
+                "completeness": completeness,
                 "impact_cone": cone,
                 "active_contract": active_contract,
                 "authorization": authorization,
@@ -506,65 +758,146 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let contract_id = args["contract_id"].as_str().map(str::to_string);
             let strict = args["strict"].as_bool().unwrap_or(false);
             let staged = args["staged"].as_bool().unwrap_or(false);
+            let test_evidence = args["test_evidence"]
+                .as_bool()
+                .or_else(|| args["test_passed"].as_bool());
+            let build_evidence = args["build_evidence"]
+                .as_bool()
+                .or_else(|| args["build_passed"].as_bool());
             let details = args["details"]
                 .as_bool()
                 .or_else(|| args["verbose"].as_bool())
                 .unwrap_or(false);
-            let opts = crate::flywheel::PostflightOptions {
+
+            let opts = crate::flywheel::LocalPostflightOptions {
                 contract_id,
-                strict,
                 staged,
-                base_commit: None,
-                ci_mode: false,
+                strict,
+                test_evidence,
+                build_evidence,
             };
-            let res = crate::flywheel::postflight_check(&root, &opts)?;
-            if details {
-                Ok(json_result(serde_json::to_value(res)?))
-            } else {
-                let verdict_str = match res.verdict {
-                    crate::flywheel::PostflightVerdict::Pass => "PASS",
-                    crate::flywheel::PostflightVerdict::BlockedBoundaryViolation => {
-                        "BLOCKED_BOUNDARY_VIOLATION"
-                    }
-                    crate::flywheel::PostflightVerdict::ReviewUnexpectedExpansion => {
-                        "REVIEW_UNEXPECTED_EXPANSION"
-                    }
-                    crate::flywheel::PostflightVerdict::BlockedConstitutionRule => {
-                        "BLOCKED_CONSTITUTION_RULE"
-                    }
-                };
-                let violations: Vec<Value> = res
-                    .classifications
-                    .iter()
-                    .filter(|c| {
-                        c.category != crate::contract::FileValidationCategory::Expected
-                            && c.category
-                                != crate::contract::FileValidationCategory::ExpectedExpansion
-                    })
-                    .map(|c| {
-                        json!({
-                            "path": c.path,
-                            "category": format!("{:?}", c.category),
-                            "reason": c.reason,
-                        })
-                    })
-                    .collect();
-                let next_action = if res.verdict == crate::flywheel::PostflightVerdict::Pass {
-                    "All changes compliant with Change Contract. Ready to commit / create PR."
-                } else {
+            let res = crate::flywheel::validate_local_postflight(&root, &opts)?;
+
+            let verdict_str = match res.verdict {
+                crate::flywheel::LocalPostflightVerdict::Pass => "PASS",
+                crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified => {
+                    "PASS_SCOPE_ONLY_UNVERIFIED"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedScopeViolation => {
+                    "BLOCKED_SCOPE_VIOLATION"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedConstitutionRule => {
+                    "BLOCKED_CONSTITUTION_RULE"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedValidationFailed => {
+                    "BLOCKED_VALIDATION_FAILED"
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedStaleContract => {
+                    "BLOCKED_STALE_CONTRACT"
+                }
+                crate::flywheel::LocalPostflightVerdict::IndeterminateGitUnavailable => {
+                    "INDETERMINATE_GIT_UNAVAILABLE"
+                }
+            };
+
+            let mut violations: Vec<Value> = Vec::new();
+            for bv in &res.boundary_violations {
+                violations.push(json!({
+                    "path": bv,
+                    "category": "BoundaryViolation",
+                    "reason": "Forbidden file modified",
+                }));
+            }
+            for uv in &res.unexpected_files {
+                violations.push(json!({
+                    "path": uv,
+                    "category": "Unexpected",
+                    "reason": "File modified outside expected contract boundary",
+                }));
+            }
+            for cv in &res.constitution_violations {
+                violations.push(json!({
+                    "rule": cv,
+                    "category": "ConstitutionViolation",
+                    "reason": "Architectural constitution rule violation",
+                }));
+            }
+
+            let next_action = match res.verdict {
+                crate::flywheel::LocalPostflightVerdict::Pass => {
+                    "All changes compliant with Change Contract and verified by validation evidence. Ready to commit / create PR."
+                }
+                crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified => {
+                    "All changes compliant with Change Contract boundaries (scope only). Test evidence was not supplied. Run tests before committing."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedValidationFailed => {
+                    "Validation tests explicitly failed. Resolve failing tests before committing code."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedStaleContract => {
+                    "Contract baseline diverged from Git HEAD. Run engram_prepare_task to re-ground and rebase the active contract."
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedScopeViolation => {
                     "Revert violating/unexpected files or invoke engram_recover for structured remediation."
-                };
+                }
+                crate::flywheel::LocalPostflightVerdict::BlockedConstitutionRule => {
+                    "Reconcile architectural constitution rule violations before modifying code or request human override."
+                }
+                crate::flywheel::LocalPostflightVerdict::IndeterminateGitUnavailable => {
+                    "Ensure git repository is initialized and accessible."
+                }
+            };
+
+            let is_compliant = res.scope_status == crate::flywheel::LocalScopeStatus::Compliant;
+
+            if details {
                 Ok(json_result(json!({
-                    "verdict": verdict_str,
+                    "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
+                        "PASS"
+                    } else {
+                        verdict_str
+                    },
+                    "local_verdict": verdict_str,
                     "contract_id": res.contract_id,
-                    "status": if res.verdict == crate::flywheel::PostflightVerdict::Pass { "COMPLIANT" } else { "VIOLATION_DETECTED" },
-                    "total_changed_files": res.total_changed_files,
-                    "expected_count": res.expected_count,
-                    "expansion_count": res.expansion_count,
-                    "unexpected_count": res.unexpected_count,
-                    "boundary_violation_count": res.boundary_violation_count,
+                    "baseline_commit": res.baseline_commit,
+                    "current_head": res.current_head,
+                    "status": if is_compliant { "COMPLIANT" } else { "VIOLATION_DETECTED" },
+                    "scope_status": serde_json::to_value(res.scope_status)?,
+                    "evidence_status": serde_json::to_value(res.evidence_status)?,
+                    "staleness_status": serde_json::to_value(res.staleness_status)?,
+                    "total_changed_files": res.changed_files.len(),
+                    "changed_files": res.changed_files,
+                    "expected_count": res.expected_files.len(),
+                    "expected_files": res.expected_files,
+                    "unexpected_count": res.unexpected_files.len(),
+                    "unexpected_files": res.unexpected_files,
+                    "boundary_violation_count": res.boundary_violations.len(),
+                    "boundary_violations": res.boundary_violations,
+                    "constitution_violations": res.constitution_violations,
                     "violations": violations,
-                    "constitution_passed": res.constitution_passed,
+                    "constitution_passed": res.constitution_violations.is_empty(),
+                    "summary": res.summary,
+                    "exit_code": res.exit_code,
+                    "next_action": next_action,
+                    "report": serde_json::to_value(&res)?,
+                })))
+            } else {
+                Ok(json_result(json!({
+                    "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
+                        "PASS"
+                    } else {
+                        verdict_str
+                    },
+                    "contract_id": res.contract_id,
+                    "status": if is_compliant { "COMPLIANT" } else { "VIOLATION_DETECTED" },
+                    "scope_status": serde_json::to_value(res.scope_status)?,
+                    "evidence_status": serde_json::to_value(res.evidence_status)?,
+                    "staleness_status": serde_json::to_value(res.staleness_status)?,
+                    "total_changed_files": res.changed_files.len(),
+                    "expected_count": res.expected_files.len(),
+                    "unexpected_count": res.unexpected_files.len(),
+                    "boundary_violation_count": res.boundary_violations.len(),
+                    "violations": violations,
+                    "constitution_passed": res.constitution_violations.is_empty(),
                     "summary": res.summary,
                     "next_action": next_action,
                 })))
@@ -630,8 +963,80 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
     }
 }
 
-pub fn tools_definitions() -> Value {
+pub fn core_tools_definitions() -> Value {
     json!([
+        {
+            "name": "engram_get_context",
+            "description": "Compile focused context with durable memories and co-change alerts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal or intent" },
+                    "token_budget": { "type": "integer", "description": "Context token budget limit" },
+                    "details": { "type": "boolean", "description": "Return full verbose excerpts" }
+                },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "engram_inspect_symbol",
+            "description": "Query blast radius impact, contract authorization, and memory lookup.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": { "type": "string", "description": "Target symbol or file path" },
+                    "depth": { "type": "integer", "description": "Dependency depth (1-3)" }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "engram_preflight",
+            "description": "Pre-flight handshake: compile context, check blast radius, lock Change Contract.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal or intent" },
+                    "token_budget": { "type": "integer", "description": "Context token budget limit" },
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Planned target files for validation" }
+                },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "engram_postflight",
+            "description": "Post-flight guard check: evaluate mutation against Change Contract and tests.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "contract_id": { "type": "string", "description": "Active Change Contract ID" },
+                    "strict": { "type": "boolean", "description": "Fail if unexpected files modified" },
+                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed" }
+                }
+            }
+        }
+    ])
+}
+
+pub fn all_tools_definitions() -> Value {
+    json!([
+        {
+            "name": "engram_prepare_task",
+            "description": "Single-shot task preparation: compile focused context, discover governing rules, validate boundaries, and lock Change Contract in one atomic round-trip.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal or intent" },
+                    "token_budget": { "type": "integer", "minimum": 1, "description": "Context token budget limit (default 1200)" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Optional list of planned target files; auto-seeded from top context files if omitted" },
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" },
+                    "no_bypass": { "type": "boolean", "description": "Force Change Contract creation and preflight even for trivial tasks (default false)" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload with complete context and preflight details (default false for compact token-efficient payload)" }
+                },
+                "required": ["task"]
+            }
+        },
         {
             "name": "engram_get_context",
             "description": "Compile focused, evidence-backed context with durable memories and co-change alerts.",
@@ -761,14 +1166,16 @@ pub fn tools_definitions() -> Value {
         },
         {
             "name": "engram_postflight",
-            "description": "Orchestrated Post-Flight Guard Check: evaluate mutation against Change Contract boundaries, enforce zero poisoning, and synthesize candidate memory.",
+            "description": "Deterministic Local Post-Flight Guard Check: evaluate mutation against Change Contract boundaries, constitution rules, git diffs, and test evidence without external LLM dependencies.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against" },
-                    "strict": { "type": "boolean", "description": "Fail if unexpected files are modified" },
+                    "contract_id": { "type": "string", "description": "Active Change Contract ID to validate against (defaults to active contract)" },
+                    "strict": { "type": "boolean", "description": "Fail if unexpected files are modified outside expected boundaries" },
                     "staged": { "type": "boolean", "description": "Validate git staged index instead of entire working tree" },
-                    "details": { "type": "boolean", "description": "Return full verbose payload with all file classification objects (default false for compact token-efficient payload)" }
+                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed (true/false, optional)" },
+                    "build_evidence": { "type": "boolean", "description": "Whether compilation/build succeeded (true/false, optional)" },
+                    "details": { "type": "boolean", "description": "Return full verbose payload with all classification objects (default false for compact token-efficient payload)" }
                 }
             }
         },
@@ -810,6 +1217,19 @@ pub fn tools_definitions() -> Value {
             }
         }
     ])
+}
+
+pub fn tools_definitions() -> Value {
+    let show_all = std::env::var("ENGRAM_SPECIALIST_TOOLS")
+        .or_else(|_| std::env::var("ENGRAM_ALL_TOOLS"))
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if show_all {
+        all_tools_definitions()
+    } else {
+        core_tools_definitions()
+    }
 }
 
 pub fn resources_definitions() -> Value {

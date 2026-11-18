@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engram.dev/schemas/triad_summary.v2.json",
+  "title": "Engram Benchmark Core Triad Summary Schema v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "block_id",
+    "task_id",
+    "seed",
+    "order",
+    "model",
+    "reasoning_effort",
+    "golden_dependency_fingerprint_verified",
+    "acceptance",
+    "comparative_analysis",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0.0" },
+    "block_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "seed": { "type": "integer" },
+    "order": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["baseline_arm1", "v151_arm2", "v154_arm3"] }
+    },
+    "model": { "type": "string" },
+    "reasoning_effort": { "type": "string" },
+    "golden_dependency_fingerprint_verified": { "type": "boolean" },
+    "acceptance": {
+      "type": "object",
+      "required": ["baseline_arm1_accepted", "v151_arm2_accepted", "v154_arm3_accepted", "all_arms_accepted"],
+      "properties": {
+        "baseline_arm1_accepted": { "type": "boolean" },
+        "v151_arm2_accepted": { "type": "boolean" },
+        "v154_arm3_accepted": { "type": "boolean" },
+        "all_arms_accepted": { "type": "boolean" }
+      }
+    },
+    "comparative_analysis": {
+      "type": "object",
+      "required": ["v154_vs_baseline", "v154_vs_v151", "v151_vs_baseline"],
+      "properties": {
+        "v154_vs_baseline": { "$ref": "#/$defs/comparison" },
+        "v154_vs_v151": { "$ref": "#/$defs/comparison" },
+        "v151_vs_baseline": { "$ref": "#/$defs/comparison" }
+      }
+    },
+    "runs": {
+      "type": "object",
+      "required": ["baseline_arm1", "v151_arm2", "v154_arm3"]
+    }
+  },
+  "$defs": {
+    "comparison": {
+      "type": "object",
+      "required": ["savings_claim_eligible", "savings_claim_status", "verdict", "explanation", "metrics"],
+      "properties": {
+        "savings_claim_eligible": { "type": "boolean" },
+        "savings_claim_status": {
+          "type": "string",
+          "enum": ["VALID", "INVALIDATED_BY_ACCEPTANCE_FAILURE", "INVALIDATED_BY_TELEMETRY_INVALID"]
+        },
+        "verdict": { "type": "string" },
+        "explanation": { "type": "string" },
+        "metrics": {
+          "type": "object",
+          "required": [
+            "total_model_tokens",
+            "prompt_tokens_total",
+            "completion_tokens",
+            "peak_single_request_context",
+            "quality_adjusted_cost"
+          ]
+        }
+      }
+    }
+  }
+}

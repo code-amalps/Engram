@@ -714,3 +714,41 @@ fn test_17_ci_policy_behavior_for_warning_and_blocking_modes() {
 
     fs::remove_dir_all(&root).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// 18. Guard hook installation with custom core.hooksPath and worktrees
+// ---------------------------------------------------------------------------
+#[test]
+fn test_18_guard_hook_install_custom_hookspath_and_worktree() {
+    let root = setup_test_git_repo("guard_hook_custom");
+
+    // 1. Configure custom core.hooksPath (.githooks)
+    let custom_hooks = root.join(".githooks");
+    fs::create_dir_all(&custom_hooks).unwrap();
+
+    let config_file = root.join(".git").join("config");
+    let mut config_content = fs::read_to_string(&config_file).unwrap();
+    config_content.push_str("\n[core]\n\thooksPath = .githooks\n");
+    fs::write(&config_file, config_content).unwrap();
+
+    // Verify install respects core.hooksPath
+    let install_msg = install_guard_hook(&root, false).unwrap();
+    assert!(install_msg.contains("Installed Engram Change Guard"));
+
+    let custom_hook_file = custom_hooks.join("pre-commit");
+    assert!(custom_hook_file.exists());
+    let content = fs::read_to_string(&custom_hook_file).unwrap();
+    assert!(content.contains(GUARD_HOOK_START));
+    assert!(content.contains(GUARD_HOOK_BODY));
+
+    // Verify idempotency
+    let re_install = install_guard_hook(&root, false).unwrap();
+    assert!(re_install.contains("already installed"));
+
+    // Verify uninstall
+    let uninstall_msg = uninstall_guard_hook(&root, false).unwrap();
+    assert!(uninstall_msg.contains("Removed Engram pre-commit hook"));
+    assert!(!custom_hook_file.exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}

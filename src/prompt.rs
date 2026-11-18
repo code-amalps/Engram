@@ -11,7 +11,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::compiler::context;
 use crate::flywheel::{parse_task_and_planned_files, preflight_task, PreflightOptions};
 use crate::storage::root_path;
 
@@ -567,7 +566,21 @@ pub fn generate_prompt(
     format: PromptFormat,
     copy_clipboard: bool,
 ) -> Result<PromptOutput> {
-    let ctx = context(root, task, budget)?;
+    generate_prompt_scoped(root, task, budget, format, copy_clipboard, None, None)
+}
+
+/// Generates structured prompt context for tools that cannot use Engram MCP,
+/// optionally scoped to a repository subpath and/or language.
+pub fn generate_prompt_scoped(
+    root: &Path,
+    task: &str,
+    budget: usize,
+    format: PromptFormat,
+    copy_clipboard: bool,
+    subpath: Option<&str>,
+    language: Option<&str>,
+) -> Result<PromptOutput> {
+    let ctx = crate::compiler::context_scoped(root, task, budget, subpath, language)?;
 
     let mut body = String::new();
 
@@ -612,6 +625,12 @@ pub fn generate_prompt(
             }
 
             body.push_str("## Context Completeness\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("- **Subpath Scope:** `{}`\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("- **Language Scope:** `{}`\n", lang));
+            }
             body.push_str(&format!(
                 "- **Estimated Tokens:** ~{} (BM25 + AST estimation)\n",
                 ctx.estimated_tokens
@@ -648,6 +667,12 @@ pub fn generate_prompt(
             body.push('\n');
 
             body.push_str("=== CONTEXT COMPLETENESS ===\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("• Subpath Scope: {}\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("• Language Scope: {}\n", lang));
+            }
             body.push_str(&format!("• Estimated Tokens: ~{}\n", ctx.estimated_tokens));
             body.push_str(&format!("• Budget: {}\n", ctx.token_budget));
             body.push_str(&format!("• Confidence: {}\n", ctx.confidence));
@@ -718,11 +743,34 @@ pub fn prepare_task_context(
     copy_clipboard: bool,
     write_active_file: bool,
 ) -> Result<PreparedTaskOutput> {
+    prepare_task_context_scoped(
+        root,
+        task,
+        budget,
+        format,
+        copy_clipboard,
+        write_active_file,
+        None,
+        None,
+    )
+}
+
+/// Prepares task-aware context optionally scoped to a repository subpath and/or language.
+pub fn prepare_task_context_scoped(
+    root: &Path,
+    task: &str,
+    budget: usize,
+    format: PromptFormat,
+    copy_clipboard: bool,
+    write_active_file: bool,
+    subpath: Option<&str>,
+    language: Option<&str>,
+) -> Result<PreparedTaskOutput> {
     let root = root_path(root)?;
     let (core_task, mut planned_files) = parse_task_and_planned_files(task, None);
 
     // 1. Compile AST grounded context within token budget
-    let ctx = context(&root, &core_task, budget)?;
+    let ctx = crate::compiler::context_scoped(&root, &core_task, budget, subpath, language)?;
 
     // 2. If no planned files specified explicitly, seed from top ranked context files
     if planned_files.is_empty() {
@@ -828,6 +876,12 @@ pub fn prepare_task_context(
             }
 
             body.push_str("## Context Completeness\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("- **Subpath Scope:** `{}`\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("- **Language Scope:** `{}`\n", lang));
+            }
             body.push_str(&format!(
                 "- **Estimated Tokens:** ~{} (BM25 + AST estimation)\n",
                 ctx.estimated_tokens
@@ -872,9 +926,24 @@ pub fn prepare_task_context(
                 body.push_str(&format!("• ECOSYSTEM POLICY: {}\n", eco));
             }
 
+            body.push_str("\n=== CONTEXT COMPLETENESS ===\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("• Subpath Scope: {}\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("• Language Scope: {}\n", lang));
+            }
+            body.push_str(&format!("• Estimated Tokens: ~{}\n", ctx.estimated_tokens));
+            body.push_str(&format!("• Budget: {}\n", ctx.token_budget));
+            body.push_str(&format!("• Included Files: {}\n", ctx.files.len()));
+            body.push_str(&format!("• Omitted Files: {}\n", ctx.excluded_files.len()));
+
             body.push_str("\n=== VERIFICATION GUIDANCE ===\n");
             body.push_str("• Run targeted test suites for modified components.\n");
-            body.push_str(&format!("• Call engram_postflight with contract {} upon completion.\n", preflight.contract_id));
+            body.push_str(&format!(
+                "• Call engram_postflight with contract {} upon completion.\n",
+                preflight.contract_id
+            ));
         }
     }
 

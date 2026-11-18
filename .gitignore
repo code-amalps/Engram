@@ -15,3 +15,11 @@ benchmarks/matched-pair-harness/**/__pycache__/
 /engram-*.zip.sha256
 /engram-*.sha256
 /mcp_in.json
+
+# Benchmark candidate binaries and temporary test data
+benchmarks/matched-pair-harness/bin/
+benchmarks/matched-pair-harness/results/
+benchmarks/cost-baseline/runs/
+benchmarks/cost-baseline/engram-logs/
+benchmarks/cost-baseline/transcripts/
+scratch/

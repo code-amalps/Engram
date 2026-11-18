@@ -564,6 +564,7 @@ pub fn convert_java_ast_to_engram_with_root(
                 evidence: "JAVA_IMPLEMENTS_DECLARATION".to_string(),
                 confidence: 0.99,
                 line: t.line,
+                is_external: false,
             });
         }
 
@@ -576,6 +577,7 @@ pub fn convert_java_ast_to_engram_with_root(
                 evidence: "JAVA_EXTENDS_DECLARATION".to_string(),
                 confidence: 0.99,
                 line: t.line,
+                is_external: false,
             });
         }
     }
@@ -614,11 +616,12 @@ pub fn convert_java_ast_to_engram_with_root(
 
         rels.push(Relationship {
             source: rel_path.to_string(),
-            target,
+            target: target.clone(),
             kind: "IMPORTS".to_string(),
             evidence: evidence.to_string(),
             confidence,
             line: imp.line,
+            is_external: !target.ends_with(".java"),
         });
     }
 
@@ -645,6 +648,7 @@ pub fn convert_java_ast_to_engram_with_root(
                 evidence: "MAVEN_GRADLE_TEST_CONVENTION".to_string(),
                 confidence: 0.95,
                 line: 1,
+                is_external: false,
             });
         } else {
             rels.push(Relationship {
@@ -654,6 +658,7 @@ pub fn convert_java_ast_to_engram_with_root(
                 evidence: "NAMING_CONVENTION".to_string(),
                 confidence: 0.90,
                 line: 1,
+                is_external: false,
             });
         }
     }

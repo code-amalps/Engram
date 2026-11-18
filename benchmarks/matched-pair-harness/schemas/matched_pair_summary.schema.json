@@ -32,9 +32,9 @@
       "type": "object",
       "required": ["control_A_accepted", "treatment_B_accepted", "pair_acceptance_parity"],
       "properties": {
-        "control_A_accepted": { "type": "boolean" },
-        "treatment_B_accepted": { "type": "boolean" },
-        "pair_acceptance_parity": { "type": "boolean" }
+        "control_A_accepted": { "type": ["boolean", "null"] },
+        "treatment_B_accepted": { "type": ["boolean", "null"] },
+        "pair_acceptance_parity": { "type": ["boolean", "null"] }
       }
     },
     "comparative_analysis": {

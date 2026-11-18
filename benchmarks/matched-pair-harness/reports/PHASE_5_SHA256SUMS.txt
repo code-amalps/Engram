@@ -1,0 +1,5 @@
+# Engram Phase 5 Candidate Binary Hashes
+# Generated: 2026-11-18T22:04:00+05:30
+
+f56347ef2f0bfd4854176a3ec3c86d8d20b4c0e5954f04e4464998f623d85bee *candidate-phase1/engram.exe
+a58b57d343502f2f4e9c328f20841527d573259fc9b305d5f006671427fd99de *candidate-phase2/engram.exe

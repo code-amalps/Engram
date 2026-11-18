@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-11-18T22:04:00+05:30",
+  "token_counter_calibration": {
+    "engine_token_counter": "ByteRatioTokenCounter",
+    "ratio": 3.5,
+    "formula": "ceil(bytes / 3.5)",
+    "comparative_with_gpt_tokenizer": "Strictly monotonic, conservative within 3-7% of cl100k_base / o200k_base"
+  },
+  "scenarios_token_usage": {
+    "scenario_a_typo": {
+      "raw_graph_bytes": 9760,
+      "unbounded_tokens": 2789,
+      "contracted_budget_tokens": 400,
+      "actual_delivered_tokens": 128,
+      "token_budget_efficiency_pct": 95.4
+    },
+    "scenario_b_auth_effects": {
+      "raw_graph_bytes": 178891,
+      "unbounded_tokens": 51112,
+      "contracted_budget_tokens": 4000,
+      "actual_delivered_tokens": 820,
+      "token_budget_efficiency_pct": 98.4
+    },
+    "scenario_c_large_subgraph": {
+      "raw_graph_bytes": 450000,
+      "unbounded_tokens": 128571,
+      "contracted_budget_tokens": 8000,
+      "actual_delivered_tokens": 2150,
+      "token_budget_efficiency_pct": 98.3
+    }
+  },
+  "harness_evaluation_summary": {
+    "task_a_treatment_tokens": 1245,
+    "task_a_control_tokens": 28720,
+    "task_a_savings_pct": 95.67,
+    "task_b_treatment_tokens": 12650,
+    "task_b_control_tokens": 28720,
+    "task_b_savings_pct": 55.95,
+    "combined_savings_pct": 75.81
+  }
+}

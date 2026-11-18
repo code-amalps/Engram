@@ -3,6 +3,7 @@
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
+pub mod budget;
 pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
@@ -13,6 +14,7 @@ pub mod empirical;
 pub mod empirical_live;
 pub mod empirical_runner;
 pub mod flywheel;
+pub mod frameworks;
 pub mod gc;
 pub mod git;
 pub mod git_history;

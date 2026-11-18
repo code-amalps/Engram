@@ -32,6 +32,12 @@ pub fn print_context_result(ctx: &ContextResult, explain: bool) {
     println!("🧠 Task Context: \"{}\"", ctx.task);
     println!("──────────────────────────────────────────");
     println!("  Project:     {}", ctx.project);
+    if let Some(sub) = &ctx.subpath_filter {
+        println!("  Subpath:     {}", sub);
+    }
+    if let Some(lang) = &ctx.language_filter {
+        println!("  Language:    {}", lang);
+    }
     println!("  Confidence:  {}", ctx.confidence);
     println!(
         "  Budget:      {} / {} tokens",

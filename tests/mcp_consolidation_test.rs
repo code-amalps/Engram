@@ -13,7 +13,7 @@
 //! 10. End-to-end stdio JSON-RPC protocol execution for `engram_prepare_task`.
 
 use engram::contract::get_active_contract;
-use engram::mcp::{mcp_call, tools_definitions};
+use engram::mcp::{all_tools_definitions, mcp_call, tools_definitions};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -348,13 +348,13 @@ fn test_single_shot_prepare_task_alias() {
 
 #[test]
 fn test_tools_definitions_contains_prepare_task() {
-    let defs = tools_definitions();
+    let defs = all_tools_definitions();
     let tools = defs.as_array().expect("tools array");
 
     let prep_tool = tools
         .iter()
         .find(|t| t["name"] == "engram_prepare_task")
-        .expect("engram_prepare_task must be defined in tools_definitions");
+        .expect("engram_prepare_task must be defined in all_tools_definitions");
 
     assert_eq!(prep_tool["name"], "engram_prepare_task");
     assert!(prep_tool["description"].as_str().unwrap().contains("Single-shot"));
@@ -578,4 +578,29 @@ fn test_workflow_metrics_and_tool_call_reduction() {
     assert_eq!(parsed["status"], "BYPASS_TRIVIAL");
 
     let _ = fs::remove_dir_all(&root);
+}
+
+
+#[test]
+fn test_tools_definitions_default_is_lean_core() {
+    let defs = tools_definitions();
+    let tools = defs.as_array().expect("tools array");
+    assert_eq!(tools.len(), 4, "Default tool surface must be exactly 4 core tools");
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, vec![
+        "engram_get_context",
+        "engram_inspect_symbol",
+        "engram_preflight",
+        "engram_postflight"
+    ]);
+
+    // Verify specialist opt-in via environment variable
+    unsafe {
+        std::env::set_var("ENGRAM_SPECIALIST_TOOLS", "1");
+    }
+    let all_defs = tools_definitions();
+    assert_eq!(all_defs.as_array().unwrap().len(), 16);
+    unsafe {
+        std::env::remove_var("ENGRAM_SPECIALIST_TOOLS");
+    }
 }

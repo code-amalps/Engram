@@ -33,6 +33,7 @@ fn test_mcp_protocol_handshake_and_tools() {
         .arg("-C")
         .arg(&repo)
         .arg("mcp")
+        .env("ENGRAM_SPECIALIST_TOOLS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

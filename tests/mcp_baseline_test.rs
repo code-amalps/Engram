@@ -48,6 +48,7 @@ impl McpFixture {
             .arg("-C")
             .arg(&temp_dir)
             .arg("mcp")
+            .env("ENGRAM_SPECIALIST_TOOLS", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

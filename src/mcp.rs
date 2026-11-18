@@ -209,11 +209,12 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 None
             };
 
-            let planned_files_raw: Option<Vec<String>> = args["planned_files"].as_array().map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect()
-            });
+            let planned_files_raw: Option<Vec<String>> =
+                args["planned_files"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                });
 
             // 1. Resolve planned files: extract explicitly supplied files or parse declarations directly
             // from task prompt. Under NO circumstances seed authorized edit targets from ambient read context files.
@@ -325,12 +326,15 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     ctx.cochange_alerts.iter().take(5).cloned().collect();
                 let relevant_decisions: Vec<String> =
                     ctx.relevant_memories.iter().take(5).cloned().collect();
-                let blocking_violations = if preflight_res.status == crate::flywheel::PreflightStatus::Blocked {
-                    preflight_res.ambiguity_gaps.clone()
-                } else {
-                    Vec::new()
-                };
-                let next_action = if preflight_res.status == crate::flywheel::PreflightStatus::Blocked {
+                let blocking_violations =
+                    if preflight_res.status == crate::flywheel::PreflightStatus::Blocked {
+                        preflight_res.ambiguity_gaps.clone()
+                    } else {
+                        Vec::new()
+                    };
+                let next_action = if preflight_res.status
+                    == crate::flywheel::PreflightStatus::Blocked
+                {
                     "Reconcile blocking violations before modifying code or request human override."
                 } else if preflight_res.is_reused_contract {
                     "Valid Change Contract active. Proceed to edit expected files."
@@ -370,15 +374,41 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if task.is_empty() {
                 bail!("Task description must not be empty");
             }
-            let budget = args["token_budget"].as_u64().unwrap_or(1200) as usize;
+            let budget = args["token_budget"]
+                .as_u64()
+                .or_else(|| args["budget_tokens"].as_u64())
+                .unwrap_or(2000) as usize;
             if budget == 0 {
                 bail!("Token budget must be greater than 0");
             }
+            let detail_level_str = args["detail_level"].as_str().unwrap_or("");
+            let full_blocks = args["full_blocks"]
+                .as_bool()
+                .or_else(|| args["include_bodies"].as_bool())
+                .unwrap_or_else(|| detail_level_str.eq_ignore_ascii_case("full"));
             let details = args["details"]
                 .as_bool()
                 .or_else(|| args["verbose"].as_bool())
                 .unwrap_or(false);
-            let ctx = context(&root, task, budget)?;
+
+            let detail_level = if full_blocks || details {
+                crate::budget::DetailLevel::Full
+            } else {
+                crate::budget::DetailLevel::Contracted
+            };
+
+            let subpath = args["subpath"].as_str();
+            let language = args["language"].as_str();
+
+            let ctx = crate::compiler::context_scoped_with_detail(
+                &root,
+                task,
+                budget,
+                subpath,
+                language,
+                detail_level,
+            )?;
+
             if details {
                 Ok(json_result(serde_json::to_value(ctx)?))
             } else {
@@ -390,6 +420,8 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                             "path": f.path,
                             "level": f.level,
                             "score": (f.score * 100.0).round() / 100.0,
+                            "provenance": f.provenance,
+                            "content": f.content,
                         })
                     })
                     .collect();
@@ -409,6 +441,8 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "ambiguity_gaps": ctx.gaps,
                     "token_budget": ctx.token_budget,
                     "estimated_tokens": ctx.estimated_tokens,
+                    "confidence": ctx.confidence,
+                    "omission_manifest": ctx.omission_manifest,
                     "next_action": "Plan changes within target files and run engram_preflight with planned_files."
                 })))
             }
@@ -446,9 +480,37 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             .unwrap_or_default();
             let memory_conflicts = crate::memory::detect_memory_conflicts(&audit_memories);
 
+            let mut code_excerpt = None;
+            let mut line_range = None;
+            let mut completeness = "NOT_AVAILABLE";
+            if let Some(ref tf) = cone.target_file {
+                if let Ok(mut s) = conn.prepare("SELECT entity_id, start_line, end_line, signature FROM entity_versions WHERE (name=?1 OR path=?1) AND path=?2 AND invalidated_at_revision IS NULL LIMIT 1") {
+                    if let Ok(row) = s.query_row(rusqlite::params![target, tf], |r| Ok((r.get::<_, String>(0)?, r.get::<_, usize>(1)?, r.get::<_, usize>(2)?, r.get::<_, String>(3)?))) {
+                        let (ent_id, start_line, end_line, sig) = row;
+                        line_range = Some(vec![start_line, end_line]);
+                        if let Ok(file_content) = std::fs::read_to_string(root.join(tf)) {
+                            let lines: Vec<&str> = file_content.lines().collect();
+                            let members = crate::storage::get_entity_members(&conn, &ent_id).unwrap_or_default();
+                            let (excerpt_str, comp_str) = crate::analyzer::generate_bounded_excerpt(
+                                &lines,
+                                start_line,
+                                end_line,
+                                &members,
+                                "typescript",
+                            );
+                            code_excerpt = Some(format!("// Signature: {}\n{}", sig, excerpt_str));
+                            completeness = comp_str;
+                        }
+                    }
+                }
+            }
+
             Ok(json_result(json!({
                 "target": cone.target_symbol,
                 "target_file": cone.target_file,
+                "line_range": line_range,
+                "code_excerpt": code_excerpt,
+                "completeness": completeness,
                 "impact_cone": cone,
                 "active_contract": active_contract,
                 "authorization": authorization,
@@ -901,7 +963,63 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
     }
 }
 
-pub fn tools_definitions() -> Value {
+pub fn core_tools_definitions() -> Value {
+    json!([
+        {
+            "name": "engram_get_context",
+            "description": "Compile focused context with durable memories and co-change alerts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal or intent" },
+                    "token_budget": { "type": "integer", "description": "Context token budget limit" },
+                    "details": { "type": "boolean", "description": "Return full verbose excerpts" }
+                },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "engram_inspect_symbol",
+            "description": "Query blast radius impact, contract authorization, and memory lookup.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": { "type": "string", "description": "Target symbol or file path" },
+                    "depth": { "type": "integer", "description": "Dependency depth (1-3)" }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "engram_preflight",
+            "description": "Pre-flight handshake: compile context, check blast radius, lock Change Contract.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal or intent" },
+                    "token_budget": { "type": "integer", "description": "Context token budget limit" },
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Planned target files for validation" }
+                },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "engram_postflight",
+            "description": "Post-flight guard check: evaluate mutation against Change Contract and tests.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "contract_id": { "type": "string", "description": "Active Change Contract ID" },
+                    "strict": { "type": "boolean", "description": "Fail if unexpected files modified" },
+                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed" }
+                }
+            }
+        }
+    ])
+}
+
+pub fn all_tools_definitions() -> Value {
     json!([
         {
             "name": "engram_prepare_task",
@@ -1099,6 +1217,19 @@ pub fn tools_definitions() -> Value {
             }
         }
     ])
+}
+
+pub fn tools_definitions() -> Value {
+    let show_all = std::env::var("ENGRAM_SPECIALIST_TOOLS")
+        .or_else(|_| std::env::var("ENGRAM_ALL_TOOLS"))
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if show_all {
+        all_tools_definitions()
+    } else {
+        core_tools_definitions()
+    }
 }
 
 pub fn resources_definitions() -> Value {

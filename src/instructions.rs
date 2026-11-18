@@ -333,63 +333,46 @@ pub const KNOWN_INSTRUCTION_FILES: &[(&str, &str)] = &[
 /// Injects active contract directives, boundaries, AST context, and agent instructions.
 pub fn format_task_instruction_body(prep: &crate::prompt::PreparedTaskOutput) -> String {
     let mut body = String::new();
-    body.push_str("## Engram Turn-0 Task Intelligence & Directives\n");
+    body.push_str("## Engram Directives\n");
 
     if prep.bypass_active {
         body.push_str("### ⚡ Adaptive Small-Task Bypass Active\n");
-        body.push_str(&format!("- **Task:** {}\n", prep.task));
-        if let Some(ref sig) = prep.classification_signals {
-            body.push_str(&format!("- **Classification:** TRIVIAL ({})\n", sig.reason));
-        } else {
-            body.push_str("- **Classification:** TRIVIAL\n");
-        }
-        body.push_str("- **Directive:** This task is classified as a safe, single-file edit. **DO NOT call `engram_get_context` or `engram_preflight`.** Proceed directly to editing the target file using standard editor tools.\n");
-        body.push_str("- **Postflight:** Run project tests to verify correctness. Postflight compliance auditing (`engram_postflight`) is optional.\n");
+        body.push_str("- Directive: Single-file edit. Zero-turn execution: DO NOT call `engram_get_context`. Edit target file directly.\n");
         return body;
     }
 
-    body.push_str(&format!("- **Task:** {}\n", prep.task));
     body.push_str(&format!(
-        "- **Active Change Contract:** `{}` (v{}, Status: {})\n",
-        prep.contract_id, prep.contract_version, prep.status
+        "- Active Change Contract: `{}` (locked to `{}`)\n",
+        prep.contract_id, prep.baseline_commit
     ));
     body.push_str(&format!(
-        "- **Baseline Revision:** `{}`\n",
+        "- Provenance: Generated locally by Engram from repository index at baseline revision `{}`.\n",
         prep.baseline_commit
     ));
-    body.push_str(&format!(
-        "- **Provenance:** Generated locally by Engram from repository index at baseline revision `{}`.\n",
-        prep.baseline_commit
-    ));
+    body.push_str(
+        "- Directives: Contract locked. Use `engram_inspect_symbol` for symbol lookups; call `engram_postflight`.\n"
+    );
+    body.push_str(
+        "- VERIFICATION GUIDANCE: Run targeted test suites for modified components. Ensure no compiler or test regressions are introduced.\n"
+    );
+
     if !prep.expected_files.is_empty() {
         body.push_str(&format!(
-            "- **Authorized Target Files:** {}\n",
+            "- Authorized Targets: {}\n",
             prep.expected_files.join(", ")
         ));
     }
     if !prep.forbidden_boundaries.is_empty() {
         body.push_str(&format!(
-            "- **Forbidden Boundaries:** {}\n",
+            "- Forbidden Boundaries: {}\n",
             prep.forbidden_boundaries.join(", ")
         ));
     }
 
-    body.push_str("\n### 🚨 Mandatory AI Agent Directives\n");
-    body.push_str(&format!(
-        "1. **ZERO-TURN EXECUTION:** Change Contract `{}` is ALREADY LOCKED to baseline revision `{}`.\n   **DO NOT CALL `engram_get_context` OR `engram_preflight`.** All required context and boundaries are provided below.\n",
-        prep.contract_id, prep.baseline_commit
-    ));
-    body.push_str("2. **BOUNDARY COMPLIANCE:** Confine code edits strictly to authorized target files. Do not modify files in forbidden boundaries or make unrequested cosmetic refactors.\n");
-    body.push_str(&format!(
-        "3. **POSTFLIGHT AUDIT:** When code edits and unit tests are complete, call `engram_postflight` with `contract_id: \"{}\"` to audit compliance.\n",
-        prep.contract_id
-    ));
-    body.push_str("4. **VERIFICATION GUIDANCE:** Run targeted test suites for modified components. Ensure no compiler or test regressions are introduced.\n\n");
-
     // Append the grounded context and constraints from prep.content
     if let Some(idx) = prep.content.find("## Relevant Context") {
         body.push_str(&prep.content[idx..]);
-    } else {
+    } else if !prep.content.trim().is_empty() {
         body.push_str(&prep.content);
     }
 
@@ -594,7 +577,7 @@ mod tests {
         assert!(content_after_inject.contains("Always follow style guide."));
         assert!(content_after_inject.contains(START_MARKER));
         assert!(content_after_inject.contains("ctr_test_12345678"));
-        assert!(content_after_inject.contains("ZERO-TURN EXECUTION"));
+        assert!(content_after_inject.contains("## Engram Directives"));
         assert!(content_after_inject.contains("src/login.tsx"));
         assert!(content_after_inject.contains(END_MARKER));
 

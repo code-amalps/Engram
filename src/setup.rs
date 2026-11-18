@@ -1011,6 +1011,8 @@ pub fn verify_mcp_health_with_timeout(
         .arg("-C")
         .arg(root)
         .arg("mcp")
+        .arg("--all-tools")
+        .env("ENGRAM_SPECIALIST_TOOLS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

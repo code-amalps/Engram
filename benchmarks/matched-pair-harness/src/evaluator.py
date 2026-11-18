@@ -11,10 +11,15 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Any, List, Optional, Tuple, Union
 from pathlib import Path
 import subprocess
+import tempfile
+import sqlite3
 import fnmatch
 import json
+import time
 import re
 import os
+
+from verification import TrackedSubprocessRunner, VerificationResult
 
 
 class FixturePreflightError(Exception):
@@ -73,10 +78,10 @@ def resolve_safe_target_path(root_path: Union[str, Path], relative_target: str) 
 def validate_fixture_preflight(repo_or_sandbox_path: Union[str, Path], task_config: Dict[str, Any]) -> None:
     """
     Validates that a repository or sandbox fixture copy contains the required baseline preconditions:
-    1. Confirm the configured target file exists in the pristine fixture within sandbox boundaries.
-    2. Confirm the expected original text is present and unambiguous (exactly expected_occurrences, default 1).
-    3. Confirm the expected corrected text is not already present (fixture not dirty / already fixed).
-    4. Confirm the expected change is non-trivial (original_text != expected_text).
+    1. Multi-path existence verification ('required_files').
+    2. Baseline patterns required to be present ('baseline_present_patterns').
+    3. Baseline patterns forbidden from being present ('baseline_absent_patterns').
+    4. Single-file typo / exact-match assertions ('target_file', 'original_text', 'expected_text').
     Fails fast with clear diagnostic if any precondition is not satisfied.
     """
     task_id = task_config.get("task_id", "unknown_task")
@@ -84,59 +89,99 @@ def validate_fixture_preflight(repo_or_sandbox_path: Union[str, Path], task_conf
     if not preflight_cfg:
         return
 
+    # 1. Multi-path existence assertions
+    required_files = preflight_cfg.get("required_files", [])
+    for rel_f in required_files:
+        target_path = resolve_safe_target_path(repo_or_sandbox_path, rel_f)
+        if not target_path.exists() or not target_path.is_file():
+            raise FixturePreflightError(
+                f"Preflight failure for task '{task_id}': Required baseline file does not exist: {rel_f}"
+            )
+
+    # 2. Baseline patterns required to be present
+    present_patterns = preflight_cfg.get("baseline_present_patterns", [])
+    for check in present_patterns:
+        rel_f = check.get("file")
+        pat = check.get("pattern")
+        if rel_f and pat:
+            target_path = resolve_safe_target_path(repo_or_sandbox_path, rel_f)
+            if not target_path.exists() or not target_path.is_file():
+                raise FixturePreflightError(
+                    f"Preflight failure for task '{task_id}': File does not exist for pattern check: {rel_f}"
+                )
+            content = target_path.read_text(encoding="utf-8", errors="ignore")
+            if pat not in content:
+                raise FixturePreflightError(
+                    f"Preflight failure for task '{task_id}': Expected baseline pattern '{pat}' missing from '{rel_f}'."
+                )
+
+    # 3. Baseline patterns forbidden to be present (dirty fixture prevention)
+    absent_patterns = preflight_cfg.get("baseline_absent_patterns", [])
+    for check in absent_patterns:
+        rel_f = check.get("file")
+        pat = check.get("pattern")
+        if rel_f and pat:
+            target_path = resolve_safe_target_path(repo_or_sandbox_path, rel_f)
+            if target_path.exists() and target_path.is_file():
+                content = target_path.read_text(encoding="utf-8", errors="ignore")
+                if pat in content:
+                    raise FixturePreflightError(
+                        f"Preflight failure for task '{task_id}': Baseline fixture is dirty or already modified! "
+                        f"Forbidden baseline pattern '{pat}' found in '{rel_f}'."
+                    )
+
+    # 4. Single-file exact match / typo check (legacy/task_a compatibility)
     target_file = preflight_cfg.get("target_file")
-    if not target_file:
-        raise FixturePreflightError(f"Task '{task_id}' fixture_preflight missing 'target_file'.")
+    if target_file:
+        original_text = preflight_cfg.get("original_text")
+        if original_text is None or original_text == "":
+            raise FixturePreflightError(f"Task '{task_id}' fixture_preflight missing 'original_text'.")
 
-    original_text = preflight_cfg.get("original_text")
-    if original_text is None or original_text == "":
-        raise FixturePreflightError(f"Task '{task_id}' fixture_preflight missing 'original_text'.")
+        expected_text = preflight_cfg.get("expected_text")
+        if expected_text is None or expected_text == "":
+            raise FixturePreflightError(f"Task '{task_id}' fixture_preflight missing 'expected_text'.")
 
-    expected_text = preflight_cfg.get("expected_text")
-    if expected_text is None or expected_text == "":
-        raise FixturePreflightError(f"Task '{task_id}' fixture_preflight missing 'expected_text'.")
+        if original_text == expected_text:
+            raise FixturePreflightError(
+                f"Task '{task_id}' fixture_preflight original_text and expected_text are identical ('{original_text}'). No-op repair."
+            )
 
-    if original_text == expected_text:
-        raise FixturePreflightError(
-            f"Task '{task_id}' fixture_preflight original_text and expected_text are identical ('{original_text}'). No-op repair."
-        )
+        expected_occurrences = preflight_cfg.get("expected_occurrences", 1)
 
-    expected_occurrences = preflight_cfg.get("expected_occurrences", 1)
+        target_path = resolve_safe_target_path(repo_or_sandbox_path, target_file)
+        if not target_path.exists() or not target_path.is_file():
+            raise FixturePreflightError(
+                f"Preflight failure for task '{task_id}': Target file does not exist: {target_file}"
+            )
 
-    target_path = resolve_safe_target_path(repo_or_sandbox_path, target_file)
-    if not target_path.exists() or not target_path.is_file():
-        raise FixturePreflightError(
-            f"Preflight failure for task '{task_id}': Target file does not exist: {target_file}"
-        )
+        content = target_path.read_text(encoding="utf-8", errors="ignore")
+        occurrences = content.count(original_text)
 
-    content = target_path.read_text(encoding="utf-8", errors="ignore")
-    occurrences = content.count(original_text)
-
-    # 1. Target string missing
-    if occurrences == 0:
-        if expected_text in content:
+        # 1. Target string missing
+        if occurrences == 0:
+            if expected_text in content:
+                raise FixturePreflightError(
+                    f"Preflight failure for task '{task_id}': Original target text '{original_text}' "
+                    f"not found in target file: {target_file} (expected text '{expected_text}' is already present; fixture is already corrected or dirty)."
+                )
             raise FixturePreflightError(
                 f"Preflight failure for task '{task_id}': Original target text '{original_text}' "
-                f"not found in target file: {target_file} (expected text '{expected_text}' is already present; fixture is already corrected or dirty)."
+                f"not found in target file: {target_file}"
             )
-        raise FixturePreflightError(
-            f"Preflight failure for task '{task_id}': Original target text '{original_text}' "
-            f"not found in target file: {target_file}"
-        )
 
-    # 2. Reject dirty fixture where expected text is already present alongside original text
-    if expected_text in content:
-        raise FixturePreflightError(
-            f"Preflight failure for task '{task_id}': Baseline fixture is dirty or already corrected! "
-            f"Expected text '{expected_text}' is already present in '{target_file}'."
-        )
+        # 2. Reject dirty fixture where expected text is already present alongside original text
+        if expected_text in content:
+            raise FixturePreflightError(
+                f"Preflight failure for task '{task_id}': Baseline fixture is dirty or already corrected! "
+                f"Expected text '{expected_text}' is already present in '{target_file}'."
+            )
 
-    # 3. Reject ambiguous fixtures (more or fewer occurrences than required)
-    if occurrences != expected_occurrences:
-        raise FixturePreflightError(
-            f"Preflight failure for task '{task_id}': Ambiguous fixture! Target text '{original_text}' "
-            f"occurs {occurrences} times in '{target_file}'. Exactly {expected_occurrences} occurrence(s) required."
-        )
+        # 3. Reject ambiguous fixtures (more or fewer occurrences than required)
+        if occurrences != expected_occurrences:
+            raise FixturePreflightError(
+                f"Preflight failure for task '{task_id}': Ambiguous fixture! Target text '{original_text}' "
+                f"occurs {occurrences} times in '{target_file}'. Exactly {expected_occurrences} occurrence(s) required."
+            )
 
 
 @dataclass
@@ -155,11 +200,11 @@ class GitImpact:
 
 @dataclass
 class CorrectnessResult:
-    score: float
-    quality_adjusted_cost: float
-    passed_all_requirements: bool
+    score: Optional[float]
+    quality_adjusted_cost: Optional[float]
+    passed_all_requirements: Optional[bool]
     gates: Dict[str, str]  # L0_typecheck, L1_lint_prettier, L2_unit_tests, L3_production_build
-    requirements: Dict[str, str]  # REQ-1: PASS/FAIL/PARTIAL
+    requirements: Dict[str, str]  # REQ-1: PASS/FAIL/PARTIAL/NOT_EVALUATED
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -186,7 +231,7 @@ class Evaluator:
         """
         # 1. Get changed files from git status --porcelain
         cmd_status = ["git", "status", "--porcelain"]
-        res_status = subprocess.run(cmd_status, cwd=sandbox_path, capture_output=True, text=True)
+        res_status = subprocess.run(cmd_status, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         changed_files = []
         untracked_files = []
         for raw_line in res_status.stdout.splitlines():
@@ -199,17 +244,25 @@ class Evaluator:
             if " -> " in fpath_raw:
                 fpath_raw = fpath_raw.split(" -> ")[-1]
             norm_fpath = fpath_raw.replace("\\", "/")
+            # Ignore pre-injected Turn-0 infrastructure files from blast-radius accounting
+            if (
+                norm_fpath.startswith(".engram/")
+                or norm_fpath == ".engram"
+                or norm_fpath.startswith(".github/")
+                or norm_fpath == ".github"
+            ):
+                continue
             changed_files.append(norm_fpath)
             if status_code == "??":
                 untracked_files.append(norm_fpath)
 
         # 2. Get numstat covering BOTH staged and unstaged changes against HEAD
         cmd_diff = ["git", "diff", "HEAD", "--numstat"]
-        res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, capture_output=True, text=True)
+        res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if res_diff.returncode != 0:
             # Fallback if HEAD does not exist (e.g. bare initialized repo in synthetic tests)
             cmd_diff = ["git", "diff", "--numstat"]
-            res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, capture_output=True, text=True)
+            res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
         insertions = 0
         deletions = 0
@@ -231,10 +284,10 @@ class Evaluator:
 
         # 3. Export full patch covering BOTH staged and unstaged changes against HEAD
         cmd_patch = ["git", "diff", "HEAD"]
-        res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, capture_output=True, text=True)
+        res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if res_patch.returncode != 0:
             cmd_patch = ["git", "diff"]
-            res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, capture_output=True, text=True)
+            res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
         patch_text = res_patch.stdout
         for uf in untracked_files:
@@ -253,14 +306,21 @@ class Evaluator:
             f.write(patch_text)
 
         # 4. Check allowed vs forbidden vs unrelated vs dependency mutations
+        repo_type = self.task_config.get("repository_type", "angular")
         unrelated_count = 0
         dependency_mutated = False
         for fpath in changed_files:
-            # Check dependency mutation
-            if fpath in ("package.json", "package-lock.json") or fpath.startswith("node_modules/"):
-                dependency_mutated = True
-                unrelated_count += 1
-                continue
+            # Check dependency mutation based on repository type
+            if repo_type in ("cargo", "rust"):
+                if fpath in ("Cargo.toml", "Cargo.lock") and not any(fnmatch.fnmatch(fpath, p) for p in self.allowed_patterns):
+                    dependency_mutated = True
+                    unrelated_count += 1
+                    continue
+            else:
+                if fpath in ("package.json", "package-lock.json") or fpath.startswith("node_modules/"):
+                    dependency_mutated = True
+                    unrelated_count += 1
+                    continue
 
             # Check forbidden
             is_forbidden = any(fnmatch.fnmatch(fpath, p) for p in self.forbidden_patterns)
@@ -283,9 +343,14 @@ class Evaluator:
         self,
         sandbox_path: Path,
         git_impact: Optional[GitImpact] = None,
-        is_dry_run: bool = False
+        is_dry_run: bool = False,
+        runner: Optional[TrackedSubprocessRunner] = None,
+        aggregate_timeout_seconds: Optional[float] = None
     ) -> Dict[str, str]:
-        """Runs L0-L3 gates or produces deterministic simulated gates in dry run."""
+        """
+        Runs L0-L3 gates or produces deterministic simulated gates in dry run.
+        Enforces monotonic aggregate verification deadline across sequential gates.
+        """
         results = {}
         gate_map = {
             "L0_typecheck": self.gates_cfg.get("L0_typecheck"),
@@ -302,6 +367,17 @@ class Evaluator:
             results["L3_production_build"] = "FAIL"
             return results
 
+        active_runner = runner or TrackedSubprocessRunner(default_timeout_seconds=300)
+        self.last_gate_details: Dict[str, Any] = {}
+
+        # Aggregate verification timeout resolution
+        if aggregate_timeout_seconds is not None:
+            budget = float(aggregate_timeout_seconds)
+        else:
+            budget = float(self.task_config.get("verification_timeout_seconds", 300))
+
+        start_time = time.monotonic()
+
         for gate_name, gate_info in gate_map.items():
             if not gate_info or not gate_info.get("enabled", False):
                 results[gate_name] = "SKIPPED"
@@ -311,20 +387,40 @@ class Evaluator:
                 results[gate_name] = "PASS"
                 continue
 
+            elapsed = time.monotonic() - start_time
+            remaining = budget - elapsed
             cmd = gate_info.get("command", "")
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    cwd=sandbox_path,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                results[gate_name] = "PASS" if proc.returncode == 0 else "FAIL"
-            except subprocess.TimeoutExpired:
+            gate_timeout = float(gate_info.get("timeout_seconds", 300))
+
+            if remaining <= 0:
                 results[gate_name] = "BLOCKED"
-            except Exception:
+                self.last_gate_details[gate_name] = {
+                    "command": cmd,
+                    "exit_code": 124,
+                    "stdout": "",
+                    "stderr": "Gate blocked: Aggregate verification deadline exhausted before start.",
+                    "combined_output": "Gate blocked: Aggregate verification deadline exhausted before start.",
+                    "elapsed_seconds": 0.0,
+                    "timed_out": True,
+                    "cancelled": False,
+                    "status": "BLOCKED",
+                    "poll_count": 0,
+                    "partial_output_preserved": False,
+                    "output_truncated": False,
+                    "stdout_truncated": False,
+                    "stderr_truncated": False
+                }
+                continue
+
+            effective_timeout = min(gate_timeout, remaining)
+            res = active_runner.run_command(cmd, cwd=sandbox_path, timeout_seconds=effective_timeout)
+            self.last_gate_details[gate_name] = res.to_dict()
+
+            if res.timed_out:
+                results[gate_name] = "BLOCKED"
+            elif res.exit_code == 0:
+                results[gate_name] = "PASS"
+            else:
                 results[gate_name] = "FAIL"
 
         return results
@@ -353,11 +449,21 @@ class Evaluator:
                 elif git_impact.files_changed_count == 0:
                     req_results[req_id] = "FAIL"
                 else:
+                    # Specific scope drift check for Task B: bulk i18n sprawl
+                    if self.task_id == "task_b_remember_me":
+                        i18n_files = [f for f in git_impact.files_changed if re.search(r'assets/i18n/.+\.json$', f)]
+                        if len(i18n_files) >= 3:
+                            req_results[req_id] = "FAIL"
+                            continue
                     req_results[req_id] = "PASS"
 
             elif eval_type == "UNIT_TEST":
                 l2 = gate_results.get("L2_unit_tests", "SKIPPED")
-                req_results[req_id] = "PASS" if l2 == "PASS" else "FAIL"
+                if self.task_id == "task_commit_cache_invalidation" and req_id == "REQ-2":
+                    drift_ok = self._check_commit_cache_req2_drift_detection(sandbox_path)
+                    req_results[req_id] = "PASS" if (l2 == "PASS" and drift_ok) else "FAIL"
+                else:
+                    req_results[req_id] = "PASS" if l2 == "PASS" else "FAIL"
 
             elif eval_type == "STATIC_CHECK":
                 passed = self._check_static_requirement(sandbox_path, req_id)
@@ -398,7 +504,76 @@ class Evaluator:
                 norm_orig = re.sub(r'\s+', ' ', orig_text)
 
                 return (norm_exp in norm_content) and (norm_orig not in norm_content)
-            return True
+            return False
+
+        if self.task_id == "task_b_remember_me":
+            app_html = sandbox_path / "projects/angular-ngrx-material-starter/src/app/app/app.component.html"
+            app_ts = sandbox_path / "projects/angular-ngrx-material-starter/src/app/app/app.component.ts"
+            auth_effects = sandbox_path / "projects/angular-ngrx-material-starter/src/app/core/auth/auth.effects.ts"
+            settings_model = sandbox_path / "projects/angular-ngrx-material-starter/src/app/core/settings/settings.model.ts"
+            settings_reducer = sandbox_path / "projects/angular-ngrx-material-starter/src/app/core/settings/settings.reducer.ts"
+
+            req_cfg = next((r for r in self.requirements_cfg if r.get("id") == req_id), {})
+            desc_and_crit = (req_cfg.get("description", "") + " " + req_cfg.get("criteria", "")).lower()
+
+            if req_id == "REQ-1":
+                # Check 1A: Auth UI layout (app.component.html has rememberMe checkbox and username input)
+                if "ui" in desc_and_crit or "checkbox" in desc_and_crit or "component" in desc_and_crit or "layout" in desc_and_crit:
+                    if not app_html.exists() or not app_html.is_file():
+                        return False
+                    html_content = app_html.read_text(encoding="utf-8", errors="ignore")
+                    uncommented = re.sub(r'<!--.*?-->', '', html_content, flags=re.DOTALL)
+                    has_checkbox = bool(re.search(r'rememberMe|remember|mat-checkbox', uncommented, re.IGNORECASE))
+                    has_username = bool(re.search(r'username|user-input|matInput', uncommented, re.IGNORECASE))
+                    return has_checkbox and has_username
+
+                # Check 1B: Settings model fallback
+                if "settings" in desc_and_crit or "model" in desc_and_crit:
+                    if not settings_model.exists() or not settings_model.is_file():
+                        return False
+                    model_content = settings_model.read_text(encoding="utf-8", errors="ignore")
+                    return bool(re.search(r'rememberMe\s*\??:\s*boolean', model_content, re.IGNORECASE))
+
+                return False
+
+            elif req_id == "REQ-2":
+                # Check 2A: Auth persistence restoration logic (app.component.ts or auth.effects.ts)
+                if "auth" in desc_and_crit or "persistence" in desc_and_crit or "restor" in desc_and_crit or "flow" in desc_and_crit:
+                    found_restoration = False
+                    for target_f in [app_ts, auth_effects]:
+                        if target_f.exists() and target_f.is_file():
+                            ts_content = target_f.read_text(encoding="utf-8", errors="ignore")
+                            if "localStorage" in ts_content and re.search(r'getItem|AUTH_USERNAME|remember', ts_content, re.IGNORECASE):
+                                found_restoration = True
+                                break
+                    return found_restoration
+
+                # Check 2B: Settings reducer fallback
+                if "reducer" in desc_and_crit or "settings" in desc_and_crit:
+                    if not settings_reducer.exists() or not settings_reducer.is_file():
+                        return False
+                    red_content = settings_reducer.read_text(encoding="utf-8", errors="ignore")
+                    has_init = bool(re.search(r'rememberMe\s*:\s*false', red_content, re.IGNORECASE))
+                    has_action = bool(re.search(r'actionSettingsChangeRememberMe|rememberMe', red_content, re.IGNORECASE))
+                    return has_init and has_action
+
+                return False
+
+            elif req_id == "REQ-3":
+                # Check 3A: Security negative check (zero password/token/secret/jwt persistence to localStorage)
+                if "security" in desc_and_crit or "password" in desc_and_crit or "token" in desc_and_crit or "negative" in desc_and_crit:
+                    security_violation = False
+                    for target_f in [app_ts, auth_effects]:
+                        if target_f.exists() and target_f.is_file():
+                            ts_content = target_f.read_text(encoding="utf-8", errors="ignore")
+                            if re.search(r'localStorage\s*\.\s*setItem\s*\([^)]*(?:password|token|secret|jwt)', ts_content, re.IGNORECASE):
+                                security_violation = True
+                                break
+                    return not security_violation
+
+                return False
+
+            return False
 
         if self.task_id == "task_c_theme_toggle":
             app_html = sandbox_path / "projects/angular-ngrx-material-starter/src/app/app/app.component.html"
@@ -441,7 +616,180 @@ class Evaluator:
             elif req_id == "REQ-7":
                 return True
 
-        return True
+            return False
+
+        if self.task_id == "task_commit_cache_invalidation":
+            if req_id == "REQ-1":
+                return self._check_commit_cache_req1_meta_persistence(sandbox_path)
+            elif req_id == "REQ-3":
+                return self._check_commit_cache_req3_clean_subcommand(sandbox_path)
+            return False
+
+        return False
+
+    def _check_commit_cache_req1_meta_persistence(self, sandbox_path: Path) -> bool:
+        """
+        REQ-1: Record active Git commit HEAD in SQLite meta table.
+        Criteria: index.db contains meta table recording git_commit_head.
+        Verifies both physical SQLite index databases and source code persistence logic.
+        """
+        # 1. Executable check: inspect SQLite database file if it exists in .engram/
+        candidate_db_names = [
+            sandbox_path / ".engram" / "index.db",
+            sandbox_path / ".engram" / "derived_symbols.db",
+            sandbox_path / "index.db"
+        ]
+        for db_path in candidate_db_names:
+            if db_path.exists() and db_path.is_file():
+                try:
+                    conn = sqlite3.connect(str(db_path))
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND (lower(name)='meta' OR lower(name)='metadata')")
+                    table_row = cur.fetchone()
+                    if table_row:
+                        table_name = table_row[0]
+                        cur.execute(f"PRAGMA table_info({table_name})")
+                        cols = [row[1].lower() for row in cur.fetchall()]
+                        if "git_commit_head" in cols:
+                            cur.execute(f"SELECT git_commit_head FROM {table_name} WHERE git_commit_head IS NOT NULL")
+                            val_row = cur.fetchone()
+                            if val_row and val_row[0]:
+                                conn.close()
+                                return True
+                        if "key" in cols and ("value" in cols or "val" in cols):
+                            val_col = "value" if "value" in cols else "val"
+                            cur.execute(f"SELECT {val_col} FROM {table_name} WHERE lower(key)='git_commit_head' OR lower(key) LIKE '%commit%'")
+                            val_row = cur.fetchone()
+                            if val_row and val_row[0]:
+                                conn.close()
+                                return True
+                    conn.close()
+                except Exception:
+                    pass
+
+        # 2. Source code static check: verify SQL and metadata recording in source files
+        target_files = [
+            sandbox_path / "src" / "analyzer.rs",
+            sandbox_path / "src" / "compiler.rs",
+            sandbox_path / "src" / "storage.rs",
+            sandbox_path / "src" / "main.rs",
+            sandbox_path / "tests" / "commit_cache_invalidation_test.rs"
+        ]
+        has_meta_table_def = False
+        has_commit_head_record = False
+
+        for tf in target_files:
+            if tf.exists() and tf.is_file():
+                try:
+                    content = tf.read_text(encoding="utf-8", errors="ignore")
+                    if re.search(r'(?i)CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(?:meta|metadata)|(?:meta|metadata)\s*\([^)]*(?:key|git_commit)', content) or \
+                       re.search(r'(?i)\b(?:meta|metadata)\b.*git_commit_head', content, re.DOTALL):
+                        has_meta_table_def = True
+
+                    if re.search(r'git_commit_head', content, re.IGNORECASE) or \
+                       ("meta" in content.lower() and re.search(r'commit.*(?:head|hash|rev)', content, re.IGNORECASE)) or \
+                       re.search(r'(?i)(?:INSERT|REPLACE|UPDATE)\s+INTO\s+(?:meta|metadata)', content):
+                        if re.search(r'git_commit_head', content, re.IGNORECASE):
+                            has_commit_head_record = True
+                except Exception:
+                    pass
+
+        return has_meta_table_def and has_commit_head_record
+
+    def _check_commit_cache_req2_drift_detection(self, sandbox_path: Path) -> bool:
+        """
+        REQ-2: Commit drift detection invalidates stale cache entries.
+        Criteria: ensure_fresh triggers re-index when repository HEAD diverges from cached commit.
+        """
+        target_files = [
+            sandbox_path / "src" / "analyzer.rs",
+            sandbox_path / "src" / "compiler.rs",
+            sandbox_path / "tests" / "commit_cache_invalidation_test.rs"
+        ]
+        has_drift_detection = False
+
+        for tf in target_files:
+            if tf.exists() and tf.is_file():
+                try:
+                    content = tf.read_text(encoding="utf-8", errors="ignore")
+                    if "ensure_fresh" in content:
+                        if re.search(r'(?:commit|head|rev|git_commit_head).*!=|!=\s*(?:commit|head|rev|cached_commit)', content, re.IGNORECASE) or \
+                           re.search(r'(?:meta|metadata).*commit.*(?:stale|drift|analyze|invalidate)', content, re.IGNORECASE | re.DOTALL):
+                            has_drift_detection = True
+                    if tf.name == "commit_cache_invalidation_test.rs" and "ensure_fresh" in content and re.search(r'drift|commit|stale', content, re.IGNORECASE):
+                        has_drift_detection = True
+                except Exception:
+                    pass
+
+        return has_drift_detection
+
+    def _check_commit_cache_req3_clean_subcommand(self, sandbox_path: Path) -> bool:
+        """
+        REQ-3: Add engram clean --cache subcommand preserving memories.
+        Criteria: clean subcommand removes SQLite cache without deleting memories.json.
+        """
+        # 1. Executable check: if a compiled engram binary exists in sandbox target/
+        for bin_subpath in ["target/debug/engram.exe", "target/release/engram.exe"]:
+            bin_path = sandbox_path / bin_subpath
+            if bin_path.exists() and bin_path.is_file():
+                try:
+                    with tempfile.TemporaryDirectory(prefix="test_engram_clean_") as tmp_dir:
+                        fixture_dir = Path(tmp_dir)
+                        engram_dir = fixture_dir / ".engram"
+                        engram_dir.mkdir(parents=True, exist_ok=True)
+                        dummy_db = engram_dir / "index.db"
+                        dummy_db.write_text("SENTINEL_INDEX_CACHE", encoding="utf-8")
+                        mem_file = engram_dir / "memories.json"
+                        sentinel_mem_content = '{"memories": ["SENTINEL_PRESERVED_USER_MEMORY_DO_NOT_DELETE"]}'
+                        mem_file.write_text(sentinel_mem_content, encoding="utf-8")
+
+                        res = subprocess.run(
+                            [str(bin_path), "clean", "--cache"],
+                            cwd=str(fixture_dir),
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
+                            check=False
+                        )
+                        if res.returncode == 0:
+                            cache_deleted = not dummy_db.exists()
+                            memories_intact = (mem_file.exists() and mem_file.read_text(encoding="utf-8") == sentinel_mem_content)
+                            if cache_deleted and memories_intact:
+                                return True
+                except Exception:
+                    pass
+
+        # 2. Source code static check: verify CommandLine enum and clean handler in src/main.rs
+        main_rs = sandbox_path / "src" / "main.rs"
+        if main_rs.exists() and main_rs.is_file():
+            try:
+                content = main_rs.read_text(encoding="utf-8", errors="ignore")
+                has_clean_cmd = bool(
+                    re.search(r'(?i)Clean\s*\{[^}]*cache\s*:\s*bool', content) or
+                    re.search(r'(?i)#\[command\(.*alias.*clean.*\)\].*Clean', content) or
+                    re.search(r'(?i)enum\s+CommandLine\s*\{[^}]*\bClean\b', content) or
+                    re.search(r'(?i)\bCleanCache\b', content)
+                )
+
+                has_cache_arg = bool(
+                    re.search(r'(?i)cache\s*:\s*bool', content) or
+                    re.search(r'(?i)#\[arg\([^)]*cache[^)]*\)\]', content) or
+                    re.search(r'(?i)"--cache"', content)
+                )
+
+                has_cache_removal = bool(
+                    re.search(r'(?i)(?:remove_file|unlink|remove_dir)[^;]*(?:index\.db|derived_symbols|cache)', content) or
+                    re.search(r'(?i)clean.*cache.*(?:remove_file|fs::remove)', content, re.DOTALL)
+                )
+
+                deletes_memories = bool(re.search(r'(?i)remove_file[^;]*memories\.json', content))
+
+                if has_clean_cmd and has_cache_arg and has_cache_removal and not deletes_memories:
+                    return True
+            except Exception:
+                pass
+
+        return False
 
     def calculate_score(
         self,

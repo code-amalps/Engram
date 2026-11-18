@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-11-18T22:04:00+05:30",
+  "harness_environment": {
+    "execution_mode": "dry-run",
+    "provider": "cloud",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "medium",
+    "golden_angular_baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "candidate_binary_sha256": "a58b57d343502f2f4e9c328f20841527d573259fc9b305d5f006671427fd99de"
+  },
+  "tasks": {
+    "task_a_typo": {
+      "task_name": "Fix Capitalization Typo in About Component Header",
+      "pair_id": "pair_01",
+      "treatment_arm": {
+        "engram_enabled": true,
+        "total_model_tokens": 1245,
+        "prompt_tokens_total": 1200,
+        "completion_tokens": 45,
+        "peak_turn_context": 1200,
+        "mcp_tool_calls_count": 0,
+        "correctness_score": 0.0,
+        "passed_requirements": false
+      },
+      "control_arm": {
+        "engram_enabled": false,
+        "total_model_tokens": 28720,
+        "prompt_tokens_total": 28400,
+        "completion_tokens": 320,
+        "peak_turn_context": 28400,
+        "mcp_tool_calls_count": 0,
+        "correctness_score": 0.0,
+        "passed_requirements": false
+      },
+      "comparative_metrics": {
+        "nominal_token_reduction_pct": 95.67,
+        "tokens_saved": 27475,
+        "savings_claim_status": "SUPPRESSED_DRY_RUN",
+        "verdict": "MUTUAL_ACCEPTANCE_FAILURE"
+      }
+    },
+    "task_b_remember_me": {
+      "task_name": "Add Remember Me Option to Authentication Flow",
+      "pair_id": "pair_01",
+      "treatment_arm": {
+        "engram_enabled": true,
+        "total_model_tokens": 12650,
+        "prompt_tokens_total": 12500,
+        "completion_tokens": 150,
+        "peak_turn_context": 12500,
+        "mcp_tool_calls_count": 1,
+        "correctness_score": 0.2,
+        "passed_requirements": false
+      },
+      "control_arm": {
+        "engram_enabled": false,
+        "total_model_tokens": 28720,
+        "prompt_tokens_total": 28400,
+        "completion_tokens": 320,
+        "peak_turn_context": 28400,
+        "mcp_tool_calls_count": 0,
+        "correctness_score": 0.2,
+        "passed_requirements": false
+      },
+      "comparative_metrics": {
+        "nominal_token_reduction_pct": 55.95,
+        "tokens_saved": 16070,
+        "savings_claim_status": "SUPPRESSED_DRY_RUN",
+        "verdict": "MUTUAL_ACCEPTANCE_FAILURE"
+      }
+    }
+  },
+  "aggregate_metrics": {
+    "total_control_tokens": 57440,
+    "total_treatment_tokens": 13895,
+    "aggregate_nominal_reduction_pct": 75.81,
+    "total_nominal_tokens_saved": 43545
+  }
+}

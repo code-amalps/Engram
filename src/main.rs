@@ -1,6 +1,7 @@
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
+pub mod budget;
 pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
@@ -8,6 +9,7 @@ pub mod contract;
 pub mod doctor;
 pub mod drift;
 pub mod flywheel;
+pub mod frameworks;
 pub mod gc;
 pub mod git;
 pub mod git_history;
@@ -41,7 +43,7 @@ use std::{
 };
 
 use analyzer::analyze;
-use compiler::context;
+use compiler::context_scoped;
 use guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
 use manifest::detect_ecosystem;
 use mcp::mcp;
@@ -83,6 +85,12 @@ enum CommandLine {
         token_budget: usize,
         #[arg(long)]
         explain: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Ground a task, detect gaps, and generate task record
     AnalyzeTask {
@@ -229,9 +237,19 @@ enum CommandLine {
         /// Lock preflight Change Contract to baseline commit and inject directives
         #[arg(long)]
         lock_contract: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
-    Mcp,
+    Mcp {
+        /// Expose all 16 specialist tools instead of the lean default 4-tool surface
+        #[arg(long)]
+        all_tools: bool,
+    },
     /// Run scientific empirical benchmarks evaluating discovery, grounding, contracts, and memory lift
     Bench {
         #[arg(long, short = 'v')]
@@ -637,8 +655,16 @@ fn run() -> Result<()> {
             task,
             token_budget,
             explain,
+            subpath,
+            language,
         }) => {
-            let res = context(root, &task, token_budget)?;
+            let res = context_scoped(
+                root,
+                &task,
+                token_budget,
+                subpath.as_deref(),
+                language.as_deref(),
+            )?;
             if force_json {
                 print_json(res)?;
             } else {
@@ -1445,6 +1471,8 @@ fn run() -> Result<()> {
             stdout,
             no_clipboard,
             lock_contract,
+            subpath,
+            language,
         }) => {
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
@@ -1452,8 +1480,16 @@ fn run() -> Result<()> {
             };
             let copy_clip = !no_clipboard && !stdout;
             if lock_contract {
-                let res =
-                    prompt::prepare_task_context(root, &task, token_budget, fmt, copy_clip, false)?;
+                let res = prompt::prepare_task_context_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    false,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1472,7 +1508,15 @@ fn run() -> Result<()> {
                     }
                 }
             } else {
-                let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
+                let res = prompt::generate_prompt_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1492,7 +1536,14 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Some(CommandLine::Mcp) => mcp(root)?,
+        Some(CommandLine::Mcp { all_tools }) => {
+            if all_tools {
+                unsafe {
+                    std::env::set_var("ENGRAM_SPECIALIST_TOOLS", "1");
+                }
+            }
+            mcp(root)?;
+        }
         Some(CommandLine::Bench { verbose, external }) => {
             if let Some(ext_path) = external {
                 let results = bench::run_external_benchmark(&ext_path)?;
@@ -1697,7 +1748,9 @@ fn run() -> Result<()> {
                             diagnostic: diag || diagnostic,
                         };
                         let res = ci_guard::run_guard(root, &opts);
-                        let is_json = force_json || fmt.to_ascii_lowercase() == "json" || format.to_ascii_lowercase() == "json";
+                        let is_json = force_json
+                            || fmt.to_ascii_lowercase() == "json"
+                            || format.to_ascii_lowercase() == "json";
                         if is_json {
                             print_json(&res)?;
                         } else {

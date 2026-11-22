@@ -10,7 +10,7 @@
 //! - 1: Block (mandatory check failed or forbidden boundary breached)
 //! - 2: Error (configuration error, malformed policy, fail-closed diagnostic)
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 
 use crate::constitution::{evaluate_rules, is_policy_file, load_constitution};
 use crate::contract::{
-    inspect_changed_files, matches_boundary, normalize_rel_path,
-    validate_contract_diff_with_constitution_and_base, CheckOptions, FileValidationCategory,
+    CheckOptions, FileValidationCategory, inspect_changed_files, matches_boundary,
+    normalize_rel_path, validate_contract_diff_with_constitution_and_base,
 };
 use crate::impact::compute_impact_cone;
 use crate::model::RuleSeverity;
@@ -270,7 +270,7 @@ pub fn parse_policy_toml(content: &str) -> Result<GuardPolicy> {
                     return Err(anyhow!(
                         "Unknown property '{}' in [checks.constitution]",
                         key
-                    ))
+                    ));
                 }
             }
         } else if current_section == "checks.impact" {
@@ -648,8 +648,11 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
 
                 // Contract baseline validation
-                if contract.baseline_revision != "WORKTREE" && !contract.baseline_revision.is_empty() {
-                    match crate::git::resolve_baseline(&resolved_root, &contract.baseline_revision) {
+                if contract.baseline_revision != "WORKTREE"
+                    && !contract.baseline_revision.is_empty()
+                {
+                    match crate::git::resolve_baseline(&resolved_root, &contract.baseline_revision)
+                    {
                         Ok(Ok(_)) => {}
                         Ok(Err(err)) => {
                             findings.push(GuardFinding {
@@ -674,7 +677,9 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                                     contract.baseline_revision, e
                                 ),
                                 path: None,
-                                remediation: Some("Verify Git repository health and baseline commit.".to_string()),
+                                remediation: Some(
+                                    "Verify Git repository health and baseline commit.".to_string(),
+                                ),
                             });
                         }
                     }

@@ -24,18 +24,18 @@ use std::path::PathBuf;
 use std::process::Command;
 use uuid::Uuid;
 
-use engram::ci_guard::{run_guard, GuardOptions, GuardStatus};
+use engram::ci_guard::{GuardOptions, GuardStatus, run_guard};
 use engram::contract::{
-    create_contract, get_contract, ratify_contract, save_contract, RatificationStatus,
+    RatificationStatus, create_contract, get_contract, ratify_contract, save_contract,
 };
-use engram::drift::{analyze_drift, DriftCategory, DriftConfidence, DriftOptions, DriftSeverity};
+use engram::drift::{DriftCategory, DriftConfidence, DriftOptions, DriftSeverity, analyze_drift};
 use engram::memory::{
+    DurableMemory, LifecycleError, MemoryLifecycleState, MemoryScope, ScopeLevel,
     load_durable_memories, ratify_decision, re_ratify_decision, record_scoped_decision,
-    reject_decision, save_durable_memories, DurableMemory, LifecycleError, MemoryLifecycleState,
-    MemoryScope, ScopeLevel,
+    reject_decision, save_durable_memories,
 };
 use engram::model::EvidenceTier;
-use engram::telemetry::{load_events, verify_event_chain, EventChainStatus};
+use engram::telemetry::{EventChainStatus, load_events, verify_event_chain};
 
 fn setup_test_git_repo(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("engram_m5_test_{}_{}", prefix, Uuid::new_v4()));
@@ -218,9 +218,11 @@ fn test_2_confirmed_drift_against_ratified_decision() {
     assert_eq!(finding.severity, DriftSeverity::Warn);
     assert_eq!(finding.confidence, DriftConfidence::Confirmed);
     assert!(finding.id.starts_with("DRIFT-DEC-STALE-dec_orders"));
-    assert!(finding
-        .expected_state
-        .contains("before reaching 5 mutations"));
+    assert!(
+        finding
+            .expected_state
+            .contains("before reaching 5 mutations")
+    );
     assert!(finding.observed_state.contains("mutated 5 times"));
     assert!(finding.suggested_action.contains("re-ratify"));
     assert!(
@@ -278,9 +280,11 @@ fn test_3_potential_drift_provisional_decision_pending_review() {
     assert_eq!(finding.category, DriftCategory::DecisionDrift);
     assert_eq!(finding.confidence, DriftConfidence::Potential);
     assert_eq!(finding.severity, DriftSeverity::Info);
-    assert!(finding
-        .id
-        .starts_with("DRIFT-DEC-PROVISIONAL-dec_provisional_1"));
+    assert!(
+        finding
+            .id
+            .starts_with("DRIFT-DEC-PROVISIONAL-dec_provisional_1")
+    );
     assert!(finding.suggested_action.contains("ratify"));
 
     let _ = fs::remove_dir_all(&root);
@@ -880,18 +884,22 @@ fn test_12_contract_ratification_with_provenance_and_telemetry() {
     // Empty reviewer fails
     let err_by = ratify_contract(&root, &contract.contract_id, "  ", "Valid reason");
     assert!(err_by.is_err());
-    assert!(err_by
-        .unwrap_err()
-        .to_string()
-        .contains("reviewer ('by') must be non-empty"));
+    assert!(
+        err_by
+            .unwrap_err()
+            .to_string()
+            .contains("reviewer ('by') must be non-empty")
+    );
 
     // Empty reason fails
     let err_reas = ratify_contract(&root, &contract.contract_id, "sec_lead", "  ");
     assert!(err_reas.is_err());
-    assert!(err_reas
-        .unwrap_err()
-        .to_string()
-        .contains("ratification reason must be non-empty"));
+    assert!(
+        err_reas
+            .unwrap_err()
+            .to_string()
+            .contains("ratification reason must be non-empty")
+    );
 
     // Valid human ratification
     let ratified = ratify_contract(
@@ -990,7 +998,9 @@ fn test_13_ratify_decision_telemetry_failure_rolls_back() {
         err_msg.contains("Governance consistency error"),
         "Must return typed consistency error, got: {err_msg}"
     );
-    let consistency_err = ratify_err.downcast::<LifecycleError>().expect("Must be LifecycleError");
+    let consistency_err = ratify_err
+        .downcast::<LifecycleError>()
+        .expect("Must be LifecycleError");
     match consistency_err {
         LifecycleError::ConsistencyError {
             state_persisted,
@@ -1106,7 +1116,9 @@ fn test_14_reject_decision_telemetry_failure_rolls_back() {
         err_msg.contains("Governance consistency error"),
         "Must return typed consistency error, got: {err_msg}"
     );
-    let consistency_err = reject_err.downcast::<LifecycleError>().expect("Must be LifecycleError");
+    let consistency_err = reject_err
+        .downcast::<LifecycleError>()
+        .expect("Must be LifecycleError");
     match consistency_err {
         LifecycleError::ConsistencyError {
             state_persisted,
@@ -1219,7 +1231,9 @@ fn test_15_re_ratify_decision_telemetry_failure_rolls_back() {
         err_msg.contains("Governance consistency error"),
         "Must return typed consistency error, got: {err_msg}"
     );
-    let consistency_err = reratify_err.downcast::<LifecycleError>().expect("Must be LifecycleError");
+    let consistency_err = reratify_err
+        .downcast::<LifecycleError>()
+        .expect("Must be LifecycleError");
     match consistency_err {
         LifecycleError::ConsistencyError {
             state_persisted,

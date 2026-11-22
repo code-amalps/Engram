@@ -30,8 +30,8 @@ use engram::empirical_live::stats::{
     PILOT_VARIANCE_UPPER_80_MULTIPLIER, SecondaryHypothesis, calculate_confirmatory_sample_size,
     evaluate_itt_sensitivity, evaluate_paired_savings, holm_bonferroni_adjust, student_t_cdf,
 };
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Static mutex to serialize tests that mutate or rely on sensitive process-wide environment variables.

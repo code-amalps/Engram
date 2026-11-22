@@ -3,13 +3,13 @@
 //! dependency classification (LOCAL, VENDORED, REPLACED_LOCAL, REPLACED_EXTERNAL, EXTERNAL, UNRESOLVED),
 //! two-stage structural interface satisfaction, and test conventions.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Node, Parser as TsParser};
 
-use crate::analyzer::{node_text, Relationship, Symbol};
+use crate::analyzer::{Relationship, Symbol, node_text};
 use crate::storage::hash;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -34,9 +34,17 @@ This register formally documents the known technical, empirical, and architectur
 - **Boundary Restriction:** Agents that attempt to call specialist endpoints (such as `engram_get_impact` or `engram_query_graph`) without `--all-tools` receive a JSON-RPC method not found error (`code -32601`).
 - **Remediation Target:** Phase 8.1 will introduce `engram_engage` as a unified single-shot endpoint, eliminating dual-surface confusion while keeping context token overhead minimal.
 
-### LIM-05: Non-Deterministic Linker Timestamps on Windows MSVC Rebuilds
-- **Observed Behavior:** Rebuilding the clean Git worktree on Windows MSVC without explicit flags produces identical machine code in `.text` and data in `.data`, but causes a hash variance in SHA-256 due to `IMAGE_FILE_HEADER.TimeDateStamp` (2 bytes) and random CodeView PDB GUID (16 bytes).
-- **Remediation Target:** Phase 7.2 investigates `/BREPRO` linker integration to guarantee bit-for-bit reproducible Windows builds.
+### LIM-05: Non-Deterministic Linker Timestamps on Windows MSVC Rebuilds (Resolved)
+- **Observed Behavior:** Rebuilding the clean Git worktree on Windows MSVC without explicit flags produces identical machine code in `.text` and data in `.data`, but causes a hash variance in SHA-256 due to `TimeDateStamp` and random CodeView PDB GUID (up to 24 bytes total).
+- **Resolution:** Resolved in Phase 7.2 / 7.3 by configuring `-C link-arg=/BREPRO` in `.cargo/config.toml`, empirically verified to yield 100% bit-for-bit identical binary hashes (`A6E8AD9A...`).
+
+### LIM-06: Pre-v1.6 Clippy Style Diagnostics on Historical Code
+- **Observed Behavior:** On Rust 1.85+ / 2024 edition toolchains, 215 style lints (e.g. `empty_line_after_doc_comments`, `manual_div_ceil`, `collapsible_if`) are reported on pre-existing Phase 1–5 files.
+- **Current Mitigation:** All genuine fatal compiler defects (such as raw pointer dereference errors in `src/empirical_live/security.rs`) have been resolved. `cargo clippy --all-targets --all-features` compiles with Exit Code 0. Strict `-D warnings` cleanup is scheduled as part of the v1.6 codebase modernization.
+
+### LIM-07: Legal Counsel Review Requirement (`LEGAL_REVIEW_PENDING`)
+- **Observed Behavior:** While technical source correspondence, public Git availability, and third-party license inventories are forensicly verified, qualified external legal counsel has not yet formally reviewed AGPLv3 Section 13 obligations.
+- **Governing Posture:** All distribution remains classified as an **Experimental Developer Preview** under `LEGAL_REVIEW_PENDING`. Formal legal counsel sign-off is required prior to non-preview production distribution.
 
 ---
 

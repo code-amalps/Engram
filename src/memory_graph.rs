@@ -1,11 +1,11 @@
 //! Memory ↔ Code Relational Graph: bidirectional GOVERNS, EXPLAINS, MOTIVATED_BY, and SUPERSEDES relations.
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::memory::{load_durable_memories, DurableMemory, ScopeLevel};
+use crate::memory::{DurableMemory, ScopeLevel, load_durable_memories};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

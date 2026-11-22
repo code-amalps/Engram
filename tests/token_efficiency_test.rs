@@ -1,6 +1,6 @@
+use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
-use serde_json::json;
 
 use engram::analyzer::analyze;
 use engram::budget::DetailLevel;
@@ -8,7 +8,11 @@ use engram::compiler::{clear_context_cache, context_scoped_optimized, context_sc
 use engram::mcp::mcp_call;
 
 fn setup_test_workspace(name: &str) -> PathBuf {
-    let ws = std::env::temp_dir().join(format!("engram_token_eff_{}_{}", name, uuid::Uuid::new_v4()));
+    let ws = std::env::temp_dir().join(format!(
+        "engram_token_eff_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&ws).unwrap();
     ws
 }
@@ -53,23 +57,60 @@ pub fn calculate_user_tax(account: &UserAccount, rate: f64) -> f64 {
 
     // 1. Compile with DetailLevel::Full
     clear_context_cache();
-    let ctx_full = context_scoped_with_detail(&ws, "calculate user tax", 2000, None, None, DetailLevel::Full).unwrap();
+    let ctx_full = context_scoped_with_detail(
+        &ws,
+        "calculate user tax",
+        2000,
+        None,
+        None,
+        DetailLevel::Full,
+    )
+    .unwrap();
     let tokens_full = ctx_full.estimated_tokens;
 
     // 2. Compile with DetailLevel::Contracted
     clear_context_cache();
-    let ctx_contracted = context_scoped_with_detail(&ws, "calculate user tax", 2000, None, None, DetailLevel::Contracted).unwrap();
+    let ctx_contracted = context_scoped_with_detail(
+        &ws,
+        "calculate user tax",
+        2000,
+        None,
+        None,
+        DetailLevel::Contracted,
+    )
+    .unwrap();
     let tokens_contracted = ctx_contracted.estimated_tokens;
 
     // 3. Compile with DetailLevel::Compact
     clear_context_cache();
-    let ctx_compact = context_scoped_with_detail(&ws, "calculate user tax", 2000, None, None, DetailLevel::Compact).unwrap();
+    let ctx_compact = context_scoped_with_detail(
+        &ws,
+        "calculate user tax",
+        2000,
+        None,
+        None,
+        DetailLevel::Compact,
+    )
+    .unwrap();
     let tokens_compact = ctx_compact.estimated_tokens;
 
-    println!("Full tokens: {}, Contracted tokens: {}, Compact tokens: {}", tokens_full, tokens_contracted, tokens_compact);
+    println!(
+        "Full tokens: {}, Contracted tokens: {}, Compact tokens: {}",
+        tokens_full, tokens_contracted, tokens_compact
+    );
 
-    assert!(tokens_compact < tokens_contracted, "Compact ({}) must use fewer tokens than Contracted ({})", tokens_compact, tokens_contracted);
-    assert!(tokens_contracted <= tokens_full, "Contracted ({}) must use <= tokens than Full ({})", tokens_contracted, tokens_full);
+    assert!(
+        tokens_compact < tokens_contracted,
+        "Compact ({}) must use fewer tokens than Contracted ({})",
+        tokens_compact,
+        tokens_contracted
+    );
+    assert!(
+        tokens_contracted <= tokens_full,
+        "Contracted ({}) must use <= tokens than Full ({})",
+        tokens_contracted,
+        tokens_full
+    );
 
     // Verify compact content contains metadata only and no complete block bodies
     let compact_file = ctx_compact.files.first().expect("File should be present");
@@ -77,9 +118,17 @@ pub fn calculate_user_tax(account: &UserAccount, rate: f64) -> f64 {
     assert!(!compact_file.content.contains("[COMPLETE_BLOCK]"));
 
     // Verify significant reduction (at least 30% reduction from Full to Compact)
-    let reduction_pct = (tokens_full.saturating_sub(tokens_compact) as f64) / (tokens_full as f64) * 100.0;
-    println!("Measured token reduction from Full to Compact: {:.1}%", reduction_pct);
-    assert!(reduction_pct >= 30.0, "Progressive compact disclosure must achieve at least 30% reduction (measured: {:.1}%)", reduction_pct);
+    let reduction_pct =
+        (tokens_full.saturating_sub(tokens_compact) as f64) / (tokens_full as f64) * 100.0;
+    println!(
+        "Measured token reduction from Full to Compact: {:.1}%",
+        reduction_pct
+    );
+    assert!(
+        reduction_pct >= 30.0,
+        "Progressive compact disclosure must achieve at least 30% reduction (measured: {:.1}%)",
+        reduction_pct
+    );
 
     fs::remove_dir_all(&ws).ok();
 }
@@ -111,7 +160,8 @@ pub fn helper_omega() -> &'static str { "omega" }
         None,
         DetailLevel::Contracted,
         Some(&targets),
-    ).unwrap();
+    )
+    .unwrap();
 
     let file = ctx_targeted.files.first().expect("File should be present");
     // calculate_tax should have excerpt, others should not have multi-line excerpt
@@ -128,16 +178,35 @@ fn test_context_deduplication() {
     fs::create_dir_all(&src).unwrap();
 
     // Two files with identical helper signature
-    fs::write(src.join("a.rs"), "pub fn common_utility(x: i32) -> i32 { x + 1 }\npub fn unique_a() {}\n").unwrap();
-    fs::write(src.join("b.rs"), "pub fn common_utility(x: i32) -> i32 { x + 1 }\npub fn unique_b() {}\n").unwrap();
+    fs::write(
+        src.join("a.rs"),
+        "pub fn common_utility(x: i32) -> i32 { x + 1 }\npub fn unique_a() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("b.rs"),
+        "pub fn common_utility(x: i32) -> i32 { x + 1 }\npub fn unique_b() {}\n",
+    )
+    .unwrap();
     analyze(&ws).unwrap();
 
     clear_context_cache();
-    let ctx = context_scoped_with_detail(&ws, "common utility work", 2000, None, None, DetailLevel::Compact).unwrap();
+    let ctx = context_scoped_with_detail(
+        &ws,
+        "common utility work",
+        2000,
+        None,
+        None,
+        DetailLevel::Compact,
+    )
+    .unwrap();
     let all_content: String = ctx.files.iter().map(|f| f.content.as_str()).collect();
 
     println!("All files content:\n{}", all_content);
-    assert!(all_content.contains("[DEDUPLICATED]"), "Second occurrence of identical signature must be tagged [DEDUPLICATED]");
+    assert!(
+        all_content.contains("[DEDUPLICATED]"),
+        "Second occurrence of identical signature must be tagged [DEDUPLICATED]"
+    );
 
     fs::remove_dir_all(&ws).ok();
 }
@@ -186,8 +255,24 @@ fn test_compiled_context_query_cache() {
     analyze(&ws).unwrap();
 
     clear_context_cache();
-    let ctx1 = context_scoped_with_detail(&ws, "cached work query", 1000, None, None, DetailLevel::Compact).unwrap();
-    let ctx2 = context_scoped_with_detail(&ws, "cached work query", 1000, None, None, DetailLevel::Compact).unwrap();
+    let ctx1 = context_scoped_with_detail(
+        &ws,
+        "cached work query",
+        1000,
+        None,
+        None,
+        DetailLevel::Compact,
+    )
+    .unwrap();
+    let ctx2 = context_scoped_with_detail(
+        &ws,
+        "cached work query",
+        1000,
+        None,
+        None,
+        DetailLevel::Compact,
+    )
+    .unwrap();
 
     assert_eq!(ctx1.task, ctx2.task);
     assert_eq!(ctx1.estimated_tokens, ctx2.estimated_tokens);

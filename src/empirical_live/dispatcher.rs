@@ -606,7 +606,8 @@ impl SandboxToolDispatcher {
                         }
                         let toolchains_dir = rpath.join("toolchains");
                         if toolchains_dir.exists() {
-                            let _ = profile.grant_path_access(&toolchains_dir, GENERIC_READ_EXECUTE);
+                            let _ =
+                                profile.grant_path_access(&toolchains_dir, GENERIC_READ_EXECUTE);
                         }
                     }
                 }

@@ -1,7 +1,7 @@
 //! MCP Server implementation: stdio JSON-RPC 2.0 protocol exposing engineering intelligence.
 
-use anyhow::{anyhow, bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::{
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
@@ -186,7 +186,6 @@ pub fn tool_error(msg: impl Into<String>) -> Value {
     })
 }
 
-
 /// Resolve the configured response byte ceiling.
 /// Precedence:
 /// 1. Tool argument "max_bytes" or "byte_limit" (clamped to 1024..=65536)
@@ -267,29 +266,50 @@ pub fn enforce_mcp_envelope_boundary(
 
     // Level 2: Condense narrative explanations and retrieval guidance
     if let Some(obj) = payload.as_object_mut() {
-        if let Some(exp) = obj.get_mut("explanation").and_then(|v| v.as_str().map(str::to_string)) {
+        if let Some(exp) = obj
+            .get_mut("explanation")
+            .and_then(|v| v.as_str().map(str::to_string))
+        {
             if exp.len() > 150 {
                 let truncated = safe_truncate_str(&exp, 150);
-                obj.insert("explanation".to_string(), json!(format!("{}... [Condensed]", truncated)));
+                obj.insert(
+                    "explanation".to_string(),
+                    json!(format!("{}... [Condensed]", truncated)),
+                );
             }
         }
         if let Some(guidance) = obj.get_mut("targeted_retrieval_guidance") {
             *guidance = json!("Use engram_inspect_symbol for omitted items.");
         }
-        if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+        if let Some(man) = obj
+            .get_mut("omission_manifest")
+            .and_then(|v| v.as_object_mut())
+        {
             if let Some(g) = man.get_mut("targeted_retrieval_guidance") {
                 *g = json!("Use engram_inspect_symbol for omitted items.");
             }
         }
-        if let Some(summary) = obj.get_mut("summary").and_then(|v| v.as_str().map(str::to_string)) {
+        if let Some(summary) = obj
+            .get_mut("summary")
+            .and_then(|v| v.as_str().map(str::to_string))
+        {
             if summary.len() > 100 {
                 let truncated = safe_truncate_str(&summary, 100);
-                obj.insert("summary".to_string(), json!(format!("{}... [Condensed]", truncated)));
+                obj.insert(
+                    "summary".to_string(),
+                    json!(format!("{}... [Condensed]", truncated)),
+                );
             }
         }
-        if let Some(na) = obj.get_mut("next_action").and_then(|v| v.as_str().map(str::to_string)) {
+        if let Some(na) = obj
+            .get_mut("next_action")
+            .and_then(|v| v.as_str().map(str::to_string))
+        {
             if na.len() > 80 {
-                obj.insert("next_action".to_string(), json!("Proceed with planned changes."));
+                obj.insert(
+                    "next_action".to_string(),
+                    json!("Proceed with planned changes."),
+                );
             }
         }
     }
@@ -311,12 +331,18 @@ pub fn enforce_mcp_envelope_boundary(
         if let Some(mc) = obj.get_mut("memory_conflicts") {
             *mc = json!([]);
         }
-        if let Some(cw) = obj.get_mut("cochange_warnings").and_then(|v| v.as_array_mut()) {
+        if let Some(cw) = obj
+            .get_mut("cochange_warnings")
+            .and_then(|v| v.as_array_mut())
+        {
             if cw.len() > 1 {
                 cw.truncate(1);
             }
         }
-        if let Some(gr) = obj.get_mut("governing_rules").and_then(|v| v.as_array_mut()) {
+        if let Some(gr) = obj
+            .get_mut("governing_rules")
+            .and_then(|v| v.as_array_mut())
+        {
             if gr.len() > 2 {
                 gr.truncate(2);
             }
@@ -326,27 +352,45 @@ pub fn enforce_mcp_envelope_boundary(
         }
         let mut shed_from_cone = 0;
         if let Some(cone) = obj.get_mut("impact_cone").and_then(|v| v.as_object_mut()) {
-            if let Some(hist) = cone.get_mut("historical_entities").and_then(|v| v.as_array_mut()) {
+            if let Some(hist) = cone
+                .get_mut("historical_entities")
+                .and_then(|v| v.as_array_mut())
+            {
                 shed_from_cone += hist.len();
                 hist.clear();
             }
-            if let Some(deps) = cone.get_mut("import_dependent_entities").and_then(|v| v.as_array_mut()) {
+            if let Some(deps) = cone
+                .get_mut("import_dependent_entities")
+                .and_then(|v| v.as_array_mut())
+            {
                 if deps.len() > 1 {
                     shed_from_cone += deps.len() - 1;
                     deps.truncate(1);
                 }
             }
-            if let Some(deps) = cone.get_mut("dependency_entities").and_then(|v| v.as_array_mut()) {
+            if let Some(deps) = cone
+                .get_mut("dependency_entities")
+                .and_then(|v| v.as_array_mut())
+            {
                 if deps.len() > 1 {
                     deps.truncate(1);
                 }
             }
         }
         if shed_from_cone > 0 {
-            if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+            if let Some(man) = obj
+                .get_mut("omission_manifest")
+                .and_then(|v| v.as_object_mut())
+            {
                 man.insert("budget_status".to_string(), json!("OMISSIONS_RECORDED"));
-                let cur = man.get("omitted_items_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                man.insert("omitted_items_count".to_string(), json!(cur + shed_from_cone as u64));
+                let cur = man
+                    .get("omitted_items_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                man.insert(
+                    "omitted_items_count".to_string(),
+                    json!(cur + shed_from_cone as u64),
+                );
             }
         }
         if let Some(files) = obj.get_mut("target_files").and_then(|v| v.as_array_mut()) {
@@ -371,25 +415,40 @@ pub fn enforce_mcp_envelope_boundary(
     if let Some(obj) = payload.as_object_mut() {
         let mut shed_from_cone_l4 = 0;
         if let Some(cone) = obj.get_mut("impact_cone").and_then(|v| v.as_object_mut()) {
-            if let Some(direct) = cone.get_mut("direct_entities").and_then(|v| v.as_array_mut()) {
+            if let Some(direct) = cone
+                .get_mut("direct_entities")
+                .and_then(|v| v.as_array_mut())
+            {
                 if direct.len() > 1 {
                     direct.truncate(1);
                 }
             }
-            if let Some(deps) = cone.get_mut("import_dependent_entities").and_then(|v| v.as_array_mut()) {
+            if let Some(deps) = cone
+                .get_mut("import_dependent_entities")
+                .and_then(|v| v.as_array_mut())
+            {
                 shed_from_cone_l4 += deps.len();
                 deps.clear();
             }
         }
-        if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+        if let Some(man) = obj
+            .get_mut("omission_manifest")
+            .and_then(|v| v.as_object_mut())
+        {
             man.insert("sample_omissions".to_string(), json!([]));
             man.insert("omission_manifest".to_string(), json!([]));
             man.insert("omission_reasons".to_string(), json!({}));
             man.insert("manifest_truncated".to_string(), json!(true));
             if shed_from_cone_l4 > 0 {
                 man.insert("budget_status".to_string(), json!("OMISSIONS_RECORDED"));
-                let cur = man.get("omitted_items_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                man.insert("omitted_items_count".to_string(), json!(cur + shed_from_cone_l4 as u64));
+                let cur = man
+                    .get("omitted_items_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                man.insert(
+                    "omitted_items_count".to_string(),
+                    json!(cur + shed_from_cone_l4 as u64),
+                );
             }
         }
         if let Some(gaps) = obj.get_mut("ambiguity_gaps").and_then(|v| v.as_array_mut()) {
@@ -457,7 +516,11 @@ pub fn enforce_mcp_envelope_boundary(
     }
     if let Some(t) = payload.get("task") {
         let task_str = t.as_str().unwrap_or("");
-        let condensed_task = if task_str.len() > 60 { safe_truncate_str(task_str, 60) } else { task_str };
+        let condensed_task = if task_str.len() > 60 {
+            safe_truncate_str(task_str, 60)
+        } else {
+            task_str
+        };
         min_payload["task"] = json!(condensed_task);
     }
     if let Some(cid) = payload.get("contract_id") {
@@ -484,7 +547,8 @@ pub fn enforce_mcp_envelope_boundary(
         "message": err_msg,
         "byte_limit": byte_limit
     });
-    let err_str = serde_json::to_string(&err_json).unwrap_or_else(|_| r#"{"error":"BOUNDARY_EXCEEDED"}"#.to_string());
+    let err_str = serde_json::to_string(&err_json)
+        .unwrap_or_else(|_| r#"{"error":"BOUNDARY_EXCEEDED"}"#.to_string());
     let err_res = json!({
         "content": [{
             "type": "text",
@@ -767,7 +831,10 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let subpath = args["subpath"].as_str();
             let language = args["language"].as_str();
             let target_symbols: Option<Vec<String>> = args["symbols"].as_array().map(|arr| {
-                arr.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect()
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .collect()
             });
 
             let ctx = crate::compiler::context_scoped_optimized(
@@ -893,12 +960,8 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 max_relationships_per_entity: 5,
                 prioritize_workspace: true,
             };
-            let (cone, mut omissions) = crate::impact::compute_impact_cone_with_budget(
-                &conn,
-                &root,
-                target,
-                budget_opts,
-            )?;
+            let (cone, mut omissions) =
+                crate::impact::compute_impact_cone_with_budget(&conn, &root, target, budget_opts)?;
             let active_contract = crate::contract::get_active_contract(&root).ok().flatten();
             let authorization = active_contract
                 .as_ref()
@@ -986,7 +1049,10 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
                             if let Some(arr) = hist.as_array_mut() {
                                 for item in arr.drain(..) {
                                     omissions.push(crate::budget::OmissionEntry {
-                                        context_item_id: item["entity_id"].as_str().unwrap_or("").to_string(),
+                                        context_item_id: item["entity_id"]
+                                            .as_str()
+                                            .unwrap_or("")
+                                            .to_string(),
                                         symbol: None,
                                         file: item["path"].as_str().unwrap_or("").to_string(),
                                         context_type: "HISTORICAL_ENTITY".to_string(),
@@ -994,7 +1060,8 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
                                         original_token_count: 50,
                                         included_token_count: 0,
                                         omitted_token_count: 50,
-                                        omission_reason: "Byte limit exceeded; shed Tier 5 entity".to_string(),
+                                        omission_reason: "Byte limit exceeded; shed Tier 5 entity"
+                                            .to_string(),
                                         omission_status: "CAPACITY_PRUNED".to_string(),
                                         retrievable_via_targeted_request: true,
                                     });
@@ -1010,7 +1077,10 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
                         if let Some(s) = exc.as_str() {
                             if s.len() > 400 {
                                 let truncated = safe_truncate_str(s, 250);
-                                *exc = json!(format!("{}\n// ... [Excerpt truncated to fit context budget]", truncated));
+                                *exc = json!(format!(
+                                    "{}\n// ... [Excerpt truncated to fit context budget]",
+                                    truncated
+                                ));
                                 res_json["completeness"] = json!("CONTRACTED");
                             }
                         }
@@ -1526,7 +1596,12 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
 pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
     let byte_limit = resolve_byte_limit(args);
     let payload = mcp_call_raw(root, name, args)?;
-    Ok(enforce_mcp_envelope_boundary(name, payload, byte_limit, &json!(1)))
+    Ok(enforce_mcp_envelope_boundary(
+        name,
+        payload,
+        byte_limit,
+        &json!(1),
+    ))
 }
 
 pub fn core_tools_definitions() -> Value {

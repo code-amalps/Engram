@@ -33,10 +33,10 @@ pub mod setup;
 pub mod storage;
 pub mod telemetry;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -1270,7 +1270,9 @@ fn run() -> Result<()> {
                     if let Some(ref sig) = res.classification_signals {
                         eprintln!("  Reason: {}", sig.reason);
                     }
-                    eprintln!("  Bypassed Change Contract and preflight round trips. Proceed directly to editing.");
+                    eprintln!(
+                        "  Bypassed Change Contract and preflight round trips. Proceed directly to editing."
+                    );
                 } else if res.clipboard_copied {
                     eprintln!(
                         "✓ Locked Change Contract '{}' and copied ~{} tokens of Turn-0 context to clipboard.",
@@ -1430,7 +1432,9 @@ fn run() -> Result<()> {
                     if dry_run {
                         println!("  ℹ️ DRY-RUN ONLY. No files were written to disk.");
                     } else {
-                        println!("  🚀 Turn-0 context ready. Agent will execute directly without get_context or preflight tool turns.");
+                        println!(
+                            "  🚀 Turn-0 context ready. Agent will execute directly without get_context or preflight tool turns."
+                        );
                     }
                 }
             }
@@ -1829,7 +1833,7 @@ fn main() {
 mod tests {
     use super::*;
     use analyzer::{estimate_tokens, language, matches_pattern, parse_file, redact, tokens};
-    use model::{analysis_key, Evidence, EvidenceTier};
+    use model::{Evidence, EvidenceTier, analysis_key};
 
     #[test]
     fn test_secret_redaction() {
@@ -1928,12 +1932,16 @@ mod tests {
         let code = b"class OrderProcessor:\n    def process_order(self, order_id):\n        pass\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.py", code, "rev1").unwrap();
         assert_eq!(record.language, "python");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
     }
 
     #[test]
@@ -1941,15 +1949,21 @@ mod tests {
         let code = b"export interface IOrder { id: string; }\nexport class OrderService implements IOrder {\n  getOrder(id: string) { return id; }\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.ts", code, "rev1").unwrap();
         assert_eq!(record.language, "typescript");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "IOrder" && s.kind == "INTERFACE"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "getOrder" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "IOrder" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "getOrder" && s.kind == "METHOD")
+        );
     }
 
     #[test]
@@ -1958,12 +1972,16 @@ mod tests {
         let (record, symbols, _) =
             parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
         assert_eq!(record.language, "csharp");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "CartService" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Checkout" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "CartService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Checkout" && s.kind == "METHOD")
+        );
     }
 
     #[test]
@@ -1971,15 +1989,21 @@ mod tests {
         let code = b"pub struct OrderService;\nimpl OrderService {\n    pub fn process_order(&self) {}\n}\npub trait OrderRepository {}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.rs", code, "rev1").unwrap();
         assert_eq!(record.language, "rust");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT")
+        );
     }
 
     #[test]
@@ -1987,17 +2011,25 @@ mod tests {
         let code = b"package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV() error { return nil }\n\ntype Exporter interface {\n    Export() error\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.go", code, "rev1").unwrap();
         assert_eq!(record.language, "go");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Exporter" && s.kind == "INTERFACE"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "orders" && s.kind == "MODULE"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Exporter" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "orders" && s.kind == "MODULE")
+        );
     }
 }

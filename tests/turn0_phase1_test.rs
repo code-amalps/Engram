@@ -69,12 +69,20 @@ fn test_prepare_cli_with_task_flag_and_positional() {
         ])
         .output()
         .expect("engram prepare --task failed");
-    assert!(prep_flag_out.status.success(), "prepare --task must succeed");
+    assert!(
+        prep_flag_out.status.success(),
+        "prepare --task must succeed"
+    );
 
     let v_flag: Value = serde_json::from_slice(&prep_flag_out.stdout).expect("valid json");
     assert!(v_flag["contract_id"].as_str().unwrap().starts_with("ctr_"));
     assert_eq!(v_flag["status"].as_str().unwrap(), "ReadyForImplementation");
-    assert!(v_flag["content"].as_str().unwrap().contains("Refactor startApp"));
+    assert!(
+        v_flag["content"]
+            .as_str()
+            .unwrap()
+            .contains("Refactor startApp")
+    );
     assert!(v_flag["content"].as_str().unwrap().contains("Provenance:"));
 
     // 2. Run using positional argument (backward compatibility)
@@ -88,11 +96,17 @@ fn test_prepare_cli_with_task_flag_and_positional() {
         ])
         .output()
         .expect("engram prepare positional failed");
-    assert!(prep_pos_out.status.success(), "prepare <task> positional must succeed");
+    assert!(
+        prep_pos_out.status.success(),
+        "prepare <task> positional must succeed"
+    );
 
     let v_pos: Value = serde_json::from_slice(&prep_pos_out.stdout).expect("valid json");
     assert!(v_pos["contract_id"].as_str().unwrap().starts_with("ctr_"));
-    assert_eq!(v_pos["contract_id"], v_flag["contract_id"], "Identical task should reuse contract");
+    assert_eq!(
+        v_pos["contract_id"], v_flag["contract_id"],
+        "Identical task should reuse contract"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -112,7 +126,9 @@ fn test_prepare_cli_missing_task_error() {
     assert!(!out.status.success(), "prepare without task must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("Task description required") || stderr.contains("required") || stderr.contains("Usage:"),
+        stderr.contains("Task description required")
+            || stderr.contains("required")
+            || stderr.contains("Usage:"),
         "stderr must report missing task argument: {}",
         stderr
     );
@@ -136,7 +152,11 @@ fn test_prepare_cli_dry_run() {
     let src_dir = ws.join("src");
     fs::create_dir_all(&src_dir).unwrap();
     let file = src_dir.join("calc.ts");
-    fs::write(&file, "export const add = (a: number, b: number) => a + b;\n").unwrap();
+    fs::write(
+        &file,
+        "export const add = (a: number, b: number) => a + b;\n",
+    )
+    .unwrap();
 
     let prep_out = Command::new(bin)
         .arg("-C")
@@ -158,10 +178,16 @@ fn test_prepare_cli_dry_run() {
 
     // Verify neither active_task.md nor copilot-instructions.md were created
     let active_task = ws.join(".engram").join("active_task.md");
-    assert!(!active_task.exists(), "active_task.md must NOT be created under --dry-run");
+    assert!(
+        !active_task.exists(),
+        "active_task.md must NOT be created under --dry-run"
+    );
 
     let inst_path = ws.join(".github").join("copilot-instructions.md");
-    assert!(!inst_path.exists(), "copilot-instructions.md must NOT be created under --dry-run");
+    assert!(
+        !inst_path.exists(),
+        "copilot-instructions.md must NOT be created under --dry-run"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -220,7 +246,8 @@ fn test_instruction_idempotency_and_preservation() {
     let inst_file = ws.join(".github").join("copilot-instructions.md");
     fs::create_dir_all(inst_file.parent().unwrap()).unwrap();
 
-    let user_header = "# Team Engineering Standards\n- Write unit tests.\n- Follow TypeScript strict mode.\n\n";
+    let user_header =
+        "# Team Engineering Standards\n- Write unit tests.\n- Follow TypeScript strict mode.\n\n";
     let user_footer = "\n# Performance Guidelines\n- Limit bundle size under 200KB.\n";
     fs::write(&inst_file, format!("{}{}", user_header, user_footer)).unwrap();
 
@@ -241,8 +268,16 @@ fn test_instruction_idempotency_and_preservation() {
     let content1 = fs::read_to_string(&inst_file).unwrap();
     assert!(content1.starts_with("# Team Engineering Standards"));
     assert!(content1.contains("- Limit bundle size under 200KB."));
-    assert_eq!(content1.matches(START_MARKER).count(), 1, "Exactly one start marker after run 1");
-    assert_eq!(content1.matches(END_MARKER).count(), 1, "Exactly one end marker after run 1");
+    assert_eq!(
+        content1.matches(START_MARKER).count(),
+        1,
+        "Exactly one start marker after run 1"
+    );
+    assert_eq!(
+        content1.matches(END_MARKER).count(),
+        1,
+        "Exactly one end marker after run 1"
+    );
     assert!(content1.contains("Generated locally by Engram"));
     assert!(content1.contains("VERIFICATION GUIDANCE:"));
 
@@ -261,9 +296,20 @@ fn test_instruction_idempotency_and_preservation() {
     assert!(out2.status.success());
 
     let content2 = fs::read_to_string(&inst_file).unwrap();
-    assert_eq!(content1, content2, "Repeated injection must be byte-for-byte identical (idempotent)");
-    assert_eq!(content2.matches(START_MARKER).count(), 1, "Exactly one start marker after run 2");
-    assert_eq!(content2.matches(END_MARKER).count(), 1, "Exactly one end marker after run 2");
+    assert_eq!(
+        content1, content2,
+        "Repeated injection must be byte-for-byte identical (idempotent)"
+    );
+    assert_eq!(
+        content2.matches(START_MARKER).count(),
+        1,
+        "Exactly one start marker after run 2"
+    );
+    assert_eq!(
+        content2.matches(END_MARKER).count(),
+        1,
+        "Exactly one end marker after run 2"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -303,13 +349,23 @@ fn test_malformed_instruction_file_safeguard() {
         .output()
         .expect("prepare inject on malformed file");
 
-    assert!(!out.status.success(), "Command must fail on malformed managed block");
+    assert!(
+        !out.status.success(),
+        "Command must fail on malformed managed block"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("Malformed Engram managed block"), "Error must explain malformed block: {}", stderr);
+    assert!(
+        stderr.contains("Malformed Engram managed block"),
+        "Error must explain malformed block: {}",
+        stderr
+    );
 
     // Verify file content was NOT overwritten or corrupted
     let content_after = fs::read_to_string(&inst_file).unwrap();
-    assert_eq!(corrupted_content, content_after, "File content must be preserved unchanged when block is malformed");
+    assert_eq!(
+        corrupted_content, content_after,
+        "File content must be preserved unchanged when block is malformed"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -329,12 +385,21 @@ fn test_adaptive_bypass_comprehensive_matrix() {
 
     let check_bypass = |task: &str, no_bypass: bool| -> (bool, String) {
         let mut cmd = Command::new(bin);
-        cmd.arg("-C").arg(&ws).arg("prepare").arg("--task").arg(task).arg("--json");
+        cmd.arg("-C")
+            .arg(&ws)
+            .arg("prepare")
+            .arg("--task")
+            .arg(task)
+            .arg("--json");
         if no_bypass {
             cmd.arg("--no-bypass");
         }
         let out = cmd.output().expect("prepare check");
-        assert!(out.status.success(), "prepare must succeed for task: {}", task);
+        assert!(
+            out.status.success(),
+            "prepare must succeed for task: {}",
+            task
+        );
         let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
         let bypass = v["bypass_active"].as_bool().unwrap();
         let reason = if let Some(sig) = v.get("classification_signals") {
@@ -347,10 +412,17 @@ fn test_adaptive_bypass_comprehensive_matrix() {
 
     // 1. Trivial typo task -> Bypass = true
     let (bypass, reason) = check_bypass("Fix typo in src/button.css", false);
-    assert!(bypass, "Single file typo must be bypassed: reason={}", reason);
+    assert!(
+        bypass,
+        "Single file typo must be bypassed: reason={}",
+        reason
+    );
 
     // 2. Ambiguity signal -> Bypass = false
-    let (bypass, _) = check_bypass("Investigate performance or something in src/button.css", false);
+    let (bypass, _) = check_bypass(
+        "Investigate performance or something in src/button.css",
+        false,
+    );
     assert!(!bypass, "Ambiguous task must NOT be bypassed");
 
     // 3. Security keyword -> Bypass = false
@@ -379,7 +451,10 @@ fn test_adaptive_bypass_comprehensive_matrix() {
 
     // 9. Trivial task with --no-bypass override -> Bypass = false
     let (bypass, _) = check_bypass("Fix typo in src/button.css", true);
-    assert!(!bypass, "Trivial task with --no-bypass must NOT be bypassed");
+    assert!(
+        !bypass,
+        "Trivial task with --no-bypass must NOT be bypassed"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }

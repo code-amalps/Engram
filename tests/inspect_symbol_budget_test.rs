@@ -1,17 +1,20 @@
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use serde_json::Value;
 
 use engram::analyzer::analyze;
-use engram::storage::db;
 use engram::impact::{
-    compute_impact_cone_with_budget, format_impact_explanation,
-    ImpactBudgetOptions,
+    ImpactBudgetOptions, compute_impact_cone_with_budget, format_impact_explanation,
 };
 use engram::mcp::mcp_call;
+use engram::storage::db;
 
 fn setup_test_workspace(name: &str) -> PathBuf {
-    let ws = std::env::temp_dir().join(format!("engram_inspect_budget_{}_{}", name, uuid::Uuid::new_v4()));
+    let ws = std::env::temp_dir().join(format!(
+        "engram_inspect_budget_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&ws).unwrap();
     ws
 }
@@ -54,7 +57,8 @@ fn test_inspect_symbol_excessive_dependency_fanout_pruning() {
   execute() { return 42; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Create 15 dependent services that import HubService
     for i in 1..=15 {
@@ -68,7 +72,8 @@ export class Dep{}Service {{
 "#,
                 i
             ),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     analyze(&ws).unwrap();
@@ -81,7 +86,8 @@ export class Dep{}Service {{
         max_relationships_per_entity: 3,
         prioritize_workspace: true,
     };
-    let (cone, omissions) = compute_impact_cone_with_budget(&conn, &ws, "src/hub.ts", opts).unwrap();
+    let (cone, omissions) =
+        compute_impact_cone_with_budget(&conn, &ws, "src/hub.ts", opts).unwrap();
 
     assert_eq!(
         cone.import_dependent_entities.len(),
@@ -110,12 +116,21 @@ export class Dep{}Service {{
     let parsed: Value = serde_json::from_str(content_text).unwrap();
 
     // Verify bounded entities in MCP result
-    let import_deps = parsed["impact_cone"]["import_dependent_entities"].as_array().unwrap();
-    assert_eq!(import_deps.len(), 4, "MCP output must respect max_entities: 4");
+    let import_deps = parsed["impact_cone"]["import_dependent_entities"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        import_deps.len(),
+        4,
+        "MCP output must respect max_entities: 4"
+    );
 
     // Verify omission manifest in MCP result
     let manifest = &parsed["omission_manifest"];
-    assert_eq!(manifest["budget_status"].as_str().unwrap(), "OMISSIONS_RECORDED");
+    assert_eq!(
+        manifest["budget_status"].as_str().unwrap(),
+        "OMISSIONS_RECORDED"
+    );
     assert_eq!(manifest["omitted_items_count"].as_i64().unwrap(), 11);
 
     let _ = fs::remove_dir_all(&ws);
@@ -138,7 +153,8 @@ export class MainService {
   constructor(private helper: InternalHelper) {}
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         src.join("helper.ts"),
@@ -146,7 +162,8 @@ export class MainService {
   run() {}
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
     let conn = db(&ws).unwrap();
@@ -180,8 +197,16 @@ fn test_inspect_symbol_duplicate_entities_and_relationships_deduplication() {
 
     // Diamond dependency pattern
     fs::write(src.join("base.ts"), "export class BaseClass {}\n").unwrap();
-    fs::write(src.join("left.ts"), "import { BaseClass } from './base'; export class Left extends BaseClass {}\n").unwrap();
-    fs::write(src.join("right.ts"), "import { BaseClass } from './base'; export class Right extends BaseClass {}\n").unwrap();
+    fs::write(
+        src.join("left.ts"),
+        "import { BaseClass } from './base'; export class Left extends BaseClass {}\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("right.ts"),
+        "import { BaseClass } from './base'; export class Right extends BaseClass {}\n",
+    )
+    .unwrap();
     fs::write(
         src.join("top.ts"),
         "import { Left } from './left'; import { Right } from './right'; export class Top { l = new Left(); r = new Right(); }\n",
@@ -202,8 +227,19 @@ fn test_inspect_symbol_duplicate_entities_and_relationships_deduplication() {
     for ent in cone.all_entities() {
         let mut seen = std::collections::HashSet::new();
         for r in &ent.relationships {
-            let key = format!("{}:{}:{}:{}", r.source, r.target, r.category.as_str(), r.provenance);
-            assert!(seen.insert(key), "Duplicate relationship found in entity {}: {:?}", ent.entity_id, r);
+            let key = format!(
+                "{}:{}:{}:{}",
+                r.source,
+                r.target,
+                r.category.as_str(),
+                r.provenance
+            );
+            assert!(
+                seen.insert(key),
+                "Duplicate relationship found in entity {}: {:?}",
+                ent.entity_id,
+                r
+            );
         }
     }
 
@@ -231,7 +267,8 @@ export class RootComponent {{
 }}
 "#
         ),
-    ).unwrap();
+    )
+    .unwrap();
 
     for i in 1..=20 {
         fs::write(
@@ -251,10 +288,13 @@ export class RootComponent {{
     });
 
     let res = mcp_call(&ws, "engram_inspect_symbol", &mcp_args).unwrap();
-    let inner_str = res["content"][0]["text"].as_str().expect("Tool response content must be string");
-    
+    let inner_str = res["content"][0]["text"]
+        .as_str()
+        .expect("Tool response content must be string");
+
     // 2. Inner payload must deserialize cleanly (valid structured JSON under truncation)
-    let inner_val: Value = serde_json::from_str(inner_str).expect("Inner tool JSON must be strictly valid JSON");
+    let inner_val: Value =
+        serde_json::from_str(inner_str).expect("Inner tool JSON must be strictly valid JSON");
 
     // 3. Serialized byte size must be within configured byte ceiling
     let actual_bytes = inner_str.len();
@@ -272,7 +312,10 @@ export class RootComponent {{
 
     // 5. Omission manifest must record omissions due to budget shedding
     let manifest = &inner_val["omission_manifest"];
-    assert_eq!(manifest["budget_status"].as_str().unwrap(), "OMISSIONS_RECORDED");
+    assert_eq!(
+        manifest["budget_status"].as_str().unwrap(),
+        "OMISSIONS_RECORDED"
+    );
     assert!(manifest["omitted_items_count"].as_i64().unwrap() > 0);
 
     let _ = fs::remove_dir_all(&ws);
@@ -287,7 +330,8 @@ fn test_inspect_symbol_small_response_within_16k_limit() {
     fs::write(
         src.join("simple.ts"),
         "export function add(a: number, b: number): number { return a + b; }\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -306,21 +350,28 @@ fn test_inspect_symbol_small_response_within_16k_limit() {
         outer_bytes.len()
     );
 
-    let inner_str = res["content"][0]["text"].as_str().expect("Tool response content must be string");
+    let inner_str = res["content"][0]["text"]
+        .as_str()
+        .expect("Tool response content must be string");
     assert!(
         inner_str.len() <= 16384,
         "Inner serialized JSON ({} bytes) must be <= 16384",
         inner_str.len()
     );
 
-    let inner_val: Value = serde_json::from_str(inner_str).expect("Inner tool JSON must be strictly valid JSON");
+    let inner_val: Value =
+        serde_json::from_str(inner_str).expect("Inner tool JSON must be strictly valid JSON");
     assert_eq!(inner_val["target"].as_str().unwrap(), "src/simple.ts");
     assert_eq!(
-        inner_val["omission_manifest"]["budget_status"].as_str().unwrap(),
+        inner_val["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
         "PACKED_WITHIN_BUDGET"
     );
     assert_eq!(
-        inner_val["omission_manifest"]["omitted_items_count"].as_i64().unwrap(),
+        inner_val["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap(),
         0
     );
 
@@ -341,7 +392,8 @@ fn test_inspect_symbol_immediately_below_limit() {
   helper() { return 1; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     for i in 1..=2 {
         fs::write(
@@ -372,11 +424,15 @@ fn test_inspect_symbol_immediately_below_limit() {
 
     let inner_val: Value = serde_json::from_str(inner_str).expect("Must parse cleanly");
     assert_eq!(
-        inner_val["omission_manifest"]["budget_status"].as_str().unwrap(),
+        inner_val["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
         "PACKED_WITHIN_BUDGET"
     );
     assert_eq!(
-        inner_val["omission_manifest"]["omitted_items_count"].as_i64().unwrap(),
+        inner_val["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap(),
         0
     );
 
@@ -396,7 +452,8 @@ fn test_inspect_symbol_immediately_above_limit_sheds_cleanly() {
   run() { return 'hub'; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     for i in 1..=8 {
         fs::write(
@@ -424,14 +481,26 @@ fn test_inspect_symbol_immediately_above_limit_sheds_cleanly() {
     );
 
     let inner_str = res["content"][0]["text"].as_str().unwrap();
-    assert!(inner_str.len() <= 2500, "Inner string ({} bytes) must be <= 2500", inner_str.len());
+    assert!(
+        inner_str.len() <= 2500,
+        "Inner string ({} bytes) must be <= 2500",
+        inner_str.len()
+    );
 
-    let inner_val: Value = serde_json::from_str(inner_str).expect("Truncated JSON must remain syntactically valid");
+    let inner_val: Value =
+        serde_json::from_str(inner_str).expect("Truncated JSON must remain syntactically valid");
     assert_eq!(
-        inner_val["omission_manifest"]["budget_status"].as_str().unwrap(),
+        inner_val["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
         "OMISSIONS_RECORDED"
     );
-    assert!(inner_val["omission_manifest"]["omitted_items_count"].as_i64().unwrap() > 0);
+    assert!(
+        inner_val["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -445,7 +514,10 @@ fn test_inspect_symbol_extremely_oversized_response() {
     // Create a huge component with extensive comments and 40 consumer files
     let mut large_doc = String::new();
     for i in 0..300 {
-        large_doc.push_str(&format!("/// Enterprise architecture documentation paragraph {}\n", i));
+        large_doc.push_str(&format!(
+            "/// Enterprise architecture documentation paragraph {}\n",
+            i
+        ));
     }
 
     fs::write(
@@ -457,7 +529,8 @@ export class GiantEnterpriseService {{
 }}
 "#
         ),
-    ).unwrap();
+    )
+    .unwrap();
 
     for i in 1..=40 {
         fs::write(
@@ -487,13 +560,21 @@ export class GiantEnterpriseService {{
     let inner_str = res["content"][0]["text"].as_str().unwrap();
     assert!(inner_str.len() <= 16384);
 
-    let inner_val: Value = serde_json::from_str(inner_str).expect("Must remain strictly valid JSON under extreme shedding");
+    let inner_val: Value = serde_json::from_str(inner_str)
+        .expect("Must remain strictly valid JSON under extreme shedding");
     assert_eq!(inner_val["target"].as_str().unwrap(), "src/giant.ts");
     assert_eq!(
-        inner_val["omission_manifest"]["budget_status"].as_str().unwrap(),
+        inner_val["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
         "OMISSIONS_RECORDED"
     );
-    assert!(inner_val["omission_manifest"]["omitted_items_count"].as_i64().unwrap() > 0);
+    assert!(
+        inner_val["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -518,7 +599,8 @@ fn test_inspect_symbol_large_code_excerpts() {
 }}
 "#
         ),
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -543,7 +625,11 @@ fn test_inspect_symbol_large_code_excerpts() {
     let inner_val: Value = serde_json::from_str(inner_str).expect("Must parse cleanly");
     // Code excerpt should be contracted to fit within budget
     if let Some(exc) = inner_val["code_excerpt"].as_str() {
-        assert!(exc.len() <= 500, "Excerpt must be contracted to fit within budget (was {})", exc.len());
+        assert!(
+            exc.len() <= 500,
+            "Excerpt must be contracted to fit within budget (was {})",
+            exc.len()
+        );
     }
 
     let _ = fs::remove_dir_all(&ws);
@@ -561,8 +647,12 @@ fn test_inspect_symbol_large_omission_manifests_capped() {
     for i in 1..=50 {
         fs::write(
             src.join(format!("dep_{:03}.ts", i)),
-            format!("import {{ CoreHub }} from './hub';\nexport class Client{} extends CoreHub {{}}\n", i),
-        ).unwrap();
+            format!(
+                "import {{ CoreHub }} from './hub';\nexport class Client{} extends CoreHub {{}}\n",
+                i
+            ),
+        )
+        .unwrap();
     }
 
     analyze(&ws).unwrap();
@@ -583,7 +673,11 @@ fn test_inspect_symbol_large_omission_manifests_capped() {
 
     let manifest = &inner_val["omission_manifest"];
     let omitted_count = manifest["omitted_items_count"].as_i64().unwrap();
-    assert!(omitted_count >= 40, "Total omitted count must accurately reflect all pruned items ({})", omitted_count);
+    assert!(
+        omitted_count >= 40,
+        "Total omitted count must accurately reflect all pruned items ({})",
+        omitted_count
+    );
 
     // But sample omission list must be capped so the manifest itself doesn't exceed budget
     let sample_list = manifest["omission_manifest"].as_array().unwrap();
@@ -623,11 +717,15 @@ fn test_inspect_symbol_empty_response() {
 
     assert_eq!(inner_val["target"].as_str().unwrap(), "src/empty.ts");
     assert_eq!(
-        inner_val["omission_manifest"]["budget_status"].as_str().unwrap(),
+        inner_val["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
         "PACKED_WITHIN_BUDGET"
     );
     assert_eq!(
-        inner_val["omission_manifest"]["omitted_items_count"].as_i64().unwrap(),
+        inner_val["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap(),
         0
     );
 
@@ -658,4 +756,3 @@ fn test_inspect_symbol_serialization_failure_and_error_handling() {
 
     let _ = fs::remove_dir_all(&ws);
 }
-

@@ -9,11 +9,26 @@ fn test_build_provenance_env_vars_present() {
     // 2. Full version string must contain required fields
     let full_str = build_info::VERSION_FULL;
 
-    assert!(full_str.contains("1.5.4"), "Version must contain package version");
-    assert!(full_str.contains("commit:"), "Version must contain commit field");
-    assert!(full_str.contains("dirty:"), "Version must contain dirty field");
-    assert!(full_str.contains("rustc:"), "Version must contain rustc field");
-    assert!(full_str.contains("profile:"), "Version must contain profile field");
+    assert!(
+        full_str.contains("1.5.4"),
+        "Version must contain package version"
+    );
+    assert!(
+        full_str.contains("commit:"),
+        "Version must contain commit field"
+    );
+    assert!(
+        full_str.contains("dirty:"),
+        "Version must contain dirty field"
+    );
+    assert!(
+        full_str.contains("rustc:"),
+        "Version must contain rustc field"
+    );
+    assert!(
+        full_str.contains("profile:"),
+        "Version must contain profile field"
+    );
 }
 
 #[test]
@@ -22,7 +37,10 @@ fn test_build_provenance_git_commit_format() {
     if commit != "unknown" {
         // Git commit SHA must be a 40-character hex string
         assert_eq!(commit.len(), 40, "Git commit SHA must be 40 hex characters");
-        assert!(commit.chars().all(|c| c.is_ascii_hexdigit()), "Git commit must be hex digits");
+        assert!(
+            commit.chars().all(|c| c.is_ascii_hexdigit()),
+            "Git commit must be hex digits"
+        );
     }
 }
 
@@ -57,12 +75,24 @@ fn test_build_provenance_formatting_function() {
     }
 
     // Clean git state
-    let clean = format_version("1.5.4", "7106a2f369fe79faf5f95449378a900ab8e8eddf", "false", "rustc 1.99.0", "release");
+    let clean = format_version(
+        "1.5.4",
+        "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+        "false",
+        "rustc 1.99.0",
+        "release",
+    );
     assert!(clean.contains("commit: 7106a2f369fe79faf5f95449378a900ab8e8eddf"));
     assert!(clean.contains("dirty: false"));
 
     // Dirty git state
-    let dirty = format_version("1.5.4", "7106a2f369fe79faf5f95449378a900ab8e8eddf", "true", "rustc 1.99.0", "release");
+    let dirty = format_version(
+        "1.5.4",
+        "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+        "true",
+        "rustc 1.99.0",
+        "release",
+    );
     assert!(dirty.contains("dirty: true"));
 
     // Missing git state (e.g. source tarball outside git)

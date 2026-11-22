@@ -22,15 +22,33 @@ fn setup_test_workspace(name: &str) -> PathBuf {
     fs::create_dir_all(&tmp).unwrap();
 
     let files = vec![
-        ("package.json", r#"{"name": "test-project", "version": "1.0.0", "dependencies": {"@angular/core": "^17.0.0"}}"#),
-        ("src/app/core/auth/auth.effects.ts", "export class AuthEffects { login$ = true; }"),
-        ("src/app/core/auth/auth.models.ts", "export interface User { username: string; }"),
-        ("src/app/core/auth/auth.reducer.ts", "export function authReducer() { return {}; }"),
-        ("src/app/features/settings/settings.component.ts", "export class SettingsComponent {}"),
+        (
+            "package.json",
+            r#"{"name": "test-project", "version": "1.0.0", "dependencies": {"@angular/core": "^17.0.0"}}"#,
+        ),
+        (
+            "src/app/core/auth/auth.effects.ts",
+            "export class AuthEffects { login$ = true; }",
+        ),
+        (
+            "src/app/core/auth/auth.models.ts",
+            "export interface User { username: string; }",
+        ),
+        (
+            "src/app/core/auth/auth.reducer.ts",
+            "export function authReducer() { return {}; }",
+        ),
+        (
+            "src/app/features/settings/settings.component.ts",
+            "export class SettingsComponent {}",
+        ),
         ("src/assets/i18n/en.json", r#"{"auth.login": "Log In"}"#),
         ("src/assets/i18n/de.json", r#"{"auth.login": "Anmelden"}"#),
         ("src/assets/i18n/fr.json", r#"{"auth.login": "Connexion"}"#),
-        ("src/assets/i18n/es.json", r#"{"auth.login": "Iniciar Sesión"}"#),
+        (
+            "src/assets/i18n/es.json",
+            r#"{"auth.login": "Iniciar Sesión"}"#,
+        ),
         ("src/assets/i18n/it.json", r#"{"auth.login": "Accedi"}"#),
     ];
 
@@ -191,7 +209,12 @@ fn test_fix_b_idempotent_preflight_and_incremental_delta() {
     assert!(res2.is_reused_contract);
     assert_eq!(res2.contract_id, original_id);
     assert_eq!(res2.contract_version, 1);
-    assert!(res2.reused_reason.as_deref().unwrap_or("").contains("fingerprint"));
+    assert!(
+        res2.reused_reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("fingerprint")
+    );
 
     // Turn 3: Incremental Delta (planned_files expanded)
     let opts3 = PreflightOptions {
@@ -207,8 +230,14 @@ fn test_fix_b_idempotent_preflight_and_incremental_delta() {
     assert_eq!(res3.status, PreflightStatus::ReadyForImplementation);
     assert!(res3.is_reused_contract);
     assert_eq!(res3.contract_id, original_id);
-    assert_eq!(res3.contract_version, 2, "Contract version must increment on approved delta expansion");
-    assert!(res3.expected_files.contains(&"src/app/core/auth/auth.tokens.ts".to_string()));
+    assert_eq!(
+        res3.contract_version, 2,
+        "Contract version must increment on approved delta expansion"
+    );
+    assert!(
+        res3.expected_files
+            .contains(&"src/app/core/auth/auth.tokens.ts".to_string())
+    );
 
     // Turn 4: Delta adding forbidden file -> BLOCKED
     let opts4 = PreflightOptions {
@@ -307,7 +336,11 @@ fn test_fix_c_scope_drift_detection_bulk_localization() {
     for c in &classifications {
         if c.path.contains("i18n") {
             assert_eq!(c.category, FileValidationCategory::Unexpected);
-            assert!(c.reason.contains("SCOPE_DRIFT_WARNING"), "Reason must contain SCOPE_DRIFT_WARNING: {}", c.reason);
+            assert!(
+                c.reason.contains("SCOPE_DRIFT_WARNING"),
+                "Reason must contain SCOPE_DRIFT_WARNING: {}",
+                c.reason
+            );
         }
     }
 }
@@ -350,7 +383,10 @@ fn test_fix_c_scope_drift_detection_unrequested_dialog() {
     assert_eq!(summary.expected_count, 1);
     assert_eq!(summary.unexpected_count, 1);
 
-    let dialog_cls = classifications.iter().find(|c| c.path.contains("dialog")).unwrap();
+    let dialog_cls = classifications
+        .iter()
+        .find(|c| c.path.contains("dialog"))
+        .unwrap();
     assert_eq!(dialog_cls.category, FileValidationCategory::Unexpected);
     assert!(dialog_cls.reason.contains("SCOPE_DRIFT_WARNING"));
 }
@@ -362,7 +398,8 @@ fn test_fix_d_instruction_block_sync_and_idempotency() {
     fs::create_dir_all(&tmp).unwrap();
 
     let copilot_file = tmp.join("copilot-instructions.md");
-    let rep1 = instructions::sync_managed_block(&copilot_file, DEFAULT_INSTRUCTION_BODY, false).unwrap();
+    let rep1 =
+        instructions::sync_managed_block(&copilot_file, DEFAULT_INSTRUCTION_BODY, false).unwrap();
     assert_eq!(rep1.action, ManagedBlockAction::Created);
 
     let content = fs::read_to_string(&copilot_file).unwrap();
@@ -371,7 +408,8 @@ fn test_fix_d_instruction_block_sync_and_idempotency() {
     assert!(content.contains("Minimal Blast Radius"));
 
     // Syncing again must be unchanged (idempotent)
-    let rep2 = instructions::sync_managed_block(&copilot_file, DEFAULT_INSTRUCTION_BODY, false).unwrap();
+    let rep2 =
+        instructions::sync_managed_block(&copilot_file, DEFAULT_INSTRUCTION_BODY, false).unwrap();
     assert_eq!(rep2.action, ManagedBlockAction::Unchanged);
 
     let _ = fs::remove_dir_all(&tmp);
@@ -398,11 +436,17 @@ fn test_iteration_1_task_aware_context_preparation() {
     assert!(res.contract_id.starts_with("ctr_"));
     assert_eq!(res.contract_version, 1);
     assert_eq!(res.status, "ReadyForImplementation");
-    assert!(res.expected_files.contains(&"src/app/core/auth/auth.effects.ts".to_string()));
+    assert!(
+        res.expected_files
+            .contains(&"src/app/core/auth/auth.effects.ts".to_string())
+    );
     assert!(res.content.contains("# Task"));
     assert!(res.content.contains("Engram Active Contract & Directives"));
     assert!(res.content.contains(&res.contract_id));
-    assert!(res.content.contains("Do NOT call `engram_get_context` or `engram_preflight`"));
+    assert!(
+        res.content
+            .contains("Do NOT call `engram_get_context` or `engram_preflight`")
+    );
 
     // Verify .engram/active_task.md was written
     let active_task_file = root.join(".engram/active_task.md");
@@ -420,122 +464,243 @@ fn test_iteration_1_task_aware_context_preparation() {
         false,
     )
     .unwrap();
-    assert_eq!(res2.contract_id, res.contract_id, "Fingerprinted preflight must reuse contract");
+    assert_eq!(
+        res2.contract_id, res.contract_id,
+        "Fingerprinted preflight must reuse contract"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn test_iteration_2a_deterministic_task_classifier() {
-    use prompt::{classify_task_complexity, TaskComplexity};
+    use prompt::{TaskComplexity, classify_task_complexity};
 
     // 1. Trivial tasks -> TaskComplexity::Trivial
     let trivial_a = "In projects/angular-ngrx-material-starter/src/environments/environment.ts, correct the branding typo in appName from 'Angular Ngrx Material Starter' to 'Angular NgRx Material Starter' so that 'NgRx' matches the official casing. Do not change any other file or configuration.";
     let sig_a = classify_task_complexity(trivial_a);
-    assert_eq!(sig_a.classification, TaskComplexity::Trivial, "Task A must be classified as Trivial: {}", sig_a.reason);
+    assert_eq!(
+        sig_a.classification,
+        TaskComplexity::Trivial,
+        "Task A must be classified as Trivial: {}",
+        sig_a.reason
+    );
     assert!(sig_a.has_trivial_action_keywords);
     assert_eq!(sig_a.file_count, 1);
 
     let trivial_typo = "Fix typo in README.md: change 'teh' to 'the'";
     let sig_typo = classify_task_complexity(trivial_typo);
-    assert_eq!(sig_typo.classification, TaskComplexity::Trivial, "Typo fix in README must be Trivial: {}", sig_typo.reason);
+    assert_eq!(
+        sig_typo.classification,
+        TaskComplexity::Trivial,
+        "Typo fix in README must be Trivial: {}",
+        sig_typo.reason
+    );
 
     let trivial_rename = "Rename variable in src/config.ts to match casing convention";
     let sig_rename = classify_task_complexity(trivial_rename);
-    assert_eq!(sig_rename.classification, TaskComplexity::Trivial, "Casing fix must be Trivial: {}", sig_rename.reason);
+    assert_eq!(
+        sig_rename.classification,
+        TaskComplexity::Trivial,
+        "Casing fix must be Trivial: {}",
+        sig_rename.reason
+    );
 
     // 2. Complex multi-file tasks -> TaskComplexity::Standard
     let task_b = "Add remember-me option to authentication flow. Planned files: src/app/core/auth/auth.effects.ts, src/app/core/auth/auth.models.ts";
     let sig_b = classify_task_complexity(task_b);
-    assert_eq!(sig_b.classification, TaskComplexity::Standard, "Task B must be Standard: {}", sig_b.reason);
+    assert_eq!(
+        sig_b.classification,
+        TaskComplexity::Standard,
+        "Task B must be Standard: {}",
+        sig_b.reason
+    );
 
     let multi_explicit = "Fix typo. Planned files: src/app/a.ts, src/app/b.ts";
     let sig_mult_exp = classify_task_complexity(multi_explicit);
-    assert_eq!(sig_mult_exp.classification, TaskComplexity::Standard, "Multiple explicit files must be Standard: {}", sig_mult_exp.reason);
+    assert_eq!(
+        sig_mult_exp.classification,
+        TaskComplexity::Standard,
+        "Multiple explicit files must be Standard: {}",
+        sig_mult_exp.reason
+    );
     assert_eq!(sig_mult_exp.file_count, 2);
 
     let multi_inline = "Fix typo in src/header.ts and src/footer.ts";
     let sig_mult_inl = classify_task_complexity(multi_inline);
-    assert_eq!(sig_mult_inl.classification, TaskComplexity::Standard, "Multiple inline files must be Standard: {}", sig_mult_inl.reason);
+    assert_eq!(
+        sig_mult_inl.classification,
+        TaskComplexity::Standard,
+        "Multiple inline files must be Standard: {}",
+        sig_mult_inl.reason
+    );
     assert_eq!(sig_mult_inl.file_count, 2);
 
     // 3. Broad symbol renames and changes affecting all usages or all files -> Standard
     let broad_usages = "In src/index.ts, rename symbol and update all usages across all files";
     let sig_broad = classify_task_complexity(broad_usages);
-    assert_eq!(sig_broad.classification, TaskComplexity::Standard, "Broad change with single explicit file must be Standard: {}", sig_broad.reason);
+    assert_eq!(
+        sig_broad.classification,
+        TaskComplexity::Standard,
+        "Broad change with single explicit file must be Standard: {}",
+        sig_broad.reason
+    );
     assert!(sig_broad.has_multi_file_keywords);
 
     let broad_all = "Update styles across all files in src/components";
     let sig_all = classify_task_complexity(broad_all);
-    assert_eq!(sig_all.classification, TaskComplexity::Standard, "Multi-file keyword must be Standard: {}", sig_all.reason);
+    assert_eq!(
+        sig_all.classification,
+        TaskComplexity::Standard,
+        "Multi-file keyword must be Standard: {}",
+        sig_all.reason
+    );
     assert!(sig_all.has_multi_file_keywords);
 
     // 4. Security & Authentication variations -> Standard
     let sec_auth = "Add remember-me option to authentication flow";
-    assert_eq!(classify_task_complexity(sec_auth).classification, TaskComplexity::Standard);
+    assert_eq!(
+        classify_task_complexity(sec_auth).classification,
+        TaskComplexity::Standard
+    );
 
     let sec_path = "Fix typo in src/auth/keys.ts";
-    assert_eq!(classify_task_complexity(sec_path).classification, TaskComplexity::Standard, "Security file path must force Standard");
+    assert_eq!(
+        classify_task_complexity(sec_path).classification,
+        TaskComplexity::Standard,
+        "Security file path must force Standard"
+    );
 
     let sec_token = "Update authorization token in src/api.ts";
-    assert_eq!(classify_task_complexity(sec_token).classification, TaskComplexity::Standard, "Auth token keyword must force Standard");
+    assert_eq!(
+        classify_task_complexity(sec_token).classification,
+        TaskComplexity::Standard,
+        "Auth token keyword must force Standard"
+    );
 
     let sec_pass = "Fix password reset session expiration in src/session.ts";
-    assert_eq!(classify_task_complexity(sec_pass).classification, TaskComplexity::Standard, "Password/session must force Standard");
+    assert_eq!(
+        classify_task_complexity(sec_pass).classification,
+        TaskComplexity::Standard,
+        "Password/session must force Standard"
+    );
 
     let sec_cred = "Update credentials in src/config.ts";
-    assert_eq!(classify_task_complexity(sec_cred).classification, TaskComplexity::Standard, "Credentials keyword must force Standard");
+    assert_eq!(
+        classify_task_complexity(sec_cred).classification,
+        TaskComplexity::Standard,
+        "Credentials keyword must force Standard"
+    );
 
     let sec_xss = "Sanitize user input against XSS in src/form.ts";
-    assert_eq!(classify_task_complexity(sec_xss).classification, TaskComplexity::Standard, "Sanitize/XSS must force Standard");
+    assert_eq!(
+        classify_task_complexity(sec_xss).classification,
+        TaskComplexity::Standard,
+        "Sanitize/XSS must force Standard"
+    );
 
     let sec_negated = "Do not change auth, only fix typo in app.component.html";
-    assert_eq!(classify_task_complexity(sec_negated).classification, TaskComplexity::Standard, "Negated auth keyword must safely fallback to Standard");
+    assert_eq!(
+        classify_task_complexity(sec_negated).classification,
+        TaskComplexity::Standard,
+        "Negated auth keyword must safely fallback to Standard"
+    );
 
     // 5. Version changes affecting manifests, lockfiles, or dependencies -> Standard
     let manifest_pkg = "Update version in package.json";
-    assert_eq!(classify_task_complexity(manifest_pkg).classification, TaskComplexity::Standard, "package.json modification must force Standard");
+    assert_eq!(
+        classify_task_complexity(manifest_pkg).classification,
+        TaskComplexity::Standard,
+        "package.json modification must force Standard"
+    );
 
     let manifest_cargo = "Bump version in Cargo.toml and update dependencies";
-    assert_eq!(classify_task_complexity(manifest_cargo).classification, TaskComplexity::Standard, "Cargo.toml and dependencies must force Standard");
+    assert_eq!(
+        classify_task_complexity(manifest_cargo).classification,
+        TaskComplexity::Standard,
+        "Cargo.toml and dependencies must force Standard"
+    );
 
     // 6. Database, schema, migration, middleware, interceptor, state-management -> Standard
     let arch_db = "Fix typo in schema migration in src/db/001.sql";
-    assert_eq!(classify_task_complexity(arch_db).classification, TaskComplexity::Standard, "Database/schema/migration must force Standard");
+    assert_eq!(
+        classify_task_complexity(arch_db).classification,
+        TaskComplexity::Standard,
+        "Database/schema/migration must force Standard"
+    );
 
     let arch_interceptor = "Update interceptor logging in src/interceptor.ts";
-    assert_eq!(classify_task_complexity(arch_interceptor).classification, TaskComplexity::Standard, "Interceptor keyword must force Standard");
+    assert_eq!(
+        classify_task_complexity(arch_interceptor).classification,
+        TaskComplexity::Standard,
+        "Interceptor keyword must force Standard"
+    );
 
     let arch_state = "Refactor state management in src/store.ts";
-    assert_eq!(classify_task_complexity(arch_state).classification, TaskComplexity::Standard, "State management must force Standard");
+    assert_eq!(
+        classify_task_complexity(arch_state).classification,
+        TaskComplexity::Standard,
+        "State management must force Standard"
+    );
 
     // 7. Test creation, modification, or removal -> Standard
     let test_add = "Add unit test for login controller in tests/login.spec.ts";
-    assert_eq!(classify_task_complexity(test_add).classification, TaskComplexity::Standard, "Test creation must force Standard");
+    assert_eq!(
+        classify_task_complexity(test_add).classification,
+        TaskComplexity::Standard,
+        "Test creation must force Standard"
+    );
 
     let test_del = "Delete obsolete test in tests/old_test.ts";
-    assert_eq!(classify_task_complexity(test_del).classification, TaskComplexity::Standard, "Test deletion must force Standard");
+    assert_eq!(
+        classify_task_complexity(test_del).classification,
+        TaskComplexity::Standard,
+        "Test deletion must force Standard"
+    );
 
     let test_typo = "Fix typo in tests/app.spec.ts";
-    assert_eq!(classify_task_complexity(test_typo).classification, TaskComplexity::Standard, "Test file modification must force Standard");
+    assert_eq!(
+        classify_task_complexity(test_typo).classification,
+        TaskComplexity::Standard,
+        "Test file modification must force Standard"
+    );
 
     // 8. Scope boundaries: 0 target files, unknown tasks, malformed input -> Standard
     let zero_files = "Fix typo";
     let sig_zero = classify_task_complexity(zero_files);
-    assert_eq!(sig_zero.classification, TaskComplexity::Standard, "Zero files must safely fallback to Standard: {}", sig_zero.reason);
+    assert_eq!(
+        sig_zero.classification,
+        TaskComplexity::Standard,
+        "Zero files must safely fallback to Standard: {}",
+        sig_zero.reason
+    );
     assert_eq!(sig_zero.file_count, 0);
 
     let unknown_task = "foobar bazqux 12345";
     let sig_unk = classify_task_complexity(unknown_task);
-    assert_eq!(sig_unk.classification, TaskComplexity::Standard, "Unrecognized task must safely fallback to Standard: {}", sig_unk.reason);
+    assert_eq!(
+        sig_unk.classification,
+        TaskComplexity::Standard,
+        "Unrecognized task must safely fallback to Standard: {}",
+        sig_unk.reason
+    );
 
     let malformed_planned = "Fix typo. Planned files:   ,  ; ;  ";
     let sig_mal = classify_task_complexity(malformed_planned);
-    assert_eq!(sig_mal.classification, TaskComplexity::Standard, "Malformed planned-files must safely fallback to Standard: {}", sig_mal.reason);
+    assert_eq!(
+        sig_mal.classification,
+        TaskComplexity::Standard,
+        "Malformed planned-files must safely fallback to Standard: {}",
+        sig_mal.reason
+    );
 
     // 9. Conflicting signals: trivial action combined with high-risk keyword -> Standard
     let conflict = "Fix typo in environment.ts and refactor authentication";
-    assert_eq!(classify_task_complexity(conflict).classification, TaskComplexity::Standard, "Conflicting trivial and high-risk signals must force Standard");
+    assert_eq!(
+        classify_task_complexity(conflict).classification,
+        TaskComplexity::Standard,
+        "Conflicting trivial and high-risk signals must force Standard"
+    );
 }
 
 #[test]
@@ -576,10 +741,17 @@ fn test_iteration_2a_adaptive_bypass_execution() {
     )
     .unwrap();
 
-    assert!(!res_a_forced.bypass_active, "Forced no-bypass must run full preparation");
+    assert!(
+        !res_a_forced.bypass_active,
+        "Forced no-bypass must run full preparation"
+    );
     assert!(res_a_forced.contract_id.starts_with("ctr_"));
     assert_eq!(res_a_forced.status, "ReadyForImplementation");
-    assert!(res_a_forced.content.contains("Engram Active Contract & Directives"));
+    assert!(
+        res_a_forced
+            .content
+            .contains("Engram Active Contract & Directives")
+    );
 
     // 3. Complex Task (Task B remember-me feature) -> Standard (Not Bypassed)
     let task_b = "Add remember-me option to authentication flow. Planned files: src/app/core/auth/auth.effects.ts, src/app/core/auth/auth.models.ts";
@@ -597,8 +769,16 @@ fn test_iteration_2a_adaptive_bypass_execution() {
     assert!(!res_b.bypass_active, "Task B must NOT be bypassed");
     assert!(res_b.contract_id.starts_with("ctr_"));
     assert_eq!(res_b.status, "ReadyForImplementation");
-    assert!(res_b.expected_files.contains(&"src/app/core/auth/auth.effects.ts".to_string()));
-    assert!(res_b.content.contains("Engram Active Contract & Directives"));
+    assert!(
+        res_b
+            .expected_files
+            .contains(&"src/app/core/auth/auth.effects.ts".to_string())
+    );
+    assert!(
+        res_b
+            .content
+            .contains("Engram Active Contract & Directives")
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -606,8 +786,8 @@ fn test_iteration_2a_adaptive_bypass_execution() {
 #[test]
 fn test_iteration_2b_local_postflight_compliant_and_evidence() {
     use engram::flywheel::{
-        validate_local_postflight, LocalEvidenceStatus, LocalPostflightOptions,
-        LocalPostflightVerdict, LocalScopeStatus, PreflightOptions, preflight_task,
+        LocalEvidenceStatus, LocalPostflightOptions, LocalPostflightVerdict, LocalScopeStatus,
+        PreflightOptions, preflight_task, validate_local_postflight,
     };
 
     let root = setup_test_workspace("iter2b_compliant");
@@ -623,7 +803,11 @@ fn test_iteration_2b_local_postflight_compliant_and_evidence() {
 
     // Modify authorized file within scope
     let target = root.join("src/app/core/auth/auth.effects.ts");
-    fs::write(&target, "export class AuthEffects { login$ = true; rememberMe$ = true; }").unwrap();
+    fs::write(
+        &target,
+        "export class AuthEffects { login$ = true; rememberMe$ = true; }",
+    )
+    .unwrap();
 
     // 1. With test validation evidence -> Pass (fully verified)
     let rep_verified = validate_local_postflight(
@@ -640,7 +824,10 @@ fn test_iteration_2b_local_postflight_compliant_and_evidence() {
 
     assert_eq!(rep_verified.verdict, LocalPostflightVerdict::Pass);
     assert_eq!(rep_verified.scope_status, LocalScopeStatus::Compliant);
-    assert_eq!(rep_verified.evidence_status, LocalEvidenceStatus::VerifiedByTests);
+    assert_eq!(
+        rep_verified.evidence_status,
+        LocalEvidenceStatus::VerifiedByTests
+    );
     assert_eq!(rep_verified.exit_code, 0);
 
     // 2. Without test validation evidence -> PassScopeOnlyUnverified (honest distinction)
@@ -656,9 +843,15 @@ fn test_iteration_2b_local_postflight_compliant_and_evidence() {
     )
     .unwrap();
 
-    assert_eq!(rep_unverified.verdict, LocalPostflightVerdict::PassScopeOnlyUnverified);
+    assert_eq!(
+        rep_unverified.verdict,
+        LocalPostflightVerdict::PassScopeOnlyUnverified
+    );
     assert_eq!(rep_unverified.scope_status, LocalScopeStatus::Compliant);
-    assert_eq!(rep_unverified.evidence_status, LocalEvidenceStatus::MissingValidationEvidence);
+    assert_eq!(
+        rep_unverified.evidence_status,
+        LocalEvidenceStatus::MissingValidationEvidence
+    );
     assert!(rep_unverified.summary.contains("PASS (SCOPE ONLY)"));
     assert_eq!(rep_unverified.exit_code, 0);
 
@@ -675,8 +868,14 @@ fn test_iteration_2b_local_postflight_compliant_and_evidence() {
     )
     .unwrap();
 
-    assert_eq!(rep_failed.verdict, LocalPostflightVerdict::BlockedValidationFailed);
-    assert_eq!(rep_failed.evidence_status, LocalEvidenceStatus::ValidationFailed);
+    assert_eq!(
+        rep_failed.verdict,
+        LocalPostflightVerdict::BlockedValidationFailed
+    );
+    assert_eq!(
+        rep_failed.evidence_status,
+        LocalEvidenceStatus::ValidationFailed
+    );
     assert_eq!(rep_failed.exit_code, 1);
 
     let _ = fs::remove_dir_all(&root);
@@ -685,8 +884,8 @@ fn test_iteration_2b_local_postflight_compliant_and_evidence() {
 #[test]
 fn test_iteration_2b_local_postflight_boundary_violation() {
     use engram::flywheel::{
-        validate_local_postflight, LocalPostflightOptions, LocalPostflightVerdict,
-        LocalScopeStatus, PreflightOptions, preflight_task,
+        LocalPostflightOptions, LocalPostflightVerdict, LocalScopeStatus, PreflightOptions,
+        preflight_task, validate_local_postflight,
     };
 
     let root = setup_test_workspace("iter2b_boundary");
@@ -718,7 +917,10 @@ fn test_iteration_2b_local_postflight_boundary_violation() {
 
     assert_eq!(rep.verdict, LocalPostflightVerdict::BlockedScopeViolation);
     assert_eq!(rep.scope_status, LocalScopeStatus::BoundaryViolation);
-    assert!(rep.boundary_violations.contains(&"src/assets/i18n/de.json".to_string()));
+    assert!(
+        rep.boundary_violations
+            .contains(&"src/assets/i18n/de.json".to_string())
+    );
     assert_eq!(rep.exit_code, 1);
 
     let _ = fs::remove_dir_all(&root);
@@ -727,8 +929,8 @@ fn test_iteration_2b_local_postflight_boundary_violation() {
 #[test]
 fn test_iteration_2b_local_postflight_stale_contract() {
     use engram::flywheel::{
-        validate_local_postflight, LocalPostflightOptions, LocalPostflightVerdict,
-        LocalStalenessStatus, PreflightOptions, preflight_task,
+        LocalPostflightOptions, LocalPostflightVerdict, LocalStalenessStatus, PreflightOptions,
+        preflight_task, validate_local_postflight,
     };
 
     let root = setup_test_workspace("iter2b_stale");
@@ -745,8 +947,16 @@ fn test_iteration_2b_local_postflight_stale_contract() {
     // Commit an intervening mutation to an expected file, advancing HEAD past the contract baseline
     let target = root.join("src/app/core/auth/auth.effects.ts");
     fs::write(&target, "// intervening commit by another actor").unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&root).output().unwrap();
-    Command::new("git").args(["commit", "-m", "Intervening commit"]).current_dir(&root).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Intervening commit"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // Now validate against the older contract baseline
     let rep = validate_local_postflight(
@@ -761,7 +971,10 @@ fn test_iteration_2b_local_postflight_stale_contract() {
     )
     .unwrap();
 
-    assert_eq!(rep.staleness_status, LocalStalenessStatus::StaleBaselineDiverged);
+    assert_eq!(
+        rep.staleness_status,
+        LocalStalenessStatus::StaleBaselineDiverged
+    );
     assert_eq!(rep.verdict, LocalPostflightVerdict::BlockedStaleContract);
     assert_eq!(rep.exit_code, 1);
 
@@ -770,10 +983,12 @@ fn test_iteration_2b_local_postflight_stale_contract() {
 
 #[test]
 fn test_iteration_2b_local_postflight_git_unavailable() {
-    use engram::contract::{ChangeContract, ContractBoundary, ContractProvenance, ContractStatus, RatificationStatus};
+    use engram::contract::{
+        ChangeContract, ContractBoundary, ContractProvenance, ContractStatus, RatificationStatus,
+    };
     use engram::flywheel::{
-        validate_local_postflight, LocalPostflightOptions, LocalPostflightVerdict,
-        LocalStalenessStatus,
+        LocalPostflightOptions, LocalPostflightVerdict, LocalStalenessStatus,
+        validate_local_postflight,
     };
 
     let tmp = std::env::temp_dir().join(format!("engram_iter2b_nogit_{}", std::process::id()));
@@ -825,7 +1040,10 @@ fn test_iteration_2b_local_postflight_git_unavailable() {
     )
     .unwrap();
 
-    assert_eq!(rep.verdict, LocalPostflightVerdict::IndeterminateGitUnavailable);
+    assert_eq!(
+        rep.verdict,
+        LocalPostflightVerdict::IndeterminateGitUnavailable
+    );
     assert_eq!(rep.staleness_status, LocalStalenessStatus::GitUnavailable);
     assert_eq!(rep.exit_code, 2);
 
@@ -835,8 +1053,8 @@ fn test_iteration_2b_local_postflight_git_unavailable() {
 #[test]
 fn test_iteration_2b_local_postflight_ambiguous_results() {
     use engram::flywheel::{
-        validate_local_postflight, LocalPostflightOptions, LocalPostflightVerdict,
-        LocalScopeStatus, PreflightOptions, preflight_task,
+        LocalPostflightOptions, LocalPostflightVerdict, LocalScopeStatus, PreflightOptions,
+        preflight_task, validate_local_postflight,
     };
 
     let root = setup_test_workspace("iter2b_ambig");
@@ -867,9 +1085,19 @@ fn test_iteration_2b_local_postflight_ambiguous_results() {
     )
     .unwrap();
 
-    assert_eq!(rep_advisory.scope_status, LocalScopeStatus::UnexpectedExpansion);
-    assert!(rep_advisory.unexpected_files.contains(&"src/app/features/settings/settings.component.ts".to_string()));
-    assert_eq!(rep_advisory.verdict, LocalPostflightVerdict::PassScopeOnlyUnverified);
+    assert_eq!(
+        rep_advisory.scope_status,
+        LocalScopeStatus::UnexpectedExpansion
+    );
+    assert!(
+        rep_advisory
+            .unexpected_files
+            .contains(&"src/app/features/settings/settings.component.ts".to_string())
+    );
+    assert_eq!(
+        rep_advisory.verdict,
+        LocalPostflightVerdict::PassScopeOnlyUnverified
+    );
 
     // 2. In strict mode: BlockedScopeViolation
     let rep_strict = validate_local_postflight(
@@ -884,7 +1112,10 @@ fn test_iteration_2b_local_postflight_ambiguous_results() {
     )
     .unwrap();
 
-    assert_eq!(rep_strict.verdict, LocalPostflightVerdict::BlockedScopeViolation);
+    assert_eq!(
+        rep_strict.verdict,
+        LocalPostflightVerdict::BlockedScopeViolation
+    );
     assert_eq!(rep_strict.exit_code, 1);
 
     let _ = fs::remove_dir_all(&root);

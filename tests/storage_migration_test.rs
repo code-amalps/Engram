@@ -1,9 +1,8 @@
 use anyhow::Result;
 use engram::storage::{
-    self, count_entity_members, get_entity_members, get_entity_members_by_name,
-    get_entity_parse_status, get_schema_version, insert_entity_members, member_id,
-    migrate_database, update_entity_parse_status, EntityMember, ParseStatus,
-    CURRENT_SCHEMA_VERSION,
+    self, CURRENT_SCHEMA_VERSION, EntityMember, ParseStatus, count_entity_members,
+    get_entity_members, get_entity_members_by_name, get_entity_parse_status, get_schema_version,
+    insert_entity_members, member_id, migrate_database, update_entity_parse_status,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -14,7 +13,8 @@ struct TempTestDir {
 
 impl TempTestDir {
     fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("engram_test_{}_{}", prefix, uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("engram_test_{}_{}", prefix, uuid::Uuid::new_v4()));
         let _ = std::fs::create_dir_all(&path);
         Self { path }
     }
@@ -182,7 +182,10 @@ fn test_02_migration_from_existing_schema() -> Result<()> {
         [],
         |row| row.get::<_, i64>(0).map(|c| c > 0),
     )?;
-    assert!(!table_exists, "entity_members must not exist in legacy v1 DB");
+    assert!(
+        !table_exists,
+        "entity_members must not exist in legacy v1 DB"
+    );
 
     // Execute migration
     migrate_database(&mut conn)?;
@@ -196,7 +199,10 @@ fn test_02_migration_from_existing_schema() -> Result<()> {
         [],
         |row| row.get::<_, i64>(0).map(|c| c > 0),
     )?;
-    assert!(table_exists, "entity_members table must exist after migration");
+    assert!(
+        table_exists,
+        "entity_members table must exist after migration"
+    );
 
     Ok(())
 }
@@ -313,7 +319,10 @@ fn test_05_rollback_on_migration_failure() -> Result<()> {
         Ok(())
     })();
 
-    assert!(tx_res.is_err(), "Transaction must fail and trigger rollback");
+    assert!(
+        tx_res.is_err(),
+        "Transaction must fail and trigger rollback"
+    );
 
     // Verify schema version is STILL 0 (not updated)
     let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -356,11 +365,10 @@ fn test_06_existing_storage_operations_remain_functional() -> Result<()> {
         "INSERT INTO metadata(key, value) VALUES ('stage', 'phase4a')",
         [],
     )?;
-    let val: String = conn.query_row(
-        "SELECT value FROM metadata WHERE key = 'stage'",
-        [],
-        |r| r.get(0),
-    )?;
+    let val: String =
+        conn.query_row("SELECT value FROM metadata WHERE key = 'stage'", [], |r| {
+            r.get(0)
+        })?;
     assert_eq!(val, "phase4a");
 
     Ok(())
@@ -448,7 +456,11 @@ fn test_07_entity_member_integrity_and_uniqueness() -> Result<()> {
 
     insert_entity_members(&conn, &[overload1, overload2, overload_body])?;
     let queries = get_entity_members_by_name(&conn, "svc_storage", "query")?;
-    assert_eq!(queries.len(), 3, "All 3 overloaded signatures must be stored");
+    assert_eq!(
+        queries.len(),
+        3,
+        "All 3 overloaded signatures must be stored"
+    );
 
     // 5. Test Foreign Key constraint (inserting member for non-existent entity must fail)
     let orphaned_member = EntityMember::new(
@@ -725,7 +737,10 @@ fn test_11_member_id_collision_detection_and_duplicate_safety() -> Result<()> {
     };
 
     let collision_result = insert_entity_members(&conn, &[m_colliding]);
-    assert!(collision_result.is_err(), "Hash collision must trigger explicit error");
+    assert!(
+        collision_result.is_err(),
+        "Hash collision must trigger explicit error"
+    );
     let err_msg = collision_result.unwrap_err().to_string();
     assert!(
         err_msg.contains("Hash collision detected"),
@@ -736,7 +751,10 @@ fn test_11_member_id_collision_detection_and_duplicate_safety() -> Result<()> {
     let stored_after_collision = get_entity_members(&conn, "ent_service")?;
     assert_eq!(stored_after_collision.len(), 1);
     assert_eq!(stored_after_collision[0].name, "execute");
-    assert_eq!(stored_after_collision[0].signature, "public execute(): boolean");
+    assert_eq!(
+        stored_after_collision[0].signature,
+        "public execute(): boolean"
+    );
 
     Ok(())
 }

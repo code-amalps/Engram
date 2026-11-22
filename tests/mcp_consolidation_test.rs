@@ -14,7 +14,7 @@
 
 use engram::contract::get_active_contract;
 use engram::mcp::{all_tools_definitions, mcp_call, tools_definitions};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -120,7 +120,11 @@ fn test_single_shot_prepare_task_success() {
 
     let expected_files = parsed["boundaries"]["expected_files"].as_array().unwrap();
     assert!(!expected_files.is_empty());
-    assert!(expected_files.iter().any(|f| f.as_str().unwrap().contains("auth")));
+    assert!(
+        expected_files
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("auth"))
+    );
 
     let target_files = parsed["context"]["target_files"].as_array().unwrap();
     assert!(!target_files.is_empty());
@@ -128,7 +132,12 @@ fn test_single_shot_prepare_task_success() {
 
     assert_eq!(parsed["is_reused_contract"], false);
     assert!(parsed["blocking_violations"].as_array().unwrap().is_empty());
-    assert!(parsed["next_action"].as_str().unwrap().contains("Change Contract locked"));
+    assert!(
+        parsed["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("Change Contract locked")
+    );
 
     // Verify active contract was persisted on disk
     let active = get_active_contract(&root).unwrap().unwrap();
@@ -157,9 +166,24 @@ fn test_single_shot_prepare_task_adaptive_bypass() {
     assert!(parsed["contract_id"].is_null());
     assert!(parsed["contract_version"].is_null());
     assert!(parsed["baseline_commit"].is_null());
-    assert!(parsed["boundaries"]["expected_files"].as_array().unwrap().is_empty());
-    assert!(parsed["context"]["target_files"].as_array().unwrap().is_empty());
-    assert!(parsed["next_action"].as_str().unwrap().contains("trivial leaf edit"));
+    assert!(
+        parsed["boundaries"]["expected_files"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        parsed["context"]["target_files"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        parsed["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("trivial leaf edit")
+    );
 
     // Verify NO contract was created on disk
     let active = get_active_contract(&root).unwrap();
@@ -219,7 +243,12 @@ fn test_single_shot_prepare_task_idempotent_contract_reuse() {
     assert_eq!(parsed2["contract_id"].as_str().unwrap(), cid1);
     assert_eq!(parsed2["is_reused_contract"], true);
     assert!(parsed2["reused_reason"].as_str().is_some());
-    assert!(parsed2["next_action"].as_str().unwrap().contains("Valid Change Contract active"));
+    assert!(
+        parsed2["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("Valid Change Contract active")
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -241,11 +270,20 @@ fn test_single_shot_prepare_task_explicit_planned_and_forbidden() {
 
     assert_eq!(parsed["status"], "READY");
     let expected = parsed["boundaries"]["expected_files"].as_array().unwrap();
-    assert!(expected.iter().any(|f| f == "src/app/core/auth/auth.models.ts"));
+    assert!(
+        expected
+            .iter()
+            .any(|f| f == "src/app/core/auth/auth.models.ts")
+    );
 
-    let forbidden = parsed["boundaries"]["forbidden_boundaries"].as_array().unwrap();
+    let forbidden = parsed["boundaries"]["forbidden_boundaries"]
+        .as_array()
+        .unwrap();
     assert_eq!(forbidden.len(), 1);
-    assert_eq!(forbidden[0], "src/app/features/settings/settings.component.ts");
+    assert_eq!(
+        forbidden[0],
+        "src/app/features/settings/settings.component.ts"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -292,17 +330,33 @@ fn test_single_shot_prepare_task_input_validation_and_errors() {
     // 1. Empty task
     let res = mcp_call(&root, "engram_prepare_task", &json!({ "task": "" }));
     assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains("Task description must not be empty"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("Task description must not be empty")
+    );
 
     // 2. Whitespace-only task
     let res = mcp_call(&root, "engram_prepare_task", &json!({ "task": "   " }));
     assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains("Task description must not be empty"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("Task description must not be empty")
+    );
 
     // 3. Token budget == 0
-    let res = mcp_call(&root, "engram_prepare_task", &json!({ "task": "Valid task", "token_budget": 0 }));
+    let res = mcp_call(
+        &root,
+        "engram_prepare_task",
+        &json!({ "task": "Valid task", "token_budget": 0 }),
+    );
     assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains("Token budget must be greater than 0"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("Token budget must be greater than 0")
+    );
 
     // 4. Planned files path traversal escape
     let res = mcp_call(
@@ -311,7 +365,11 @@ fn test_single_shot_prepare_task_input_validation_and_errors() {
         &json!({ "task": "Valid task", "planned_files": ["../../outside.ts"] }),
     );
     assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains("directory traversal ('..') is prohibited"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("directory traversal ('..') is prohibited")
+    );
 
     // 5. Forbidden boundary path traversal escape
     let res = mcp_call(
@@ -320,7 +378,11 @@ fn test_single_shot_prepare_task_input_validation_and_errors() {
         &json!({ "task": "Valid task", "forbidden": ["../../secret.key"] }),
     );
     assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains("directory traversal ('..') is prohibited"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("directory traversal ('..') is prohibited")
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -357,7 +419,12 @@ fn test_tools_definitions_contains_prepare_task() {
         .expect("engram_prepare_task must be defined in all_tools_definitions");
 
     assert_eq!(prep_tool["name"], "engram_prepare_task");
-    assert!(prep_tool["description"].as_str().unwrap().contains("Single-shot"));
+    assert!(
+        prep_tool["description"]
+            .as_str()
+            .unwrap()
+            .contains("Single-shot")
+    );
 
     let schema = &prep_tool["inputSchema"];
     assert_eq!(schema["type"], "object");
@@ -486,7 +553,12 @@ fn test_stdio_jsonrpc_protocol_prepare_task() {
     let parsed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(parsed["status"], "READY");
     assert!(parsed["contract_id"].as_str().unwrap().starts_with("ctr_"));
-    assert!(!parsed["context"]["target_files"].as_array().unwrap().is_empty());
+    assert!(
+        !parsed["context"]["target_files"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     // Clean exit
     drop(stdin);
@@ -542,11 +614,26 @@ fn test_workflow_metrics_and_tool_call_reduction() {
     let new_resp_bytes = new_resp_str.len();
 
     println!("\n=== SCENARIO 1: COMPLEX FEATURE TASK METRICS ===");
-    println!("Old Workflow MCP Calls: {} (get_context + preflight)", old_calls);
-    println!("New Workflow MCP Calls: {} (engram_prepare_task)", new_calls);
-    println!("Tool Call Reduction:    {}% ({} -> {})", (old_calls - new_calls) * 100 / old_calls, old_calls, new_calls);
+    println!(
+        "Old Workflow MCP Calls: {} (get_context + preflight)",
+        old_calls
+    );
+    println!(
+        "New Workflow MCP Calls: {} (engram_prepare_task)",
+        new_calls
+    );
+    println!(
+        "Tool Call Reduction:    {}% ({} -> {})",
+        (old_calls - new_calls) * 100 / old_calls,
+        old_calls,
+        new_calls
+    );
     println!("Old Workflow Request Bytes:  {}", old_req_bytes);
-    println!("New Workflow Request Bytes:  {} (-{}%)", new_req_bytes, (old_req_bytes - new_req_bytes) * 100 / old_req_bytes);
+    println!(
+        "New Workflow Request Bytes:  {} (-{}%)",
+        new_req_bytes,
+        (old_req_bytes - new_req_bytes) * 100 / old_req_bytes
+    );
     println!("Old Workflow Response Bytes: {}", old_resp_bytes);
     println!("New Workflow Response Bytes: {}", new_resp_bytes);
 
@@ -580,19 +667,25 @@ fn test_workflow_metrics_and_tool_call_reduction() {
     let _ = fs::remove_dir_all(&root);
 }
 
-
 #[test]
 fn test_tools_definitions_default_is_lean_core() {
     let defs = tools_definitions();
     let tools = defs.as_array().expect("tools array");
-    assert_eq!(tools.len(), 4, "Default tool surface must be exactly 4 core tools");
+    assert_eq!(
+        tools.len(),
+        4,
+        "Default tool surface must be exactly 4 core tools"
+    );
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, vec![
-        "engram_get_context",
-        "engram_inspect_symbol",
-        "engram_preflight",
-        "engram_postflight"
-    ]);
+    assert_eq!(
+        names,
+        vec![
+            "engram_get_context",
+            "engram_inspect_symbol",
+            "engram_preflight",
+            "engram_postflight"
+        ]
+    );
 
     // Verify specialist opt-in via environment variable
     unsafe {

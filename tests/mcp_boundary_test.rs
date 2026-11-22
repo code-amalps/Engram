@@ -1,14 +1,16 @@
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use serde_json::Value;
 
 use engram::analyzer::analyze;
-use engram::mcp::{
-    compute_envelope_bytes, enforce_mcp_envelope_boundary, mcp_call,
-};
+use engram::mcp::{compute_envelope_bytes, enforce_mcp_envelope_boundary, mcp_call};
 
 fn setup_test_workspace(name: &str) -> PathBuf {
-    let ws = std::env::temp_dir().join(format!("engram_mcp_boundary_{}_{}", name, uuid::Uuid::new_v4()));
+    let ws = std::env::temp_dir().join(format!(
+        "engram_mcp_boundary_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&ws).unwrap();
     ws
 }
@@ -22,7 +24,8 @@ fn test_boundary_01_small_response_well_within_budget() {
     fs::write(
         src.join("auth.ts"),
         "export function login(user: string, pass: string): boolean { return true; }\n",
-    ).unwrap();
+    )
+    .unwrap();
     analyze(&ws).unwrap();
 
     let args = serde_json::json!({
@@ -30,10 +33,14 @@ fn test_boundary_01_small_response_well_within_budget() {
         "token_budget": 1200
     });
     let res = mcp_call(&ws, "engram_get_context", &args).expect("mcp_call must succeed");
-    
+
     // Wire JSON-RPC envelope bytes
     let env_bytes = compute_envelope_bytes(&serde_json::json!(1), &res);
-    assert!(env_bytes <= 16384, "Complete envelope bytes ({} bytes) must be <= 16384", env_bytes);
+    assert!(
+        env_bytes <= 16384,
+        "Complete envelope bytes ({} bytes) must be <= 16384",
+        env_bytes
+    );
 
     let content_text = res["content"][0]["text"].as_str().expect("text string");
     let parsed: Value = serde_json::from_str(content_text).expect("Valid JSON");
@@ -60,12 +67,14 @@ fn test_boundary_02_exact_limit_acceptance() {
     let needed = byte_limit.saturating_sub(base_len);
     payload["pad"] = serde_json::json!("A".repeat(needed));
 
-    let res = enforce_mcp_envelope_boundary("test_tool", payload, byte_limit, &serde_json::json!(1));
+    let res =
+        enforce_mcp_envelope_boundary("test_tool", payload, byte_limit, &serde_json::json!(1));
     let final_bytes = compute_envelope_bytes(&serde_json::json!(1), &res);
     assert!(
         final_bytes <= byte_limit,
         "Exact limit test response ({} bytes) must be <= {}",
-        final_bytes, byte_limit
+        final_bytes,
+        byte_limit
     );
 
     let content_text = res["content"][0]["text"].as_str().expect("text string");
@@ -90,11 +99,13 @@ fn test_boundary_03_boundary_crossing_16383_16384_16385() {
         assert!(
             env_bytes <= limit,
             "Enforced response ({} bytes) must strictly obey limit {}",
-            env_bytes, limit
+            env_bytes,
+            limit
         );
 
         let content_text = res["content"][0]["text"].as_str().unwrap();
-        let parsed: Value = serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
+        let parsed: Value =
+            serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
         assert!(parsed.is_object());
     }
 }
@@ -119,7 +130,8 @@ fn test_boundary_04_massive_omission_manifest_1000_files() {
             original_token_count: 100,
             included_token_count: 0,
             omitted_token_count: 100,
-            omission_reason: "Context budget exhausted; omitted to fit within token ceiling".to_string(),
+            omission_reason: "Context budget exhausted; omitted to fit within token ceiling"
+                .to_string(),
             omission_status: "CAPACITY_PRUNED".to_string(),
             retrievable_via_targeted_request: true,
         });
@@ -156,7 +168,12 @@ fn test_boundary_04_massive_omission_manifest_1000_files() {
     });
 
     // Enforce boundary with standard 16384 byte ceiling
-    let res = enforce_mcp_envelope_boundary("engram_get_context", raw_payload, 16384, &serde_json::json!(1));
+    let res = enforce_mcp_envelope_boundary(
+        "engram_get_context",
+        raw_payload,
+        16384,
+        &serde_json::json!(1),
+    );
     let final_bytes = compute_envelope_bytes(&serde_json::json!(1), &res);
     assert!(
         final_bytes <= 16384,
@@ -183,12 +200,16 @@ fn test_boundary_05_massive_code_excerpts_100kb() {
     // 120 KB source file
     let mut huge_body = String::new();
     for i in 0..3000 {
-        huge_body.push_str(&format!("  const intermediate_var_{:04} = 'large string payload for padding';\n", i));
+        huge_body.push_str(&format!(
+            "  const intermediate_var_{:04} = 'large string payload for padding';\n",
+            i
+        ));
     }
     fs::write(
         src.join("huge_algorithm.ts"),
         format!("export function runHugeAlgorithm(): void {{\n{huge_body}}}\n"),
-    ).unwrap();
+    )
+    .unwrap();
     analyze(&ws).unwrap();
 
     let args = serde_json::json!({
@@ -218,7 +239,11 @@ fn test_boundary_06_deep_dependency_graph_progressive_shedding() {
     let src = ws.join("src");
     fs::create_dir_all(&src).unwrap();
 
-    fs::write(src.join("base_service.ts"), "export class BaseService { ping() { return 1; } }\n").unwrap();
+    fs::write(
+        src.join("base_service.ts"),
+        "export class BaseService { ping() { return 1; } }\n",
+    )
+    .unwrap();
     for i in 1..=60 {
         fs::write(
             src.join(format!("consumer_{:03}.ts", i)),
@@ -243,8 +268,18 @@ fn test_boundary_06_deep_dependency_graph_progressive_shedding() {
 
     let content_text = res["content"][0]["text"].as_str().unwrap();
     let parsed: Value = serde_json::from_str(content_text).expect("Must parse cleanly");
-    assert_eq!(parsed["omission_manifest"]["budget_status"].as_str().unwrap(), "OMISSIONS_RECORDED");
-    assert!(parsed["omission_manifest"]["omitted_items_count"].as_i64().unwrap() > 0);
+    assert_eq!(
+        parsed["omission_manifest"]["budget_status"]
+            .as_str()
+            .unwrap(),
+        "OMISSIONS_RECORDED"
+    );
+    assert!(
+        parsed["omission_manifest"]["omitted_items_count"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -273,12 +308,16 @@ fn test_boundary_07_extreme_parameters_max_bytes_1024() {
     );
 
     let content_text = res["content"][0]["text"].as_str().unwrap();
-    let parsed: Value = serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
+    let parsed: Value =
+        serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
     // Either a minimal valid truncated payload or structured BOUNDARY_EXCEEDED error
     let is_valid_min = parsed.get("payload_truncated") == Some(&serde_json::json!(true))
         || parsed.get("error") == Some(&serde_json::json!("BOUNDARY_EXCEEDED"))
         || parsed.get("status") == Some(&serde_json::json!("READY"));
-    assert!(is_valid_min, "Must return either structured minimal payload or structured boundary error");
+    assert!(
+        is_valid_min,
+        "Must return either structured minimal payload or structured boundary error"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -290,7 +329,11 @@ fn test_boundary_08_configurable_max_bytes_4096_8192_32768() {
     let src = ws.join("src");
     fs::create_dir_all(&src).unwrap();
 
-    fs::write(src.join("service.ts"), "export class DataService { get() { return [1,2,3]; } }\n").unwrap();
+    fs::write(
+        src.join("service.ts"),
+        "export class DataService { get() { return [1,2,3]; } }\n",
+    )
+    .unwrap();
     for i in 1..=25 {
         fs::write(
             src.join(format!("dep_{}.ts", i)),
@@ -311,7 +354,8 @@ fn test_boundary_08_configurable_max_bytes_4096_8192_32768() {
         assert!(
             final_bytes <= limit,
             "Response ({} bytes) must strictly obey configured max_bytes limit {}",
-            final_bytes, limit
+            final_bytes,
+            limit
         );
 
         let content_text = res["content"][0]["text"].as_str().unwrap();
@@ -333,7 +377,8 @@ fn test_boundary_09_unicode_multibyte_paths_and_symbols() {
     fs::write(
         src.join(unicode_file),
         "export class 認証サービス { public ログイン(): boolean { return true; } }\n",
-    ).unwrap();
+    )
+    .unwrap();
     analyze(&ws).unwrap();
 
     let args = serde_json::json!({
@@ -351,9 +396,15 @@ fn test_boundary_09_unicode_multibyte_paths_and_symbols() {
 
     let content_text = res["content"][0]["text"].as_str().unwrap();
     // Verify UTF-8 byte length is counted correctly
-    assert!(content_text.len() >= content_text.chars().count(), "UTF-8 byte length must be >= char count");
+    assert!(
+        content_text.len() >= content_text.chars().count(),
+        "UTF-8 byte length must be >= char count"
+    );
     let parsed: Value = serde_json::from_str(content_text).expect("Must parse cleanly");
-    assert_eq!(parsed["target"].as_str().unwrap(), format!("src/{}", unicode_file));
+    assert_eq!(
+        parsed["target"].as_str().unwrap(),
+        format!("src/{}", unicode_file)
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -373,7 +424,8 @@ fn test_boundary_10_task_b_regression_95kb_reproduction() {
   logout$ = null;
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         src.join("settings.reducer.ts"),
@@ -381,7 +433,8 @@ fn test_boundary_10_task_b_regression_95kb_reproduction() {
   rememberMe: boolean;
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Create 150 simulated background repository files with matching keywords to trigger massive omission manifests
     for i in 1..=150 {
@@ -393,7 +446,8 @@ fn test_boundary_10_task_b_regression_95kb_reproduction() {
     analyze(&ws).unwrap();
 
     // Exact Task B call parameters with tight token budget to force candidate omission
-    let task_b_prompt = "Implement remember-me checkbox in login screen with durable preference storage";
+    let task_b_prompt =
+        "Implement remember-me checkbox in login screen with durable preference storage";
     let args = serde_json::json!({
         "task": task_b_prompt,
         "token_budget": 200
@@ -407,18 +461,27 @@ fn test_boundary_10_task_b_regression_95kb_reproduction() {
         final_bytes
     );
 
-    let content_text = res["content"][0]["text"].as_str().expect("Tool response text must be string");
+    let content_text = res["content"][0]["text"]
+        .as_str()
+        .expect("Tool response text must be string");
     let parsed: Value = serde_json::from_str(content_text).expect("Valid structured JSON");
 
     // 1. Verify essential context is retained
     assert_eq!(parsed["status"].as_str().unwrap(), "READY");
-    let target_files = parsed["target_files"].as_array().expect("target_files array");
-    assert!(!target_files.is_empty(), "Must retain task-relevant target files");
+    let target_files = parsed["target_files"]
+        .as_array()
+        .expect("target_files array");
+    assert!(
+        !target_files.is_empty(),
+        "Must retain task-relevant target files"
+    );
 
     // 2. Verify omission manifest is bounded and contains totals + guidance
     let man = &parsed["omission_manifest"];
     assert!(man.is_object(), "omission_manifest must be present");
-    let omitted_count = man["omitted_items_count"].as_i64().expect("omitted_items_count");
+    let omitted_count = man["omitted_items_count"]
+        .as_i64()
+        .expect("omitted_items_count");
     assert!(
         omitted_count >= 140,
         "Total omitted items count ({}) must record all unselected files without bloating payload",
@@ -426,10 +489,17 @@ fn test_boundary_10_task_b_regression_95kb_reproduction() {
     );
     assert_eq!(man["manifest_truncated"].as_bool().unwrap(), true);
     assert!(man["unrepresented_omissions_count"].as_i64().unwrap() > 0);
-    assert!(man["targeted_retrieval_guidance"].as_str().unwrap().contains("engram_inspect_symbol"));
+    assert!(
+        man["targeted_retrieval_guidance"]
+            .as_str()
+            .unwrap()
+            .contains("engram_inspect_symbol")
+    );
 
     // 3. Verify sample omission list is capped (never dumping 150 files)
-    let samples = man["sample_omissions"].as_array().expect("sample_omissions array");
+    let samples = man["sample_omissions"]
+        .as_array()
+        .expect("sample_omissions array");
     assert!(
         samples.len() <= 5,
         "Sample omissions list must be capped to at most 5 entries (got {})",
@@ -454,9 +524,14 @@ fn test_boundary_11_universal_endpoint_coverage() {
         "token_budget": 1200,
         "max_bytes": 8192
     });
-    let res_prep = mcp_call(&ws, "engram_prepare_task", &prep_args).expect("prepare_task must succeed");
+    let res_prep =
+        mcp_call(&ws, "engram_prepare_task", &prep_args).expect("prepare_task must succeed");
     let bytes_prep = compute_envelope_bytes(&serde_json::json!(1), &res_prep);
-    assert!(bytes_prep <= 8192, "prepare_task bytes ({}) must be <= 8192", bytes_prep);
+    assert!(
+        bytes_prep <= 8192,
+        "prepare_task bytes ({}) must be <= 8192",
+        bytes_prep
+    );
     let _: Value = serde_json::from_str(res_prep["content"][0]["text"].as_str().unwrap()).unwrap();
 
     // 2. engram_preflight
@@ -465,10 +540,16 @@ fn test_boundary_11_universal_endpoint_coverage() {
         "planned_files": ["src/index.ts"],
         "max_bytes": 8192
     });
-    let res_pre = mcp_call(&ws, "engram_preflight", &preflight_args).expect("preflight must succeed");
+    let res_pre =
+        mcp_call(&ws, "engram_preflight", &preflight_args).expect("preflight must succeed");
     let bytes_pre = compute_envelope_bytes(&serde_json::json!(1), &res_pre);
-    assert!(bytes_pre <= 8192, "preflight bytes ({}) must be <= 8192", bytes_pre);
-    let parsed_pre: Value = serde_json::from_str(res_pre["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(
+        bytes_pre <= 8192,
+        "preflight bytes ({}) must be <= 8192",
+        bytes_pre
+    );
+    let parsed_pre: Value =
+        serde_json::from_str(res_pre["content"][0]["text"].as_str().unwrap()).unwrap();
     let contract_id = parsed_pre["contract_id"].as_str().unwrap().to_string();
 
     // 3. engram_postflight
@@ -479,7 +560,11 @@ fn test_boundary_11_universal_endpoint_coverage() {
     });
     let res_post = mcp_call(&ws, "engram_postflight", &post_args).expect("postflight must succeed");
     let bytes_post = compute_envelope_bytes(&serde_json::json!(1), &res_post);
-    assert!(bytes_post <= 8192, "postflight bytes ({}) must be <= 8192", bytes_post);
+    assert!(
+        bytes_post <= 8192,
+        "postflight bytes ({}) must be <= 8192",
+        bytes_post
+    );
     let _: Value = serde_json::from_str(res_post["content"][0]["text"].as_str().unwrap()).unwrap();
 
     let _ = fs::remove_dir_all(&ws);

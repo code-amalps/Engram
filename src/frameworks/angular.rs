@@ -67,20 +67,24 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
         let clean = seed_path.replace('\\', "/");
 
         // Helper to check and add companion
-        let mut add_if_exists = |rel_path: String, kind: CompanionKind, conf: f64, reason: String| {
-            let p = rel_path.replace('\\', "/");
-            if p != clean && workspace_root.join(&p).exists() {
-                if !companions.iter().any(|c: &ArchitecturalCompanion| c.path == p) {
-                    companions.push(ArchitecturalCompanion {
-                        path: p,
-                        kind,
-                        confidence: conf,
-                        reason,
-                        exists_on_disk: true,
-                    });
+        let mut add_if_exists =
+            |rel_path: String, kind: CompanionKind, conf: f64, reason: String| {
+                let p = rel_path.replace('\\', "/");
+                if p != clean && workspace_root.join(&p).exists() {
+                    if !companions
+                        .iter()
+                        .any(|c: &ArchitecturalCompanion| c.path == p)
+                    {
+                        companions.push(ArchitecturalCompanion {
+                            path: p,
+                            kind,
+                            confidence: conf,
+                            reason,
+                            exists_on_disk: true,
+                        });
+                    }
                 }
-            }
-        };
+            };
 
         // 1. State Management Triad Expansion: actions <-> effects <-> reducer <-> selectors
         if clean.ends_with(".actions.ts")
@@ -284,7 +288,9 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
             let mut resolved = None;
             if workspace_root.join(&clean).exists() {
                 resolved = Some(clean);
-            } else if let Ok(mut stmt) = conn.prepare("SELECT path FROM files WHERE path LIKE ?1 LIMIT 1") {
+            } else if let Ok(mut stmt) =
+                conn.prepare("SELECT path FROM files WHERE path LIKE ?1 LIMIT 1")
+            {
                 let pat = format!("%/{}", rel_path);
                 if let Ok(row) = stmt.query_row(rusqlite::params![pat], |r| r.get::<_, String>(0)) {
                     resolved = Some(row.replace('\\', "/"));
@@ -292,7 +298,10 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
             }
 
             if let Some(p) = resolved {
-                if !companions.iter().any(|c: &ArchitecturalCompanion| c.path == p) {
+                if !companions
+                    .iter()
+                    .any(|c: &ArchitecturalCompanion| c.path == p)
+                {
                     companions.push(ArchitecturalCompanion {
                         path: p,
                         kind,
@@ -305,7 +314,10 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
         };
 
         // Scenario C / Remember Me Task Discovery
-        if lower.contains("remember") || lower.contains("remember me") || (lower.contains("auth") && lower.contains("login")) {
+        if lower.contains("remember")
+            || lower.contains("remember me")
+            || (lower.contains("auth") && lower.contains("login"))
+        {
             add_candidate(
                 "auth.actions.ts",
                 CompanionKind::StateAction,
@@ -375,7 +387,10 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
         }
 
         // Scenario A / HttpErrorInterceptor Task Discovery
-        if lower.contains("httperror") || lower.contains("http error") || (lower.contains("interceptor") && lower.contains("error")) {
+        if lower.contains("httperror")
+            || lower.contains("http error")
+            || (lower.contains("interceptor") && lower.contains("error"))
+        {
             add_candidate(
                 "http-error.interceptor.ts",
                 CompanionKind::InjectedService,

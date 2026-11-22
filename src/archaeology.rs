@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::analyzer::ensure_fresh;
-use crate::memory::{load_durable_memories, DurableMemory};
+use crate::memory::{DurableMemory, load_durable_memories};
 use crate::memory_graph::{build_memory_graph, query_governed_entities, query_governing_memories};
 use crate::storage::{db, root_path};
 

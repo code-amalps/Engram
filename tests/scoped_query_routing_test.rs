@@ -4,7 +4,7 @@ use std::process::Command;
 
 use engram::analyzer::analyze;
 use engram::compiler::{canonicalize_language, context, context_scoped, normalize_subpath};
-use engram::prompt::{generate_prompt, generate_prompt_scoped, PromptFormat};
+use engram::prompt::{PromptFormat, generate_prompt, generate_prompt_scoped};
 
 fn setup_test_workspace(name: &str) -> PathBuf {
     let ws = std::env::temp_dir().join(format!(

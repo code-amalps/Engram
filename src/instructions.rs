@@ -1,7 +1,7 @@
 //! Safe, non-destructive instruction file manager using managed delimiter blocks.
 //! Supports .github/copilot-instructions.md, .cursorrules, .windsurfrules, CLAUDE.md, and AGENTS.md.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},

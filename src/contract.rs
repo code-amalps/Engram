@@ -1,7 +1,7 @@
 //! Change Contract Engine: elastic boundary validation, versioning, baseline anchoring,
 //! Constitution precedence, provenance ratification, Git hook management, and Change Guard CI checks.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

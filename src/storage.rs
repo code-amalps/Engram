@@ -205,7 +205,7 @@ pub fn migrate_database(conn: &mut Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_members_entity ON entity_members(entity_id);
         CREATE INDEX IF NOT EXISTS idx_members_entity_name ON entity_members(entity_id, name);
         CREATE INDEX IF NOT EXISTS idx_members_name ON entity_members(name);
-        CREATE INDEX IF NOT EXISTS idx_relationships_ext ON relationships(source_id, is_external);"
+        CREATE INDEX IF NOT EXISTS idx_relationships_ext ON relationships(source_id, is_external);",
     )?;
 
     tx.commit()?;
@@ -437,9 +437,8 @@ pub fn insert_entity_members(conn: &Connection, members: &[EntityMember]) -> Res
     }
     use rusqlite::OptionalExtension;
 
-    let mut check_stmt = conn.prepare(
-        "SELECT entity_id, name, signature FROM entity_members WHERE member_id = ?1",
-    )?;
+    let mut check_stmt =
+        conn.prepare("SELECT entity_id, name, signature FROM entity_members WHERE member_id = ?1")?;
 
     let mut insert_stmt = conn.prepare(
         "INSERT INTO entity_members (
@@ -459,7 +458,9 @@ pub fn insert_entity_members(conn: &Connection, members: &[EntityMember]) -> Res
     let mut count = 0;
     for m in members {
         let existing: Option<(String, String, String)> = check_stmt
-            .query_row([&m.member_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .query_row([&m.member_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
             .optional()?;
 
         match existing {
@@ -500,7 +501,13 @@ pub fn insert_entity_members(conn: &Connection, members: &[EntityMember]) -> Res
                 } else {
                     anyhow::bail!(
                         "Hash collision detected in entity_members for member_id '{}'. Existing member ({}, {}, {}) cannot be overwritten by ({}, {}, {})",
-                        m.member_id, ex_entity, ex_name, ex_sig, m.entity_id, m.name, m.signature
+                        m.member_id,
+                        ex_entity,
+                        ex_name,
+                        ex_sig,
+                        m.entity_id,
+                        m.name,
+                        m.signature
                     );
                 }
             }
@@ -707,8 +714,16 @@ mod tests {
 
     #[test]
     fn test_member_id_deterministic() {
-        let id1 = member_id("entity_1", "setItem", "setItem(key: string, value: any): void");
-        let id2 = member_id("entity_1", "setItem", "setItem(key: string, value: any): void");
+        let id1 = member_id(
+            "entity_1",
+            "setItem",
+            "setItem(key: string, value: any): void",
+        );
+        let id2 = member_id(
+            "entity_1",
+            "setItem",
+            "setItem(key: string, value: any): void",
+        );
         let id3 = member_id("entity_1", "getItem", "getItem<T>(key: string): T | null");
         assert_eq!(id1, id2);
         assert_ne!(id1, id3);
@@ -724,7 +739,10 @@ mod tests {
 
         assert_eq!(ParseStatus::from_str("COMPLETE"), ParseStatus::Complete);
         assert_eq!(ParseStatus::from_str("PARTIAL"), ParseStatus::Partial);
-        assert_eq!(ParseStatus::from_str("NOT_AVAILABLE"), ParseStatus::NotAvailable);
+        assert_eq!(
+            ParseStatus::from_str("NOT_AVAILABLE"),
+            ParseStatus::NotAvailable
+        );
         assert_eq!(ParseStatus::from_str("ERROR"), ParseStatus::Error);
         assert_eq!(ParseStatus::from_str("UNKNOWN"), ParseStatus::Complete);
     }

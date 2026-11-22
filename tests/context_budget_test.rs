@@ -23,8 +23,8 @@
 //! 20. Partial truncation and omission manifest accuracy
 
 use engram::budget::{
-    BudgetPacker, ByteRatioTokenCounter, ContextItem, ContextItemType, DetailLevel,
-    PriorityTier, TokenCounter, WordTokenCounter,
+    BudgetPacker, ByteRatioTokenCounter, ContextItem, ContextItemType, DetailLevel, PriorityTier,
+    TokenCounter, WordTokenCounter,
 };
 use engram::mcp::mcp_call;
 use serde_json::json;
@@ -109,7 +109,14 @@ fn test_04_many_small_context_items() {
 
     // 30 items of 10 tokens each = 300 tokens total
     let items: Vec<ContextItem> = (0..30)
-        .map(|i| dummy_item(&format!("item_{:02}", i), PriorityTier::Tier2High, 100.0 - (i as f64), 10))
+        .map(|i| {
+            dummy_item(
+                &format!("item_{:02}", i),
+                PriorityTier::Tier2High,
+                100.0 - (i as f64),
+                10,
+            )
+        })
         .collect();
 
     let res = packer.pack(items);
@@ -132,11 +139,21 @@ fn test_05_one_mandatory_item_larger_than_capacity() {
     let mandatory_oversized = dummy_item("god_module", PriorityTier::Tier1Mandatory, 1000.0, 200);
     let res = packer.pack(vec![mandatory_oversized]);
 
-    assert!(res.is_overflow, "Must flag capacity overflow when mandatory item exceeds budget");
+    assert!(
+        res.is_overflow,
+        "Must flag capacity overflow when mandatory item exceeds budget"
+    );
     assert_eq!(res.manifest.budget_status, "CAPACITY_OVERFLOW");
     assert_eq!(res.manifest.omitted_items_count, 1);
-    assert_eq!(res.manifest.omission_manifest[0].omission_status, "CAPACITY_OVERFLOW");
-    assert!(res.manifest.omission_manifest[0].omission_reason.contains("Mandatory Tier 1 context exceeds"));
+    assert_eq!(
+        res.manifest.omission_manifest[0].omission_status,
+        "CAPACITY_OVERFLOW"
+    );
+    assert!(
+        res.manifest.omission_manifest[0]
+            .omission_reason
+            .contains("Mandatory Tier 1 context exceeds")
+    );
 }
 
 // ----------------------------------------------------------------------------
@@ -171,7 +188,11 @@ fn test_07_duplicate_context_entries() {
     let duplicate = item.clone();
 
     let res = packer.pack(vec![item, duplicate]);
-    assert_eq!(res.packed_items.len(), 1, "Duplicate items must be deduplicated by id");
+    assert_eq!(
+        res.packed_items.len(),
+        1,
+        "Duplicate items must be deduplicated by id"
+    );
     assert_eq!(res.manifest.omitted_items_count, 0);
 }
 
@@ -194,7 +215,11 @@ fn test_08_mixed_signatures_and_complete_block() {
     assert_eq!(res.packed_items.len(), 1);
     assert_eq!(res.packed_items[0].id, "sig1");
     assert_eq!(res.manifest.omitted_items_count, 1);
-    assert!(res.manifest.omission_manifest[0].omission_reason.contains("opt-in via detail_level=full"));
+    assert!(
+        res.manifest.omission_manifest[0]
+            .omission_reason
+            .contains("opt-in via detail_level=full")
+    );
 
     // Under Full detail level, Tier 4 complete blocks are admitted if budget allows
     let full_packer = BudgetPacker::new(500)
@@ -216,7 +241,8 @@ fn test_09_unicode_and_multilingual_source() {
         .with_counter(Box::new(ByteRatioTokenCounter::default()))
         .with_reserved_metadata(100);
 
-    let unicode_content = "function 计算总额(参数: 字符串): 数值 { return 42; } // 日本語コメント: 認証成功";
+    let unicode_content =
+        "function 计算总额(参数: 字符串): 数值 { return 42; } // 日本語コメント: 認証成功";
     let item = ContextItem {
         id: "unicode_test".to_string(),
         symbol: Some("计算总额".to_string()),
@@ -247,7 +273,10 @@ fn test_10_very_long_method_signatures() {
         .map(|i| format!("param_{}: LongDescriptiveTypeIdentifier{}", i, i))
         .collect::<Vec<_>>()
         .join(", ");
-    let long_sig = format!("public executeComplexEnterpriseTransformationWorkflow<{}>({}): Result<TransformationOutput, EnterpriseError>;", "T1, T2, T3", params);
+    let long_sig = format!(
+        "public executeComplexEnterpriseTransformationWorkflow<{}>({}): Result<TransformationOutput, EnterpriseError>;",
+        "T1, T2, T3", params
+    );
 
     let item = ContextItem {
         id: "long_sig".to_string(),
@@ -262,7 +291,10 @@ fn test_10_very_long_method_signatures() {
 
     let res = packer.pack(vec![item]);
     assert_eq!(res.packed_items.len(), 1);
-    assert!(res.formatted_context.contains("executeComplexEnterpriseTransformationWorkflow"));
+    assert!(
+        res.formatted_context
+            .contains("executeComplexEnterpriseTransformationWorkflow")
+    );
     assert_eq!(res.manifest.budget_status, "WITHIN_BUDGET");
 }
 
@@ -294,7 +326,10 @@ export class EntityRepository<T extends AggregateRoot<ID>, ID extends Serializab
 
     let res = packer.pack(vec![item]);
     assert_eq!(res.packed_items.len(), 1);
-    assert!(res.formatted_context.contains("<T extends AggregateRoot<ID>"));
+    assert!(
+        res.formatted_context
+            .contains("<T extends AggregateRoot<ID>")
+    );
 }
 
 // ----------------------------------------------------------------------------
@@ -364,7 +399,10 @@ fn test_15_invalid_budget_values() {
     let res = mcp_call(&temp_ws, "engram_get_context", &args);
     assert!(res.is_err(), "Must reject token_budget = 0 with an error");
     let err_str = res.err().unwrap().to_string();
-    assert!(err_str.contains("greater than 0"), "Error message must state budget must be > 0");
+    assert!(
+        err_str.contains("greater than 0"),
+        "Error message must state budget must be > 0"
+    );
 
     let _ = fs::remove_dir_all(&temp_ws);
 }
@@ -377,7 +415,10 @@ fn test_16_tokenizer_unavailable_fallback() {
     // When external tokenizer is unavailable, ByteRatioTokenCounter provides
     // mathematically guaranteed conservative estimation: ceil(bytes / 3.5)
     let counter = ByteRatioTokenCounter::default();
-    assert!(!counter.is_exact(), "Fallback tokenizer must not falsely claim exact tokenization");
+    assert!(
+        !counter.is_exact(),
+        "Fallback tokenizer must not falsely claim exact tokenization"
+    );
     assert_eq!(counter.model_name(), "cl100k_conservative_byte_ratio_3.5");
 
     let sample_code = "export class LocalStorageService { setItem(key: string, val: any): void; }";
@@ -440,7 +481,12 @@ fn test_18_concurrent_requests() {
     for thread_idx in 0..10 {
         let packer_clone = Arc::clone(&packer);
         handles.push(thread::spawn(move || {
-            let item = dummy_item(&format!("thread_{}", thread_idx), PriorityTier::Tier2High, 10.0, 30);
+            let item = dummy_item(
+                &format!("thread_{}", thread_idx),
+                PriorityTier::Tier2High,
+                10.0,
+                30,
+            );
             let res = packer_clone.pack(vec![item]);
             assert_eq!(res.packed_items.len(), 1);
             assert_eq!(res.manifest.packed_tokens, 30);
@@ -495,7 +541,7 @@ fn test_20_partial_truncation_and_omission_manifest_accuracy() {
         .with_reserved_metadata(20); // 80 usable
 
     let it1 = dummy_item("fit1", PriorityTier::Tier1Mandatory, 100.0, 50); // fits (50 tokens)
-    let it2 = dummy_item("omit2", PriorityTier::Tier2High, 80.0, 40);     // 50 + 40 = 90 > 80, omitted!
+    let it2 = dummy_item("omit2", PriorityTier::Tier2High, 80.0, 40); // 50 + 40 = 90 > 80, omitted!
     let it3 = dummy_item("fit3_small", PriorityTier::Tier3Normal, 95.0, 20); // 50 + 20 = 70 <= 80, fits!
 
     let res = packer.pack(vec![it1, it2, it3]);
@@ -515,5 +561,9 @@ fn test_20_partial_truncation_and_omission_manifest_accuracy() {
     assert_eq!(omission.priority_tier, 2);
     assert_eq!(omission.omitted_token_count, 40);
     assert!(omission.retrievable_via_targeted_request);
-    assert!(omission.omission_reason.contains("needed 40 tokens, 30 tokens remaining"));
+    assert!(
+        omission
+            .omission_reason
+            .contains("needed 40 tokens, 30 tokens remaining")
+    );
 }

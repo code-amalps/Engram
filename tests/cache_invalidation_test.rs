@@ -5,17 +5,29 @@ use std::sync::Arc;
 use std::thread;
 
 use engram::analyzer::analyze;
-use engram::compiler::{clear_context_cache, clear_workspace_cache, compute_index_fingerprint, context};
+use engram::compiler::{
+    clear_context_cache, clear_workspace_cache, compute_index_fingerprint, context,
+};
 use engram::storage::db;
 
 fn setup_test_workspace(name: &str, is_git: bool) -> PathBuf {
-    let ws = std::env::temp_dir().join(format!("engram_cache_test_{}_{}", name, uuid::Uuid::new_v4()));
+    let ws = std::env::temp_dir().join(format!(
+        "engram_cache_test_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&ws).unwrap();
 
     if is_git {
         let _ = Command::new("git").args(["init"]).current_dir(&ws).output();
-        let _ = Command::new("git").args(["config", "user.name", "Engram Tester"]).current_dir(&ws).output();
-        let _ = Command::new("git").args(["config", "user.email", "tester@engram.local"]).current_dir(&ws).output();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Engram Tester"])
+            .current_dir(&ws)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.email", "tester@engram.local"])
+            .current_dir(&ws)
+            .output();
     }
 
     ws
@@ -30,10 +42,18 @@ fn test_01_cache_hit_when_nothing_changed() {
     analyze(&ws).unwrap();
 
     let res1 = context(&ws, "AuthService", 2000).unwrap();
-    assert!(res1.files.iter().any(|f| f.path.contains("auth_service.rs")));
+    assert!(
+        res1.files
+            .iter()
+            .any(|f| f.path.contains("auth_service.rs"))
+    );
 
     let res2 = context(&ws, "AuthService", 2000).unwrap();
-    assert!(res2.files.iter().any(|f| f.path.contains("auth_service.rs")));
+    assert!(
+        res2.files
+            .iter()
+            .any(|f| f.path.contains("auth_service.rs"))
+    );
     assert_eq!(res1.files.len(), res2.files.len());
 
     let _ = fs::remove_dir_all(&ws);
@@ -49,14 +69,22 @@ fn test_02_cache_miss_after_entity_modified() {
     analyze(&ws).unwrap();
 
     let res1 = context(&ws, "UserService", 2000).unwrap();
-    assert!(res1.files.iter().any(|f| f.path.contains("user_service.rs")));
+    assert!(
+        res1.files
+            .iter()
+            .any(|f| f.path.contains("user_service.rs"))
+    );
 
     // Modify file to add new symbol
     fs::write(&file, "pub struct UserService;\npub struct UserProfile;\n").unwrap();
     analyze(&ws).unwrap();
 
     let res2 = context(&ws, "UserProfile", 2000).unwrap();
-    assert!(res2.files.iter().any(|f| f.path.contains("user_service.rs")));
+    assert!(
+        res2.files
+            .iter()
+            .any(|f| f.path.contains("user_service.rs"))
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -166,7 +194,8 @@ fn test_07_cache_invalidation_db_replacement() {
 
     // Rebuild database from scratch
     let conn = db(&ws).unwrap();
-    conn.execute_batch("DELETE FROM files; DELETE FROM entities; DELETE FROM entity_versions;").unwrap();
+    conn.execute_batch("DELETE FROM files; DELETE FROM entities; DELETE FROM entity_versions;")
+        .unwrap();
     conn.execute(
         "INSERT INTO metadata(key, value) VALUES('index_generation', '500') ON CONFLICT(key) DO UPDATE SET value='500'",
         [],

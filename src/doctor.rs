@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::memory::{
-    load_durable_memories, save_durable_memories, MemoryLifecycleState, ScopeLevel,
+    MemoryLifecycleState, ScopeLevel, load_durable_memories, save_durable_memories,
 };
 use crate::storage::{db, root_path};
 

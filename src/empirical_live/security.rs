@@ -1033,6 +1033,7 @@ pub fn to_wide_null(s: &str) -> Vec<u16> {
 
 /// UTF-16 wide string null-terminated decoder.
 #[cfg(windows)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn from_wide_null(ptr: *const u16) -> String {
     if ptr.is_null() {
         return String::new();
@@ -2221,6 +2222,7 @@ pub fn parse_security_descriptor_bytes(sd_bytes: &[u8]) -> Result<DaclSnapshot, 
 
 /// Capture a deterministic snapshot of an object's DACL for before/after comparison.
 #[cfg(windows)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn snapshot_user_object_dacl(handle: win32::HANDLE) -> Result<DaclSnapshot, SecurityError> {
     if handle.is_null() || handle == win32::INVALID_HANDLE_VALUE {
         let err = unsafe { win32::GetLastError() };
@@ -3801,14 +3803,22 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                         let version_dir = entry.path();
                         if version_dir.is_dir() {
                             let x64 = version_dir.join("x64");
-                            if x64.is_dir() && !is_untrusted_directory(&x64) && !paths.contains(&x64) {
+                            if x64.is_dir()
+                                && !is_untrusted_directory(&x64)
+                                && !paths.contains(&x64)
+                            {
                                 paths.push(x64);
                             }
                             let x86 = version_dir.join("x86");
-                            if x86.is_dir() && !is_untrusted_directory(&x86) && !paths.contains(&x86) {
+                            if x86.is_dir()
+                                && !is_untrusted_directory(&x86)
+                                && !paths.contains(&x86)
+                            {
                                 paths.push(x86);
                             }
-                            if !is_untrusted_directory(&version_dir) && !paths.contains(&version_dir) {
+                            if !is_untrusted_directory(&version_dir)
+                                && !paths.contains(&version_dir)
+                            {
                                 paths.push(version_dir);
                             }
                         }
@@ -3826,7 +3836,10 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
             "C:\\tools\\python",
         ] {
             let root_path = PathBuf::from(root_prefix);
-            if root_path.is_dir() && !is_untrusted_directory(&root_path) && !paths.contains(&root_path) {
+            if root_path.is_dir()
+                && !is_untrusted_directory(&root_path)
+                && !paths.contains(&root_path)
+            {
                 paths.push(root_path);
             }
         }
@@ -3834,12 +3847,7 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
 
     #[cfg(not(windows))]
     {
-        for p in &[
-            "/usr/bin",
-            "/bin",
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-        ] {
+        for p in &["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"] {
             let pb = PathBuf::from(p);
             if pb.is_dir() && !is_untrusted_directory(&pb) {
                 paths.push(pb);
@@ -3865,7 +3873,10 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
             let py_bin = py_dir.join("bin");
             if py_bin.is_dir() && !is_untrusted_directory(&py_bin) && !paths.contains(&py_bin) {
                 paths.push(py_bin);
-            } else if py_dir.is_dir() && !is_untrusted_directory(&py_dir) && !paths.contains(&py_dir) {
+            } else if py_dir.is_dir()
+                && !is_untrusted_directory(&py_dir)
+                && !paths.contains(&py_dir)
+            {
                 paths.push(py_dir);
             }
         }
@@ -3877,7 +3888,10 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                         let version_dir = entry.path();
                         if version_dir.is_dir() {
                             let x64_bin = version_dir.join("x64").join("bin");
-                            if x64_bin.is_dir() && !is_untrusted_directory(&x64_bin) && !paths.contains(&x64_bin) {
+                            if x64_bin.is_dir()
+                                && !is_untrusted_directory(&x64_bin)
+                                && !paths.contains(&x64_bin)
+                            {
                                 paths.push(x64_bin);
                             }
                         }

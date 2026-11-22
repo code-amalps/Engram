@@ -19,7 +19,10 @@ pub struct IndexStateFingerprint {
     pub head_revision: String,
 }
 
-pub fn compute_index_fingerprint(root: &Path, conn: &rusqlite::Connection) -> rusqlite::Result<IndexStateFingerprint> {
+pub fn compute_index_fingerprint(
+    root: &Path,
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<IndexStateFingerprint> {
     let workspace_canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let index_generation: i64 = conn
         .query_row(
@@ -184,7 +187,14 @@ pub fn canonicalize_language(raw: &str) -> Result<&'static str> {
 }
 
 pub fn context(root: &Path, task: &str, budget: usize) -> Result<ContextResult> {
-    context_scoped_with_detail(root, task, budget, None, None, crate::budget::DetailLevel::Contracted)
+    context_scoped_with_detail(
+        root,
+        task,
+        budget,
+        None,
+        None,
+        crate::budget::DetailLevel::Contracted,
+    )
 }
 
 pub fn context_scoped(
@@ -194,7 +204,14 @@ pub fn context_scoped(
     subpath: Option<&str>,
     language: Option<&str>,
 ) -> Result<ContextResult> {
-    context_scoped_with_detail(root, task, budget, subpath, language, crate::budget::DetailLevel::Contracted)
+    context_scoped_with_detail(
+        root,
+        task,
+        budget,
+        subpath,
+        language,
+        crate::budget::DetailLevel::Contracted,
+    )
 }
 
 pub fn context_scoped_with_detail(
@@ -458,7 +475,10 @@ pub fn context_scoped_optimized(
 
     let is_container_module = |p: &str| -> bool {
         let l = p.to_ascii_lowercase();
-        l.ends_with(".module.ts") || l.ends_with("/main.ts") || l.ends_with("/main.rs") || l.ends_with("/lib.rs")
+        l.ends_with(".module.ts")
+            || l.ends_with("/main.ts")
+            || l.ends_with("/main.rs")
+            || l.ends_with("/lib.rs")
     };
 
     let mut expansion_seeds: Vec<String> = Vec::new();
@@ -597,7 +617,9 @@ pub fn context_scoped_optimized(
 
                     if doc_map.contains_key(&clean_neighbor) {
                         let boost = 3.0 * edge.confidence;
-                        *composite_scores.entry(clean_neighbor.clone()).or_insert(0.0) += boost;
+                        *composite_scores
+                            .entry(clean_neighbor.clone())
+                            .or_insert(0.0) += boost;
 
                         let prov = format!(
                             "Graph {} edge via {} (confidence: {:.2})",
@@ -671,7 +693,10 @@ pub fn context_scoped_optimized(
                     sym_score += 5000.0;
                 }
             }
-            if potential_symbols.iter().any(|ps| ps.eq_ignore_ascii_case(sym_name)) {
+            if potential_symbols
+                .iter()
+                .any(|ps| ps.eq_ignore_ascii_case(sym_name))
+            {
                 sym_score += 2000.0;
             }
             for term in &terms {
@@ -692,7 +717,10 @@ pub fn context_scoped_optimized(
             sb.total_cmp(&sa).then_with(|| a.3.cmp(&b.3))
         });
 
-        let has_targeted_symbols = target_symbols.is_some() || syms_meta.iter().any(|s| compute_symbol_score(&s.1, &s.5) >= 1000.0);
+        let has_targeted_symbols = target_symbols.is_some()
+            || syms_meta
+                .iter()
+                .any(|s| compute_symbol_score(&s.1, &s.5) >= 1000.0);
 
         let body_lines: Vec<&str> = body.lines().collect();
         let remaining_tokens = limit.saturating_sub(used);
@@ -705,11 +733,15 @@ pub fn context_scoped_optimized(
             for (_ent_id, name, kind, start_line, end_line, sig) in &syms_meta {
                 let sig_key = format!("{}::{}", name, sig);
                 if seen_signatures.contains(&sig_key) {
-                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"));
+                    content.push_str(&format!(
+                        "- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"
+                    ));
                     continue;
                 }
                 seen_signatures.insert(sig_key);
-                content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"));
+                content.push_str(&format!(
+                    "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
+                ));
             }
         } else if !syms_meta.is_empty() {
             content.push_str("SYMBOLS & CODE EXCERPTS:\n");
@@ -725,13 +757,17 @@ pub fn context_scoped_optimized(
 
                 let sig_key = format!("{}::{}", name, sig);
                 if seen_signatures.contains(&sig_key) {
-                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"));
+                    content.push_str(&format!(
+                        "- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"
+                    ));
                     continue;
                 }
                 seen_signatures.insert(sig_key);
 
                 if !is_requested {
-                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"));
+                    content.push_str(&format!(
+                        "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
+                    ));
                     continue;
                 }
 
@@ -807,7 +843,9 @@ pub fn context_scoped_optimized(
                         }
                     }
                 } else {
-                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"));
+                    content.push_str(&format!(
+                        "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
+                    ));
                 }
             }
         } else {
@@ -823,7 +861,11 @@ pub fn context_scoped_optimized(
                 partial.push(*l);
             }
             if partial.len() == body_lines.len() {
-                content.push_str(&format!("Lines 1..{} [COMPLETE_BLOCK]:\n{}\n", body_lines.len(), body));
+                content.push_str(&format!(
+                    "Lines 1..{} [COMPLETE_BLOCK]:\n{}\n",
+                    body_lines.len(),
+                    body
+                ));
             } else {
                 content.push_str(&format!(
                     "Lines 1..{} [INCOMPLETE_EXCERPT: showing {} of {} lines]:\n{}\n// [TRUNCATED to fit token budget]\n",
@@ -1105,10 +1147,12 @@ mod tests {
     fn test_normalize_subpath_valid() {
         assert_eq!(normalize_subpath("src").unwrap(), "src");
         assert_eq!(normalize_subpath("src/").unwrap(), "src");
-        assert!(normalize_subpath("/src/")
-            .unwrap_err()
-            .to_string()
-            .contains("cannot be absolute"));
+        assert!(
+            normalize_subpath("/src/")
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be absolute")
+        );
         assert_eq!(
             normalize_subpath("src/compiler.rs").unwrap(),
             "src/compiler.rs"

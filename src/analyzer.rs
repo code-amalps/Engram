@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ignore::WalkBuilder;
 use regex::Regex;
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::model;
 use crate::storage::{
-    config_hash, db, git, hash, insert_entity_members, member_id, now, revision, root_path,
-    EntityMember, ParseStatus,
+    EntityMember, ParseStatus, config_hash, db, git, hash, insert_entity_members, member_id, now,
+    revision, root_path,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -269,7 +269,9 @@ fn is_rust_lifetime(chars: &[char], i: usize) -> bool {
     // Also check if preceded by keyword 'for' (e.g. `for<'a>`)
     if p >= 3 {
         let prev_word: String = chars[p - 3..p].iter().collect();
-        if prev_word == "for" && (p == 3 || chars[p - 4].is_whitespace() || matches!(chars[p - 4], '(' | '<' | ',')) {
+        if prev_word == "for"
+            && (p == 3 || chars[p - 4].is_whitespace() || matches!(chars[p - 4], '(' | '<' | ','))
+        {
             return true;
         }
     }
@@ -696,16 +698,38 @@ pub fn is_external_target(target: &str) -> bool {
     if clean.starts_with("java.") || clean.starts_with("javax.") {
         return true;
     }
-    if clean.starts_with("src/") || clean.starts_with("projects/") || clean.starts_with("tests/") || clean.starts_with("app/") {
+    if clean.starts_with("src/")
+        || clean.starts_with("projects/")
+        || clean.starts_with("tests/")
+        || clean.starts_with("app/")
+    {
         return false;
     }
-    if clean.ends_with(".ts") || clean.ends_with(".js") || clean.ends_with(".rs") || clean.ends_with(".go") || clean.ends_with(".java") || clean.ends_with(".cs") || clean.ends_with(".py") {
+    if clean.ends_with(".ts")
+        || clean.ends_with(".js")
+        || clean.ends_with(".rs")
+        || clean.ends_with(".go")
+        || clean.ends_with(".java")
+        || clean.ends_with(".cs")
+        || clean.ends_with(".py")
+    {
         return false;
     }
     if clean.starts_with("rxjs") || clean.starts_with("lodash") || clean.starts_with("express") {
         return true;
     }
-    if matches!(clean.split("::").next().unwrap_or(""), "serde" | "anyhow" | "tokio" | "clap" | "rusqlite" | "chrono" | "uuid" | "regex" | "tree_sitter") {
+    if matches!(
+        clean.split("::").next().unwrap_or(""),
+        "serde"
+            | "anyhow"
+            | "tokio"
+            | "clap"
+            | "rusqlite"
+            | "chrono"
+            | "uuid"
+            | "regex"
+            | "tree_sitter"
+    ) {
         return true;
     }
     if !clean.contains('/') && !clean.contains('\\') && !clean.contains("::") {
@@ -841,8 +865,12 @@ fn extract_typescript_members(
                     .map(|x| node_text(x, src))
                     .unwrap_or_else(|| "<anonymous>".into());
                 let vis = extract_ts_visibility(child, src);
-                let is_async = child.children(&mut child.walk()).any(|c| c.kind() == "async");
-                let is_static = child.children(&mut child.walk()).any(|c| c.kind() == "static");
+                let is_async = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "async");
+                let is_static = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "static");
                 let params = child
                     .child_by_field_name("parameters")
                     .map(|x| node_text(x, src))
@@ -881,8 +909,12 @@ fn extract_typescript_members(
                     if let Some(params_node) = child.child_by_field_name("parameters") {
                         let mut p_cursor = params_node.walk();
                         for param in params_node.children(&mut p_cursor) {
-                            if param.kind() == "required_parameter" || param.kind() == "optional_parameter" {
-                                let has_acc = param.children(&mut param.walk()).any(|c| c.kind() == "accessibility_modifier");
+                            if param.kind() == "required_parameter"
+                                || param.kind() == "optional_parameter"
+                            {
+                                let has_acc = param
+                                    .children(&mut param.walk())
+                                    .any(|c| c.kind() == "accessibility_modifier");
                                 if has_acc {
                                     let p_vis = extract_ts_visibility(param, src);
                                     let p_name = param
@@ -890,9 +922,9 @@ fn extract_typescript_members(
                                         .or_else(|| param.child_by_field_name("pattern"))
                                         .map(|x| node_text(x, src))
                                         .unwrap_or_default();
-                                    let p_type = param
-                                        .child_by_field_name("type")
-                                        .map(|x| node_text(x, src).trim_start_matches(':').trim().to_string());
+                                    let p_type = param.child_by_field_name("type").map(|x| {
+                                        node_text(x, src).trim_start_matches(':').trim().to_string()
+                                    });
                                     if !p_name.is_empty() {
                                         let p_sig = normalize_signature(&format!(
                                             "{p_vis} {p_name}: {}",
@@ -967,7 +999,9 @@ fn extract_typescript_members(
                 let ret = child
                     .child_by_field_name("return_type")
                     .map(|x| node_text(x, src).trim_start_matches(':').trim().to_string());
-                let is_static = child.children(&mut child.walk()).any(|c| c.kind() == "static");
+                let is_static = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "static");
 
                 let mut sig_parts = Vec::new();
                 if vis != "public" {
@@ -1011,7 +1045,9 @@ fn extract_typescript_members(
                     .map(|x| node_text(x, src))
                     .unwrap_or_else(|| "<anonymous>".into());
                 let vis = extract_ts_visibility(child, src);
-                let is_static = child.children(&mut child.walk()).any(|c| c.kind() == "static");
+                let is_static = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "static");
                 let prop_type = child
                     .child_by_field_name("type")
                     .map(|x| node_text(x, src).trim_start_matches(':').trim().to_string());
@@ -1065,12 +1101,11 @@ fn extract_rust_attributes(node: Node, src: &[u8]) -> Vec<String> {
 }
 
 fn extract_rust_visibility(node: Node, src: &[u8]) -> String {
-    let vis_node = node
-        .child_by_field_name("visibility")
-        .or_else(|| {
-            let mut cursor = node.walk();
-            node.children(&mut cursor).find(|c| c.kind() == "visibility_modifier")
-        });
+    let vis_node = node.child_by_field_name("visibility").or_else(|| {
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .find(|c| c.kind() == "visibility_modifier")
+    });
 
     if let Some(vis) = vis_node {
         let text = node_text(vis, src);
@@ -1081,12 +1116,7 @@ fn extract_rust_visibility(node: Node, src: &[u8]) -> String {
     "private".to_string()
 }
 
-fn extract_rust_members(
-    node: Node,
-    src: &[u8],
-    entity_id: &str,
-    out: &mut Vec<EntityMember>,
-) {
+fn extract_rust_members(node: Node, src: &[u8], entity_id: &str, out: &mut Vec<EntityMember>) {
     let kind = node.kind();
     match kind {
         "struct_item" => {
@@ -1176,9 +1206,12 @@ fn extract_rust_members(
                             .child_by_field_name("parameters")
                             .map(|x| node_text(x, src))
                             .unwrap_or_else(|| "()".into());
-                        let ret = item
-                            .child_by_field_name("return_type")
-                            .map(|x| node_text(x, src).trim_start_matches("->").trim().to_string());
+                        let ret = item.child_by_field_name("return_type").map(|x| {
+                            node_text(x, src)
+                                .trim_start_matches("->")
+                                .trim()
+                                .to_string()
+                        });
 
                         let attrs = extract_rust_attributes(item, src);
                         let dec_json = if !attrs.is_empty() {
@@ -1217,12 +1250,7 @@ fn extract_rust_members(
     }
 }
 
-fn extract_typescript_imports(
-    n: Node,
-    src: &[u8],
-    path: &str,
-    rels: &mut Vec<Relationship>,
-) {
+fn extract_typescript_imports(n: Node, src: &[u8], path: &str, rels: &mut Vec<Relationship>) {
     if let Some(src_node) = n.child_by_field_name("source") {
         let raw = node_text(src_node, src);
         let spec = raw.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
@@ -1274,16 +1302,15 @@ fn extract_typescript_imports(
     }
 }
 
-fn extract_fallback_symbols(
-    source: &str,
-    path: &str,
-    lang: &str,
-    out: &mut Vec<Symbol>,
-) {
+fn extract_fallback_symbols(source: &str, path: &str, lang: &str, out: &mut Vec<Symbol>) {
     if lang == "typescript" || lang == "javascript" {
-        let class_re = Regex::new(r#"(?m)^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)"#).ok();
+        let class_re = Regex::new(
+            r#"(?m)^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)"#,
+        )
+        .ok();
         let iface_re = Regex::new(r#"(?m)^\s*(?:export\s+)?interface\s+([A-Za-z0-9_$]+)"#).ok();
-        let fn_re = Regex::new(r#"(?m)^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)"#).ok();
+        let fn_re =
+            Regex::new(r#"(?m)^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)"#).ok();
 
         for (line_idx, line) in source.lines().enumerate() {
             let row = line_idx + 1;
@@ -1343,10 +1370,17 @@ fn extract_fallback_symbols(
             }
         }
     } else if lang == "rust" {
-        let struct_re = Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?struct\s+([A-Za-z0-9_]+)"#).ok();
-        let trait_re = Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?trait\s+([A-Za-z0-9_]+)"#).ok();
-        let impl_re = Regex::new(r#"(?m)^\s*impl(?:<[^>]+>)?\s+(?:([A-Za-z0-9_]+)\s+for\s+)?([A-Za-z0-9_]+)"#).ok();
-        let fn_re = Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)"#).ok();
+        let struct_re =
+            Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?struct\s+([A-Za-z0-9_]+)"#).ok();
+        let trait_re =
+            Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?trait\s+([A-Za-z0-9_]+)"#).ok();
+        let impl_re = Regex::new(
+            r#"(?m)^\s*impl(?:<[^>]+>)?\s+(?:([A-Za-z0-9_]+)\s+for\s+)?([A-Za-z0-9_]+)"#,
+        )
+        .ok();
+        let fn_re =
+            Regex::new(r#"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)"#)
+                .ok();
 
         for (line_idx, line) in source.lines().enumerate() {
             let row = line_idx + 1;
@@ -1544,12 +1578,7 @@ pub fn visit(
     visit_ast(n, src, path, lang, out, rels, &mut members, revision);
 }
 
-pub fn parse_file_ast(
-    root: &Path,
-    rel: &str,
-    bytes: &[u8],
-    rev: &str,
-) -> Result<ParsedFile> {
+pub fn parse_file_ast(root: &Path, rel: &str, bytes: &[u8], rev: &str) -> Result<ParsedFile> {
     let path = Path::new(rel);
     let lang = match language(path) {
         Some(l) => l,
@@ -1645,7 +1674,10 @@ pub fn parse_file_ast(
         let mut fallback = Vec::new();
         extract_fallback_symbols(&source, rel, lang, &mut fallback);
         for fs in fallback {
-            if !symbols.iter().any(|s| s.name == fs.name && s.kind == fs.kind) {
+            if !symbols
+                .iter()
+                .any(|s| s.name == fs.name && s.kind == fs.kind)
+            {
                 symbols.push(fs);
             }
         }
@@ -1664,12 +1696,19 @@ pub fn parse_file_ast(
             let mut extra_members = Vec::new();
             for m in &members {
                 if m.member_kind == "method" {
-                    if let Some(parent) = symbols.iter().find(|s| s.id == m.entity_id && s.kind == "IMPL") {
+                    if let Some(parent) = symbols
+                        .iter()
+                        .find(|s| s.id == m.entity_id && s.kind == "IMPL")
+                    {
                         if let Some(struct_id) = struct_map.get(&parent.name) {
                             if struct_id != &m.entity_id {
                                 let mut m_clone = m.clone();
                                 m_clone.entity_id = struct_id.clone();
-                                m_clone.member_id = member_id(&m_clone.entity_id, &m_clone.name, &m_clone.signature);
+                                m_clone.member_id = member_id(
+                                    &m_clone.entity_id,
+                                    &m_clone.name,
+                                    &m_clone.signature,
+                                );
                                 extra_members.push(m_clone);
                             }
                         }

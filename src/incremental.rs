@@ -7,7 +7,7 @@
 //! - Fallback: Safe full-analysis fallback when incremental correctness cannot be established.
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -18,9 +18,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::analyzer::{
-    excluded, ignore_patterns, language, parse_file_ast, reconcile_symbol_ids,
-};
+use crate::analyzer::{excluded, ignore_patterns, language, parse_file_ast, reconcile_symbol_ids};
 use crate::model;
 use crate::storage::{config_hash, db, hash, now, revision, root_path};
 
@@ -481,7 +479,8 @@ fn incremental_analyze_internal(
     let mut assigned_ids = HashSet::new();
 
     // Persist Tier 1 parsed updates
-    for (rec, mut symbols, rels, mut members, parse_status, file_analysis_key) in tier1_parsed_data {
+    for (rec, mut symbols, rels, mut members, parse_status, file_analysis_key) in tier1_parsed_data
+    {
         let old_ids: Vec<String> = symbols.iter().map(|s| s.id.clone()).collect();
         reconcile_symbol_ids(&tx, &mut symbols, &current_paths, &mut assigned_ids)?;
         let id_map: HashMap<String, String> = old_ids

@@ -1,7 +1,7 @@
 use engram::analyzer::{
     generate_bounded_excerpt, is_external_target, normalize_signature, parse_file_ast,
 };
-use engram::storage::{self, get_entity_members, EntityMember, ParseStatus};
+use engram::storage::{self, EntityMember, ParseStatus, get_entity_members};
 use rusqlite::Connection;
 use std::{
     fs,
@@ -14,7 +14,11 @@ struct TempTestDir {
 
 impl TempTestDir {
     fn new(prefix: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("engram_ast_test_{}_{}", prefix, uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "engram_ast_test_{}_{}",
+            prefix,
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&dir).expect("failed to create temp test dir");
         Self { path: dir }
     }
@@ -63,8 +67,13 @@ export interface UserSession {
 }
 "#;
 
-    let parsed = parse_file_ast(temp.path(), "src/auth.service.ts", ts_code.as_bytes(), "rev1")
-        .expect("parsing failed");
+    let parsed = parse_file_ast(
+        temp.path(),
+        "src/auth.service.ts",
+        ts_code.as_bytes(),
+        "rev1",
+    )
+    .expect("parsing failed");
 
     assert_eq!(parsed.parse_status, ParseStatus::Complete);
     assert!(!parsed.symbols.is_empty(), "expected symbols");
@@ -101,7 +110,10 @@ export interface UserSession {
         .find(|m| m.name == "storage" && m.member_kind == "field")
         .expect("injected field 'storage' not found");
     assert_eq!(storage_field.visibility, "private");
-    assert_eq!(storage_field.return_type.as_deref(), Some("LocalStorageService"));
+    assert_eq!(
+        storage_field.return_type.as_deref(),
+        Some("LocalStorageService")
+    );
 
     // Verify token field
     let token_field = auth_members
@@ -115,7 +127,11 @@ export interface UserSession {
         .iter()
         .filter(|m| m.name == "login" && m.member_kind == "overload_signature")
         .collect();
-    assert_eq!(overloads.len(), 2, "expected 2 overload signatures for login");
+    assert_eq!(
+        overloads.len(),
+        2,
+        "expected 2 overload signatures for login"
+    );
 
     // Verify implementing method
     let login_method = auth_members
@@ -230,7 +246,13 @@ impl<T: Send> WorkQueue<T> {
     assert_eq!(cap_field.visibility, "private");
 
     // Verify struct outer attributes
-    assert!(tasks_field.decorators.as_ref().unwrap_or(&String::new()).contains("derive"));
+    assert!(
+        tasks_field
+            .decorators
+            .as_ref()
+            .unwrap_or(&String::new())
+            .contains("derive")
+    );
 
     // Verify methods linked to struct or impl
     let new_method = parsed
@@ -267,7 +289,10 @@ impl<T: Send> WorkQueue<T> {
 fn test_03_signature_normalization_and_id_determinism() {
     let sig1 = "  public   getItem < T > ( key :  string ,  options ?: any ) : T | null { ";
     let norm1 = normalize_signature(sig1);
-    assert_eq!(norm1, "public getItem<T>(key: string, options?: any): T | null");
+    assert_eq!(
+        norm1,
+        "public getItem<T>(key: string, options?: any): T | null"
+    );
 
     // Idempotency: f(f(x)) == f(x)
     assert_eq!(normalize_signature(&norm1), norm1);
@@ -275,14 +300,20 @@ fn test_03_signature_normalization_and_id_determinism() {
     // Rust path with double-colon
     let rust_sig = "pub  fn  new ( cap :  usize ) -> std :: collections :: VecDeque < T > {";
     let norm_rust = normalize_signature(rust_sig);
-    assert_eq!(norm_rust, "pub fn new(cap: usize) -> std::collections::VecDeque<T>");
+    assert_eq!(
+        norm_rust,
+        "pub fn new(cap: usize) -> std::collections::VecDeque<T>"
+    );
     assert_eq!(normalize_signature(&norm_rust), norm_rust);
 
     // Deterministic member ID
     let entity_id = "ent_test_entity_123456";
     let id1 = storage::member_id(entity_id, "getItem", &norm1);
     let id2 = storage::member_id(entity_id, "getItem", &normalize_signature(sig1));
-    assert_eq!(id1, id2, "member_id must be deterministic regardless of whitespace");
+    assert_eq!(
+        id1, id2,
+        "member_id must be deterministic regardless of whitespace"
+    );
     assert_eq!(id1.len(), 16, "member_id must be 16 chars");
 }
 
@@ -291,7 +322,8 @@ fn test_04_bounded_excerpt_generation() {
     // 1. Small block (<= 40 lines): should return COMPLETE
     let small_lines: Vec<&str> = (1..=25).map(|_| "  const x = 1;").collect();
     let members = Vec::new();
-    let (excerpt_small, state_small) = generate_bounded_excerpt(&small_lines, 1, 25, &members, "typescript");
+    let (excerpt_small, state_small) =
+        generate_bounded_excerpt(&small_lines, 1, 25, &members, "typescript");
     assert_eq!(state_small, "COMPLETE");
     assert!(excerpt_small.starts_with("[COMPLETE_BLOCK]"));
 
@@ -305,7 +337,14 @@ fn test_04_bounded_excerpt_generation() {
 
     let line_refs: Vec<&str> = large_lines.iter().map(String::as_str).collect();
     let sample_members = vec![
-        EntityMember::new("ent_1", "constructor", "constructor", "constructor(api: ApiService)", 2, 5),
+        EntityMember::new(
+            "ent_1",
+            "constructor",
+            "constructor",
+            "constructor(api: ApiService)",
+            2,
+            5,
+        ),
         EntityMember {
             member_id: "m1".into(),
             entity_id: "ent_1".into(),
@@ -322,7 +361,8 @@ fn test_04_bounded_excerpt_generation() {
         },
     ];
 
-    let (excerpt_large, state_large) = generate_bounded_excerpt(&line_refs, 1, 62, &sample_members, "typescript");
+    let (excerpt_large, state_large) =
+        generate_bounded_excerpt(&line_refs, 1, 62, &sample_members, "typescript");
     assert_eq!(state_large, "CONTRACTED");
     assert!(excerpt_large.starts_with("[CONTRACTED_SIGNATURES]"));
     assert!(excerpt_large.contains("constructor(api: ApiService) { /* ... */ }"));
@@ -416,14 +456,31 @@ import { AppState } from '../state/app.state';
 export class DummyService {}
 "#;
 
-    let parsed = parse_file_ast(temp.path(), "src/dummy.service.ts", ts_code.as_bytes(), "rev1")
-        .expect("parsing failed");
+    let parsed = parse_file_ast(
+        temp.path(),
+        "src/dummy.service.ts",
+        ts_code.as_bytes(),
+        "rev1",
+    )
+    .expect("parsing failed");
 
     for rel in &parsed.relationships {
         // Assert no raw syntax noise leaked into targets
-        assert!(!rel.target.contains("{ tap"), "target leaked syntax: {}", rel.target);
-        assert!(!rel.target.contains("{ Injectable"), "target leaked syntax: {}", rel.target);
-        assert!(!rel.target.contains("import "), "target leaked syntax: {}", rel.target);
+        assert!(
+            !rel.target.contains("{ tap"),
+            "target leaked syntax: {}",
+            rel.target
+        );
+        assert!(
+            !rel.target.contains("{ Injectable"),
+            "target leaked syntax: {}",
+            rel.target
+        );
+        assert!(
+            !rel.target.contains("import "),
+            "target leaked syntax: {}",
+            rel.target
+        );
     }
 
     // Verify first-party vs third-party is_external classification
@@ -436,27 +493,39 @@ export class DummyService {}
         .iter()
         .find(|r| r.target == "@angular/core" && r.kind == "IMPORTS")
         .expect("@angular/core import missing");
-    assert!(angular_import.is_external, "@angular/core must be classified as external");
+    assert!(
+        angular_import.is_external,
+        "@angular/core must be classified as external"
+    );
 
     let rxjs_import = parsed
         .relationships
         .iter()
         .find(|r| r.target == "rxjs/operators" && r.kind == "IMPORTS")
         .expect("rxjs/operators import missing");
-    assert!(rxjs_import.is_external, "rxjs/operators must be classified as external");
+    assert!(
+        rxjs_import.is_external,
+        "rxjs/operators must be classified as external"
+    );
 
     let local_storage_import = parsed
         .relationships
         .iter()
         .find(|r| r.target.ends_with("local-storage.service.ts") && r.kind == "IMPORTS")
         .expect("local-storage.service.ts import missing");
-    assert!(!local_storage_import.is_external, "local-storage.service must be classified as internal");
+    assert!(
+        !local_storage_import.is_external,
+        "local-storage.service must be classified as internal"
+    );
 
     // Verify clean symbol import specifier
     let sym_import = parsed
         .relationships
         .iter()
-        .find(|r| r.target.ends_with("local-storage.service.ts::LocalStorageService"))
+        .find(|r| {
+            r.target
+                .ends_with("local-storage.service.ts::LocalStorageService")
+        })
         .expect("clean symbol import specifier missing");
     assert_eq!(sym_import.kind, "IMPORTS_SYMBOL");
     assert!(!sym_import.is_external);
@@ -481,8 +550,13 @@ export class OrderService {
 }
 "#;
 
-    let parsed = parse_file_ast(temp.path(), "src/order.service.ts", ts_code.as_bytes(), "rev1")
-        .expect("parsing failed");
+    let parsed = parse_file_ast(
+        temp.path(),
+        "src/order.service.ts",
+        ts_code.as_bytes(),
+        "rev1",
+    )
+    .expect("parsing failed");
 
     // Insert into DB
     let tx = conn.transaction().expect("tx");
@@ -494,18 +568,38 @@ export class OrderService {
         ).expect("insert entity");
     }
 
-    let inserted_members = storage::insert_entity_members(&tx, &parsed.members).expect("insert members");
-    assert!(inserted_members >= 3, "expected at least 3 members (field, constructor, method)");
+    let inserted_members =
+        storage::insert_entity_members(&tx, &parsed.members).expect("insert members");
+    assert!(
+        inserted_members >= 3,
+        "expected at least 3 members (field, constructor, method)"
+    );
     tx.commit().expect("commit");
 
     // Query entity members using storage API
-    let order_class = parsed.symbols.iter().find(|s| s.name == "OrderService").unwrap();
+    let order_class = parsed
+        .symbols
+        .iter()
+        .find(|s| s.name == "OrderService")
+        .unwrap();
     let stored_members = get_entity_members(&conn, &order_class.id).expect("get_entity_members");
     assert_eq!(stored_members.len(), parsed.members.len());
 
-    assert!(stored_members.iter().any(|m| m.name == "processOrder" && m.member_kind == "method"));
-    assert!(stored_members.iter().any(|m| m.name == "id" && m.member_kind == "field"));
-    assert!(stored_members.iter().any(|m| m.name == "constructor" && m.member_kind == "constructor"));
+    assert!(
+        stored_members
+            .iter()
+            .any(|m| m.name == "processOrder" && m.member_kind == "method")
+    );
+    assert!(
+        stored_members
+            .iter()
+            .any(|m| m.name == "id" && m.member_kind == "field")
+    );
+    assert!(
+        stored_members
+            .iter()
+            .any(|m| m.name == "constructor" && m.member_kind == "constructor")
+    );
 }
 
 #[test]
@@ -528,8 +622,13 @@ export class ServiceA {
 "#;
 
     // Step 1: Parse and insert v1
-    let parsed_v1 = parse_file_ast(temp.path(), "src/service_a.ts", v1_code.as_bytes(), "rev1").unwrap();
-    let sym_v1 = parsed_v1.symbols.iter().find(|s| s.name == "ServiceA").unwrap();
+    let parsed_v1 =
+        parse_file_ast(temp.path(), "src/service_a.ts", v1_code.as_bytes(), "rev1").unwrap();
+    let sym_v1 = parsed_v1
+        .symbols
+        .iter()
+        .find(|s| s.name == "ServiceA")
+        .unwrap();
     {
         let tx = conn.transaction().unwrap();
         tx.execute(
@@ -546,7 +645,8 @@ export class ServiceA {
     assert_eq!(members_v1[0].name, "oldMethod");
 
     // Step 2: Incremental update to v2 - purge stale members and insert new
-    let parsed_v2 = parse_file_ast(temp.path(), "src/service_a.ts", v2_code.as_bytes(), "rev2").unwrap();
+    let parsed_v2 =
+        parse_file_ast(temp.path(), "src/service_a.ts", v2_code.as_bytes(), "rev2").unwrap();
     let mut members_v2 = parsed_v2.members;
     // Map entity id to existing
     for m in &mut members_v2 {
@@ -556,16 +656,29 @@ export class ServiceA {
 
     {
         let tx = conn.transaction().unwrap();
-        tx.execute("DELETE FROM entity_members WHERE entity_id = ?1", [&sym_v1.id]).unwrap();
+        tx.execute(
+            "DELETE FROM entity_members WHERE entity_id = ?1",
+            [&sym_v1.id],
+        )
+        .unwrap();
         storage::insert_entity_members(&tx, &members_v2).unwrap();
         tx.commit().unwrap();
     }
 
     let members_v2_stored = get_entity_members(&conn, &sym_v1.id).unwrap();
     assert_eq!(members_v2_stored.len(), 2);
-    assert!(!members_v2_stored.iter().any(|m| m.name == "oldMethod"), "oldMethod must be purged");
-    assert!(members_v2_stored.iter().any(|m| m.name == "newMethod"), "newMethod must be present");
-    assert!(members_v2_stored.iter().any(|m| m.name == "secondMethod"), "secondMethod must be present");
+    assert!(
+        !members_v2_stored.iter().any(|m| m.name == "oldMethod"),
+        "oldMethod must be purged"
+    );
+    assert!(
+        members_v2_stored.iter().any(|m| m.name == "newMethod"),
+        "newMethod must be present"
+    );
+    assert!(
+        members_v2_stored.iter().any(|m| m.name == "secondMethod"),
+        "secondMethod must be present"
+    );
 }
 
 #[test]
@@ -585,25 +698,42 @@ fn test_11_signature_normalization_edge_cases() {
     // 1. String literal containing punctuation, spaces, delimiters, and arrows
     let str_lit_sig = r#"fn log(msg: &str = "hello, world : ) -> ") -> bool"#;
     let norm_str = normalize_signature(str_lit_sig);
-    assert_eq!(norm_str, r#"fn log(msg: &str = "hello, world : ) -> ") -> bool"#);
-    assert_eq!(normalize_signature(&norm_str), norm_str, "String literal normalization must be idempotent");
+    assert_eq!(
+        norm_str,
+        r#"fn log(msg: &str = "hello, world : ) -> ") -> bool"#
+    );
+    assert_eq!(
+        normalize_signature(&norm_str),
+        norm_str,
+        "String literal normalization must be idempotent"
+    );
 
     // 2. Character literals containing delimiters
     let char_lit_sig = r#"fn find(delim: char = ',') -> Option<usize>"#;
     let norm_char = normalize_signature(char_lit_sig);
     assert_eq!(norm_char, r#"fn find(delim: char = ',') -> Option<usize>"#);
-    assert_eq!(normalize_signature(&norm_char), norm_char, "Character literal normalization must be idempotent");
+    assert_eq!(
+        normalize_signature(&norm_char),
+        norm_char,
+        "Character literal normalization must be idempotent"
+    );
 
     // 3. Nested generic types
     let nested_sig = "  pub fn get_map < K , V > ( ) -> Map < String , Vec < Option < T > > > { ";
     let norm_nested = normalize_signature(nested_sig);
-    assert_eq!(norm_nested, "pub fn get_map<K, V>() -> Map<String, Vec<Option<T>>>");
+    assert_eq!(
+        norm_nested,
+        "pub fn get_map<K, V>() -> Map<String, Vec<Option<T>>>"
+    );
     assert_eq!(normalize_signature(&norm_nested), norm_nested);
 
     // 4. Rust double-colon paths
     let path_sig = "pub fn create() -> std :: collections :: HashMap < String , Vec < u8 > >";
     let norm_path = normalize_signature(path_sig);
-    assert_eq!(norm_path, "pub fn create() -> std::collections::HashMap<String, Vec<u8>>");
+    assert_eq!(
+        norm_path,
+        "pub fn create() -> std::collections::HashMap<String, Vec<u8>>"
+    );
     assert_eq!(normalize_signature(&norm_path), norm_path);
 
     // 5. TypeScript arrow functions and return types
@@ -623,7 +753,10 @@ fn test_11_signature_normalization_edge_cases() {
     let overload_b = normalize_signature("query(keys: string[]): string[];");
     assert_eq!(overload_a, "query(key: string): string");
     assert_eq!(overload_b, "query(keys: string[]): string[]");
-    assert_ne!(overload_a, overload_b, "Semantically distinct overload signatures must not collapse");
+    assert_ne!(
+        overload_a, overload_b,
+        "Semantically distinct overload signatures must not collapse"
+    );
 
     // 8. Inline block and line comments removal
     let comment_sig = "fn calculate( /* factor */ x: f64, // base rate\n y: f64 ) -> f64 {";
@@ -634,17 +767,28 @@ fn test_11_signature_normalization_edge_cases() {
     // 9. Comments inside string literals must NOT be stripped
     let comment_in_str = r#"fn url(u: &str = "http://example.com/*test*/") -> bool"#;
     let norm_comment_in_str = normalize_signature(comment_in_str);
-    assert_eq!(norm_comment_in_str, r#"fn url(u: &str = "http://example.com/*test*/") -> bool"#);
+    assert_eq!(
+        norm_comment_in_str,
+        r#"fn url(u: &str = "http://example.com/*test*/") -> bool"#
+    );
 
     // 10. Rust lifetimes (must NOT be treated as opening character literals)
     let sig_lifetime_1 = "fn get < 'a > ( value : & 'a str ) -> & 'a str {";
     let norm_lt1 = normalize_signature(sig_lifetime_1);
     assert_eq!(norm_lt1, "fn get<'a>(value: &'a str) -> &'a str");
-    assert_eq!(normalize_signature(&norm_lt1), norm_lt1, "Lifetime signature must be idempotent");
+    assert_eq!(
+        normalize_signature(&norm_lt1),
+        norm_lt1,
+        "Lifetime signature must be idempotent"
+    );
 
-    let sig_lifetime_2 = "fn transform < 'a , 'b > ( first : & 'a str , second : & 'b str ) -> & 'a str";
+    let sig_lifetime_2 =
+        "fn transform < 'a , 'b > ( first : & 'a str , second : & 'b str ) -> & 'a str";
     let norm_lt2 = normalize_signature(sig_lifetime_2);
-    assert_eq!(norm_lt2, "fn transform<'a, 'b>(first: &'a str, second: &'b str) -> &'a str");
+    assert_eq!(
+        norm_lt2,
+        "fn transform<'a, 'b>(first: &'a str, second: &'b str) -> &'a str"
+    );
     assert_eq!(normalize_signature(&norm_lt2), norm_lt2);
 
     let sig_lifetime_static = "fn process < T : 'static > ( value : T )";
@@ -660,11 +804,21 @@ fn test_11_signature_normalization_edge_cases() {
     // 11. Lifetime semantic distinction in member IDs
     let id_a = storage::member_id("ent_svc", "get", "fn get<'a>(value: &'a str) -> &'a str");
     let id_b = storage::member_id("ent_svc", "get", "fn get<'b>(value: &'b str) -> &'b str");
-    assert_ne!(id_a, id_b, "Distinct lifetime signatures must produce distinct member IDs");
+    assert_ne!(
+        id_a, id_b,
+        "Distinct lifetime signatures must produce distinct member IDs"
+    );
 
     // Formatting differences produce identical member IDs
-    let id_fmt = storage::member_id("ent_svc", "get", &normalize_signature("  fn   get < 'a > (  value :  & 'a  str  )  ->   & 'a  str  { "));
-    assert_eq!(id_a, id_fmt, "Formatting-only differences must produce identical member IDs");
+    let id_fmt = storage::member_id(
+        "ent_svc",
+        "get",
+        &normalize_signature("  fn   get < 'a > (  value :  & 'a  str  )  ->   & 'a  str  { "),
+    );
+    assert_eq!(
+        id_a, id_fmt,
+        "Formatting-only differences must produce identical member IDs"
+    );
 
     // 12. Comment boundary preservation
     let comma_comment = "fn calculate(a: i32 /* comment */ , b: i32) -> i32";
@@ -673,7 +827,10 @@ fn test_11_signature_normalization_edge_cases() {
 
     let token_comment = "fn process/* comment */_value()";
     let norm_token = normalize_signature(token_comment);
-    assert_eq!(norm_token, "fn process _value()", "Comment removal must not merge distinct lexical tokens");
+    assert_eq!(
+        norm_token, "fn process _value()",
+        "Comment removal must not merge distinct lexical tokens"
+    );
 
     let generic_comment = "fn example() -> Vec/* comment */<String>";
     let norm_gen = normalize_signature(generic_comment);
@@ -747,7 +904,8 @@ public class UserServiceTest {
         "src/main/java/com/example/service/UserService.java",
         service_code.as_bytes(),
         "rev1",
-    ).expect("Java service parsing failed");
+    )
+    .expect("Java service parsing failed");
 
     assert_eq!(parsed_service.parse_status, ParseStatus::Complete);
     assert!(!parsed_service.symbols.is_empty());
@@ -758,7 +916,10 @@ public class UserServiceTest {
         .iter()
         .find(|r| r.target.ends_with("User.java") && r.kind == "IMPORTS")
         .expect("Local User.java import relationship missing");
-    assert!(!local_import.is_external, "Local Java source must not be classified as external");
+    assert!(
+        !local_import.is_external,
+        "Local Java source must not be classified as external"
+    );
     assert_eq!(local_import.evidence, "LOCAL_JAVA_SOURCE");
 
     // 2. Verify standard library imports are classified as external (is_external: true)
@@ -767,7 +928,10 @@ public class UserServiceTest {
         .iter()
         .find(|r| r.target == "java.time.Instant" && r.kind == "IMPORTS")
         .expect("java.time.Instant import missing");
-    assert!(stdlib_import.is_external, "Java stdlib import must be classified as external");
+    assert!(
+        stdlib_import.is_external,
+        "Java stdlib import must be classified as external"
+    );
     assert_eq!(stdlib_import.evidence, "JAVA_STDLIB");
 
     let util_import = parsed_service
@@ -775,7 +939,10 @@ public class UserServiceTest {
         .iter()
         .find(|r| r.target == "java.util.List" && r.kind == "IMPORTS")
         .expect("java.util.List import missing");
-    assert!(util_import.is_external, "java.util.List import must be classified as external");
+    assert!(
+        util_import.is_external,
+        "java.util.List import must be classified as external"
+    );
 
     // 3. Verify external package import is classified as external (is_external: true)
     let spring_import = parsed_service
@@ -783,7 +950,10 @@ public class UserServiceTest {
         .iter()
         .find(|r| r.target == "org.springframework.stereotype.Service" && r.kind == "IMPORTS")
         .expect("Spring Service import missing");
-    assert!(spring_import.is_external, "Third-party dependency must be classified as external");
+    assert!(
+        spring_import.is_external,
+        "Third-party dependency must be classified as external"
+    );
     assert_eq!(spring_import.evidence, "EXTERNAL_DEPENDENCY");
 
     // 4. Verify interface implementation relationship
@@ -792,7 +962,10 @@ public class UserServiceTest {
         .iter()
         .find(|r| r.target == "UserServiceInterface" && r.kind == "IMPLEMENTS")
         .expect("implements relationship missing");
-    assert!(!iface_rel.is_external, "Interface implementation must be internal");
+    assert!(
+        !iface_rel.is_external,
+        "Interface implementation must be internal"
+    );
 
     // 5. Parse UserServiceTest.java and verify test-to-target convention
     let parsed_test = parse_file_ast(
@@ -800,14 +973,18 @@ public class UserServiceTest {
         "src/test/java/com/example/service/UserServiceTest.java",
         test_code.as_bytes(),
         "rev1",
-    ).expect("Java test parsing failed");
+    )
+    .expect("Java test parsing failed");
 
     let test_rel = parsed_test
         .relationships
         .iter()
         .find(|r| r.kind == "TESTS")
         .expect("Test convention relationship missing");
-    assert_eq!(test_rel.target, "src/main/java/com/example/service/UserService.java");
+    assert_eq!(
+        test_rel.target,
+        "src/main/java/com/example/service/UserService.java"
+    );
     assert!(!test_rel.is_external);
     assert_eq!(test_rel.evidence, "MAVEN_GRADLE_TEST_CONVENTION");
 }
@@ -852,7 +1029,10 @@ export class WorkerService {
 
     // Step 1: Initial cold analysis
     let cold = engram::incremental::incremental_analyze(root).expect("Cold analysis failed");
-    assert!(cold.tier1_reparsed_files.contains(&"src/worker.ts".to_string()));
+    assert!(
+        cold.tier1_reparsed_files
+            .contains(&"src/worker.ts".to_string())
+    );
 
     let conn = storage::db(root).unwrap();
     let worker_ent_id: String = conn
@@ -872,8 +1052,13 @@ export class WorkerService {
     fs::remove_file(&worker_path).unwrap();
 
     // Step 3: Run incremental analysis detecting file deletion
-    let incr_del = engram::incremental::incremental_analyze(root).expect("Incremental analysis after delete failed");
-    assert!(incr_del.tier1_deleted_files.contains(&"src/worker.ts".to_string()));
+    let incr_del = engram::incremental::incremental_analyze(root)
+        .expect("Incremental analysis after delete failed");
+    assert!(
+        incr_del
+            .tier1_deleted_files
+            .contains(&"src/worker.ts".to_string())
+    );
 
     // Verify entity was invalidated
     let invalidated_rev: Option<String> = conn
@@ -883,7 +1068,10 @@ export class WorkerService {
             |r| r.get(0),
         )
         .unwrap();
-    assert!(invalidated_rev.is_some(), "Entity must have invalidated_at_revision set");
+    assert!(
+        invalidated_rev.is_some(),
+        "Entity must have invalidated_at_revision set"
+    );
 
     // Verify entity members were transactionally deleted and are no longer visible
     let members_after_del = get_entity_members(&conn, &worker_ent_id).unwrap();
@@ -903,8 +1091,13 @@ export class WorkerService {
 "#;
     fs::write(&worker_path, worker_v2).unwrap();
 
-    let incr_reborn = engram::incremental::incremental_analyze(root).expect("Incremental analysis after recreate failed");
-    assert!(incr_reborn.tier1_reparsed_files.contains(&"src/worker.ts".to_string()));
+    let incr_reborn = engram::incremental::incremental_analyze(root)
+        .expect("Incremental analysis after recreate failed");
+    assert!(
+        incr_reborn
+            .tier1_reparsed_files
+            .contains(&"src/worker.ts".to_string())
+    );
 
     let new_ent_id: String = conn
         .query_row(
@@ -917,6 +1110,12 @@ export class WorkerService {
     let fresh_members = get_entity_members(&conn, &new_ent_id).unwrap();
     assert_eq!(fresh_members.len(), 1, "Expected exactly 1 new member");
     assert_eq!(fresh_members[0].name, "rebornMethod");
-    assert!(!fresh_members.iter().any(|m| m.name == "compute"), "compute must not be present");
-    assert!(!fresh_members.iter().any(|m| m.name == "status"), "status must not be present");
+    assert!(
+        !fresh_members.iter().any(|m| m.name == "compute"),
+        "compute must not be present"
+    );
+    assert!(
+        !fresh_members.iter().any(|m| m.name == "status"),
+        "status must not be present"
+    );
 }

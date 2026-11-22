@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
-use engram::contract::{create_contract, save_contract, ContractStatus};
+use engram::contract::{ContractStatus, create_contract, save_contract};
 use engram::hook::{
-    install_hook, resolve_hooks_dir, run_hook, uninstall_hook, HOOK_END_MARKER, HOOK_START_MARKER,
+    HOOK_END_MARKER, HOOK_START_MARKER, install_hook, resolve_hooks_dir, run_hook, uninstall_hook,
 };
 
 fn setup_test_git_repo(prefix: &str) -> PathBuf {
@@ -62,7 +62,11 @@ fn test_01_compliant_staged_changes_pass() {
     // Stage compliant change
     let src_dir = root.join("src");
     fs::create_dir_all(&src_dir).unwrap();
-    fs::write(src_dir.join("lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
+    fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
 
     let add_out = Command::new("git")
         .args(["add", "src/lib.rs"])
@@ -110,7 +114,10 @@ fn test_02_out_of_contract_staged_changes_blocked() {
 
     // Validate staged changes: should be blocked (exit code 1)
     let code = run_hook(&root, false, false, None, None, false).unwrap();
-    assert_eq!(code, 1, "Forbidden staged change must exit with 1 (blocked)");
+    assert_eq!(
+        code, 1,
+        "Forbidden staged change must exit with 1 (blocked)"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -447,13 +454,17 @@ fn test_10_repeated_installation_and_removal_are_safe_and_idempotent() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_11_git_paths_with_spaces_work() {
-    let space_dir = std::env::temp_dir().join(format!("engram test repo spaces {}", Uuid::new_v4()));
+    let space_dir =
+        std::env::temp_dir().join(format!("engram test repo spaces {}", Uuid::new_v4()));
     fs::create_dir_all(&space_dir).unwrap();
     init_git_in_dir(&space_dir);
 
     // Install hook in directory with spaces
     let install_res = install_hook(&space_dir, false);
-    assert!(install_res.is_ok(), "Installation in path with spaces failed");
+    assert!(
+        install_res.is_ok(),
+        "Installation in path with spaces failed"
+    );
 
     // Create contract and stage file
     let contract = create_contract(

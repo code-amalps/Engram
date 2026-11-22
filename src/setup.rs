@@ -2,9 +2,9 @@
 //! Supports Cursor, VS Code, Claude Desktop, Windsurf, and Factory AI (Droid) through a provider/adapter architecture,
 //! with safe JSON merge, managed instruction blocks, conflict detection, and dry-run planning.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use crate::instructions::{self, ManagedBlockAction, DEFAULT_INSTRUCTION_BODY};
+use crate::instructions::{self, DEFAULT_INSTRUCTION_BODY, ManagedBlockAction};
 
 pub const GOVERNED_TOOL_NAMES: &[&str] = &[
     "engram_check_constitution",

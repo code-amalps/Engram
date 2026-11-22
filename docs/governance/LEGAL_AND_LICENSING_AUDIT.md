@@ -13,13 +13,13 @@
 
 This document formalizes the legal and open-source licensing governance for Engram.
 
-Under GNU Affero General Public License Version 3 (AGPL-3.0-or-later), distribution of compiled binaries mandates the provision of Corresponding Source code under Section 6. As repository owner and copyright holder, Amal P S has authorized public distribution of Engram v1.5.4 Candidate 5 and subsequent v1.6 releases under AGPL-3.0-or-later, supported by complete, verified technical source correspondence.
+Under GNU Affero General Public License Version 3 (AGPL-3.0-or-later), distribution of compiled binaries mandates the provision of Corresponding Source code under Section 6. As repository owner and copyright holder, Amal P S explicitly authorized public publication of the Engram v1.5.4 Candidate 5 developer preview. Any future public release (including v1.6 milestones) requires separate, fresh owner authorization. While technical source correspondence has been forensicly verified, open-source legal compliance remains subject to independent qualified legal counsel review.
 
 ---
 
 ## 2. AGPL-3.0 Section 6 Corresponding Source Verification
 
-Engram strictly satisfies AGPL-3.0 Section 6 requirements through public Git repository availability:
+Engram provides technical source correspondence through public Git repository availability:
 
 | Requirement | Implementation Evidence | Verification State |
 | :--- | :--- | :---: |
@@ -30,7 +30,7 @@ Engram strictly satisfies AGPL-3.0 Section 6 requirements through public Git rep
 | **Offline Reproducibility** | Compiles with `cargo build --release --locked --offline` with zero network dependencies | **VERIFIED** |
 
 ### Source Access Instructions for Recipients:
-Any recipient of the Engram executable may obtain the complete, matching Corresponding Source using standard Git tooling:
+Any recipient of the Engram executable may obtain the matching source tree using standard Git tooling:
 ```bash
 git clone https://github.com/code-amalps/Engram.git
 cd Engram
@@ -42,16 +42,16 @@ cargo build --release --locked
 
 ## 3. Third-Party Dependency License Audit
 
-All dependencies declared in `Cargo.lock` have been audited for copyleft compatibility with AGPL-3.0:
+All dependencies declared in `Cargo.lock` have been inventoried for licensing terms:
 
-| Dependency Category | Example Crates | Inbound License | AGPL-3.0 Compatibility |
+| Dependency Category | Example Crates | Inbound License | Inventory Status |
 | :--- | :--- | :--- | :---: |
-| **AST Parsing** | `tree-sitter`, `tree-sitter-python`, `tree-sitter-typescript` | MIT | **100% Compatible** |
-| **Serialization & Protocol** | `serde`, `serde_json`, `tokio` | MIT / Apache-2.0 | **100% Compatible** |
-| **Storage Engine** | `rusqlite`, `libsqlite3-sys` | MIT / Public Domain | **100% Compatible** |
-| **CLI & Diagnostics** | `clap`, `tracing`, `tracing-subscriber` | MIT / Apache-2.0 | **100% Compatible** |
+| **AST Parsing** | `tree-sitter`, `tree-sitter-python`, `tree-sitter-typescript` | MIT | Permissive Open Source |
+| **Serialization & Protocol** | `serde`, `serde_json`, `tokio` | MIT / Apache-2.0 | Permissive Open Source |
+| **Storage Engine** | `rusqlite`, `libsqlite3-sys` | MIT / Public Domain | Permissive Open Source |
+| **CLI & Diagnostics** | `clap`, `tracing`, `tracing-subscriber` | MIT / Apache-2.0 | Permissive Open Source |
 
-**Conclusion:** Zero proprietary, non-commercial, or copyleft-incompatible libraries exist in the dependency tree.
+**Technical Finding:** Zero proprietary or non-commercial licenses were discovered in the dependency inventory. Formal legal compatibility opinions remain subject to qualified legal counsel review.
 
 ---
 
@@ -65,6 +65,6 @@ All dependencies declared in `Cargo.lock` have been audited for copyleft compati
 
 ## 5. Governance Sign-Off Verdict
 
-### Status: `LEGAL_GOVERNANCE_RESOLVED_AND_COMPLIANT`
+### Status: `TECHNICAL_SOURCE_CORRESPONDENCE_VERIFIED_LEGAL_REVIEW_PENDING`
 
-Engram satisfies all source correspondence, licensing attribution, and dependency compatibility obligations under AGPL-3.0-or-later.
+Technical source correspondence, public Git availability, and third-party license inventories are forensicly verified. Formal legal counsel review remains pending and must be resolved prior to final non-preview production distribution.

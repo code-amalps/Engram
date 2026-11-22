@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use engram::instructions::{END_MARKER, START_MARKER};
 use engram::setup::{
-    all_providers, get_provider, inspect_mcp_config, list_targets, orchestrate_setup, setup_client,
-    verify_mcp_health, verify_mcp_health_with_timeout, SetupOptions, SetupScope,
-    GOVERNED_TOOL_NAMES,
+    GOVERNED_TOOL_NAMES, SetupOptions, SetupScope, all_providers, get_provider, inspect_mcp_config,
+    list_targets, orchestrate_setup, setup_client, verify_mcp_health,
+    verify_mcp_health_with_timeout,
 };
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -51,7 +51,8 @@ fn test_setup_providers_target_matrix_and_scopes() {
     assert!(droid.capabilities().project_mcp);
     assert!(!droid.capabilities().user_mcp);
 
-    let factory_alias = get_provider("factory").expect("factory alias must resolve to droid provider");
+    let factory_alias =
+        get_provider("factory").expect("factory alias must resolve to droid provider");
     assert_eq!(factory_alias.id(), "droid");
 
     // List targets output
@@ -684,12 +685,10 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
     assert_eq!(args[2], "mcp");
 
     // 3. Inspect configuration
-    let root_canon = fs::canonicalize(&ws)
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let root_canon = fs::canonicalize(&ws).unwrap().to_string_lossy().to_string();
     let current_bin = engram::setup::get_engram_binary_path();
-    let (status, conflict, details) = inspect_mcp_config(&mcp_file, &current_bin, &root_canon).unwrap();
+    let (status, conflict, details) =
+        inspect_mcp_config(&mcp_file, &current_bin, &root_canon).unwrap();
     assert_eq!(status, "CONFIGURED_HEALTHY", "Details: {:?}", details);
     assert!(!conflict);
     assert!(details.is_none());
@@ -708,7 +707,10 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
         },
     )
     .unwrap();
-    assert_eq!(reapply.changes_applied, 0, "Repeated apply must be strictly idempotent");
+    assert_eq!(
+        reapply.changes_applied, 0,
+        "Repeated apply must be strictly idempotent"
+    );
 
     // 5. Remove surgically cleans engram from servers
     let rem = orchestrate_setup(
@@ -728,6 +730,11 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
     if mcp_file.exists() {
         let cleaned: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&mcp_file).unwrap()).unwrap();
-        assert!(cleaned.get("servers").and_then(|s| s.get("engram")).is_none());
+        assert!(
+            cleaned
+                .get("servers")
+                .and_then(|s| s.get("engram"))
+                .is_none()
+        );
     }
 }

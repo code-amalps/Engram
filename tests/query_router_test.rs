@@ -7,12 +7,22 @@ use engram::compiler::context;
 use engram::frameworks::detect_framework_provider;
 
 fn setup_test_workspace(name: &str) -> PathBuf {
-    let ws = std::env::temp_dir().join(format!("engram_query_router_test_{}_{}", name, uuid::Uuid::new_v4()));
+    let ws = std::env::temp_dir().join(format!(
+        "engram_query_router_test_{}_{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&ws).unwrap();
 
     let _ = Command::new("git").args(["init"]).current_dir(&ws).output();
-    let _ = Command::new("git").args(["config", "user.name", "Engram Tester"]).current_dir(&ws).output();
-    let _ = Command::new("git").args(["config", "user.email", "tester@engram.local"]).current_dir(&ws).output();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "Engram Tester"])
+        .current_dir(&ws)
+        .output();
+    let _ = Command::new("git")
+        .args(["config", "user.email", "tester@engram.local"])
+        .current_dir(&ws)
+        .output();
 
     ws
 }
@@ -33,7 +43,8 @@ impl Calculator {
     pub fn add(&self, a: i32, b: i32) -> i32 { a + b }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         src.join("calculator_test.rs"),
@@ -44,19 +55,28 @@ fn test_add() {
     assert_eq!(c.add(2, 2), 4);
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
     // Verify Generic provider is selected
-    let files = vec!["src/calculator.rs".to_string(), "src/calculator_test.rs".to_string()];
+    let files = vec![
+        "src/calculator.rs".to_string(),
+        "src/calculator_test.rs".to_string(),
+    ];
     let provider = detect_framework_provider(&ws, &files);
     assert_eq!(provider.name(), "generic");
 
     let res = context(&ws, "Calculator add method", 2000).unwrap();
     assert!(!res.files.is_empty());
     assert_eq!(res.files[0].path, "src/calculator.rs");
-    assert!(res.files[0].provenance.iter().any(|p| p.contains("Exact symbol match") || p.contains("BM25")));
+    assert!(
+        res.files[0]
+            .provenance
+            .iter()
+            .any(|p| p.contains("Exact symbol match") || p.contains("BM25"))
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -67,7 +87,11 @@ fn test_add() {
 #[test]
 fn test_02_angular_ngrx_adapter_discovery() {
     let ws = setup_test_workspace("angular_detect");
-    fs::write(ws.join("angular.json"), r#"{"$schema": "./node_modules/@angular/cli/lib/config/schema.json"}"#).unwrap();
+    fs::write(
+        ws.join("angular.json"),
+        r#"{"$schema": "./node_modules/@angular/cli/lib/config/schema.json"}"#,
+    )
+    .unwrap();
 
     let files = vec![
         "src/app/core/auth/auth.actions.ts".to_string(),
@@ -95,7 +119,8 @@ fn test_03_exact_symbol_matching() {
     login(): boolean { return true; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         src.join("unrelated.ts"),
@@ -103,14 +128,20 @@ fn test_03_exact_symbol_matching() {
     render(): void {}
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
     let res = context(&ws, "Inspect AuthService class", 2000).unwrap();
     assert!(!res.files.is_empty());
     assert_eq!(res.files[0].path, "src/auth.service.ts");
-    assert!(res.files[0].provenance.iter().any(|p| p.contains("Exact symbol match: AuthService")));
+    assert!(
+        res.files[0]
+            .provenance
+            .iter()
+            .any(|p| p.contains("Exact symbol match: AuthService"))
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -131,7 +162,8 @@ impl SessionHandler {
     pub fn authenticate_user(&self) -> bool { true }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -158,7 +190,8 @@ export class DataService {
     constructor(private s: Storage) {}
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         src.join("storage.ts"),
@@ -166,7 +199,8 @@ export class DataService {
     save(k: string, v: string): void {}
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -191,34 +225,42 @@ fn test_06_actions_effects_services_store_registration() {
         auth.join("auth.actions.ts"),
         r#"export const login = () => ({ type: '[Auth] Login' });
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         auth.join("auth.effects.ts"),
         r#"import { login } from './auth.actions';
 export class AuthEffects {}
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         auth.join("auth.reducer.ts"),
         r#"export function authReducer(state: any) { return state; }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         ws.join("src/app/core/core.module.ts"),
         r#"import { AuthEffects } from './auth/auth.effects';
 export class CoreModule {}
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(ws.join("angular.json"), r#"{}"#).unwrap();
 
     analyze(&ws).unwrap();
 
     let res = context(&ws, "auth.actions.ts", 4000).unwrap();
-    let paths: Vec<String> = res.files.iter().map(|f| f.path.replace('\\', "/")).collect();
+    let paths: Vec<String> = res
+        .files
+        .iter()
+        .map(|f| f.path.replace('\\', "/"))
+        .collect();
     assert!(paths.iter().any(|p| p.ends_with("auth.actions.ts")));
     assert!(paths.iter().any(|p| p.ends_with("auth.effects.ts")));
     assert!(paths.iter().any(|p| p.ends_with("auth.reducer.ts")));
@@ -231,14 +273,16 @@ export class CoreModule {}
 // ----------------------------------------------------------------------------
 #[test]
 fn test_07_scenario_a_golden_angular_http_error_interceptor() {
-    let angular_path = Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
+    let angular_path =
+        Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
     if !angular_path.exists() {
         eprintln!("Golden Angular repo not found, skipping Scenario A");
         return;
     }
 
     let start = std::time::Instant::now();
-    let res = context(angular_path, "HttpErrorInterceptor", 4000).expect("Context compilation succeeds");
+    let res =
+        context(angular_path, "HttpErrorInterceptor", 4000).expect("Context compilation succeeds");
     let latency = start.elapsed();
     let json = serde_json::to_string(&res).unwrap();
     eprintln!("\n=== SCENARIO A RETRIEVAL LATENCY: {:?} ===", latency);
@@ -253,22 +297,37 @@ fn test_07_scenario_a_golden_angular_http_error_interceptor() {
     );
 
     // Verify symbol and bounded code excerpt
-    assert!(top_file.content.contains("HttpErrorInterceptor"), "Content must contain HttpErrorInterceptor definition");
-    assert!(top_file.content.contains("intercept"), "Content must contain intercept method");
+    assert!(
+        top_file.content.contains("HttpErrorInterceptor"),
+        "Content must contain HttpErrorInterceptor definition"
+    );
+    assert!(
+        top_file.content.contains("intercept"),
+        "Content must contain intercept method"
+    );
     assert!(
         top_file.content.contains("[COMPLETE_BLOCK]") || top_file.content.contains("intercept("),
         "Bounded code excerpt must be present"
     );
 
     // Verify directly related dependency core.module.ts is discovered
-    let paths: Vec<String> = res.files.iter().map(|f| f.path.replace('\\', "/")).collect();
+    let paths: Vec<String> = res
+        .files
+        .iter()
+        .map(|f| f.path.replace('\\', "/"))
+        .collect();
     assert!(
         paths.iter().any(|p| p.contains("core.module.ts")),
         "core.module.ts must be discovered as companion registration file"
     );
 
     // Verify explainable provenance
-    assert!(top_file.provenance.iter().any(|p| p.contains("Exact symbol match: HttpErrorInterceptor")));
+    assert!(
+        top_file
+            .provenance
+            .iter()
+            .any(|p| p.contains("Exact symbol match: HttpErrorInterceptor"))
+    );
 }
 
 // ----------------------------------------------------------------------------
@@ -276,7 +335,8 @@ fn test_07_scenario_a_golden_angular_http_error_interceptor() {
 // ----------------------------------------------------------------------------
 #[test]
 fn test_08_scenario_b_golden_angular_auth_effects() {
-    let angular_path = Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
+    let angular_path =
+        Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
     if !angular_path.exists() {
         eprintln!("Golden Angular repo not found, skipping Scenario B");
         return;
@@ -289,14 +349,33 @@ fn test_08_scenario_b_golden_angular_auth_effects() {
     eprintln!("\n=== SCENARIO B RETRIEVAL LATENCY: {:?} ===", latency);
     eprintln!("=== SCENARIO B PAYLOAD BYTES: {} ===", json.len());
 
-    let paths: Vec<String> = res.files.iter().map(|f| f.path.replace('\\', "/")).collect();
+    let paths: Vec<String> = res
+        .files
+        .iter()
+        .map(|f| f.path.replace('\\', "/"))
+        .collect();
 
     // Verify essential first-party targets
-    assert!(paths.iter().any(|p| p.contains("auth.effects.ts")), "Must contain auth.effects.ts");
-    assert!(paths.iter().any(|p| p.contains("auth.actions.ts")), "Must discover auth.actions.ts");
-    assert!(paths.iter().any(|p| p.contains("local-storage.service.ts")), "Must discover local-storage.service.ts");
-    assert!(paths.iter().any(|p| p.contains("core.module.ts")), "Must discover core.module.ts");
-    assert!(paths.iter().any(|p| p.contains("auth.effects.spec.ts")), "Must discover auth.effects.spec.ts");
+    assert!(
+        paths.iter().any(|p| p.contains("auth.effects.ts")),
+        "Must contain auth.effects.ts"
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("auth.actions.ts")),
+        "Must discover auth.actions.ts"
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("local-storage.service.ts")),
+        "Must discover local-storage.service.ts"
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("core.module.ts")),
+        "Must discover core.module.ts"
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("auth.effects.spec.ts")),
+        "Must discover auth.effects.spec.ts"
+    );
 
     // Defined ground truth: 5 target files for AuthEffects cluster
     let ground_truth = [
@@ -313,13 +392,30 @@ fn test_08_scenario_b_golden_angular_auth_effects() {
         }
     }
     let coverage = matches as f64 / ground_truth.len() as f64;
-    eprintln!("Scenario B Ground Truth Coverage: {:.1}% ({}/{})", coverage * 100.0, matches, ground_truth.len());
-    assert!(coverage >= 0.95, "Scenario B coverage must be >= 95%, got {:.1}%", coverage * 100.0);
+    eprintln!(
+        "Scenario B Ground Truth Coverage: {:.1}% ({}/{})",
+        coverage * 100.0,
+        matches,
+        ground_truth.len()
+    );
+    assert!(
+        coverage >= 0.95,
+        "Scenario B coverage must be >= 95%, got {:.1}%",
+        coverage * 100.0
+    );
 
     // Verify external third-party implementations are excluded from context files
     for p in &paths {
-        assert!(!p.starts_with("@angular/"), "External package {} must not be in context files", p);
-        assert!(!p.starts_with("rxjs"), "External package {} must not be in context files", p);
+        assert!(
+            !p.starts_with("@angular/"),
+            "External package {} must not be in context files",
+            p
+        );
+        assert!(
+            !p.starts_with("rxjs"),
+            "External package {} must not be in context files",
+            p
+        );
     }
 }
 
@@ -328,13 +424,15 @@ fn test_08_scenario_b_golden_angular_auth_effects() {
 // ----------------------------------------------------------------------------
 #[test]
 fn test_09_scenario_c_golden_angular_remember_me() {
-    let angular_path = Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
+    let angular_path =
+        Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
     if !angular_path.exists() {
         eprintln!("Golden Angular repo not found, skipping Scenario C");
         return;
     }
 
-    let task = "Implement or modify the Remember Me functionality in the existing Angular application.";
+    let task =
+        "Implement or modify the Remember Me functionality in the existing Angular application.";
     let start = std::time::Instant::now();
     let res = context(angular_path, task, 8000).expect("Context compilation succeeds");
     let latency = start.elapsed();
@@ -343,14 +441,21 @@ fn test_09_scenario_c_golden_angular_remember_me() {
     eprintln!("=== SCENARIO C PAYLOAD BYTES: {} ===", json.len());
     eprintln!("Total files returned: {}", res.files.len());
     for f in &res.files {
-        eprintln!("  Selected: {} (score: {}, prov: {:?})", f.path, f.score, f.provenance);
+        eprintln!(
+            "  Selected: {} (score: {}, prov: {:?})",
+            f.path, f.score, f.provenance
+        );
     }
     eprintln!("Total files excluded: {}", res.excluded_files.len());
     for ex in &res.excluded_files {
         eprintln!("  Excluded: {} (reason: {})", ex.0, ex.1);
     }
 
-    let paths: Vec<String> = res.files.iter().map(|f| f.path.replace('\\', "/")).collect();
+    let paths: Vec<String> = res
+        .files
+        .iter()
+        .map(|f| f.path.replace('\\', "/"))
+        .collect();
 
     // Verify 5/5 Ground-Truth Target Recovery:
     // 1. auth.actions.ts
@@ -369,7 +474,12 @@ fn test_09_scenario_c_golden_angular_remember_me() {
     let mut recovered = 0;
     for (target_file, role) in &targets {
         let found = paths.iter().any(|p| p.contains(target_file));
-        eprintln!("Target [{}]: {} -> {}", role, target_file, if found { "RECOVERED" } else { "MISSING" });
+        eprintln!(
+            "Target [{}]: {} -> {}",
+            role,
+            target_file,
+            if found { "RECOVERED" } else { "MISSING" }
+        );
         if found {
             recovered += 1;
         }
@@ -378,14 +488,28 @@ fn test_09_scenario_c_golden_angular_remember_me() {
     // Also check UI and i18n companions
     let has_html = paths.iter().any(|p| p.contains("app.component.html"));
     let has_i18n = paths.iter().any(|p| p.contains("en.json"));
-    eprintln!("UI Template Companion (app.component.html): {}", if has_html { "RECOVERED" } else { "OMITTED" });
-    eprintln!("i18n Translation Companion (en.json): {}", if has_i18n { "RECOVERED" } else { "OMITTED" });
+    eprintln!(
+        "UI Template Companion (app.component.html): {}",
+        if has_html { "RECOVERED" } else { "OMITTED" }
+    );
+    eprintln!(
+        "i18n Translation Companion (en.json): {}",
+        if has_i18n { "RECOVERED" } else { "OMITTED" }
+    );
 
-    assert_eq!(recovered, 5, "Scenario C acceptance gate requires 5/5 (100.0%) recovery, got {}/5", recovered);
+    assert_eq!(
+        recovered, 5,
+        "Scenario C acceptance gate requires 5/5 (100.0%) recovery, got {}/5",
+        recovered
+    );
 
     // Verify explainable provenance for every target
     for f in &res.files {
-        assert!(!f.provenance.is_empty(), "Every file must have explainable provenance, {} had empty", f.path);
+        assert!(
+            !f.provenance.is_empty(),
+            "Every file must have explainable provenance, {} had empty",
+            f.path
+        );
     }
 }
 
@@ -399,15 +523,25 @@ fn test_10_relevance_ranking() {
     fs::create_dir_all(&src).unwrap();
 
     fs::write(src.join("target.rs"), "pub struct TargetSymbol;\n").unwrap();
-    fs::write(src.join("neighbor.rs"), "use super::target::TargetSymbol;\n").unwrap();
+    fs::write(
+        src.join("neighbor.rs"),
+        "use super::target::TargetSymbol;\n",
+    )
+    .unwrap();
     fs::write(src.join("unrelated.rs"), "pub struct UnrelatedOther;\n").unwrap();
 
     analyze(&ws).unwrap();
 
     let res = context(&ws, "TargetSymbol", 3000).unwrap();
     assert!(res.files.len() >= 2);
-    assert_eq!(res.files[0].path, "src/target.rs", "Direct symbol match must be rank 1");
-    assert!(res.files[0].score > res.files[1].score, "Rank 1 score must exceed neighbor score");
+    assert_eq!(
+        res.files[0].path, "src/target.rs",
+        "Direct symbol match must be rank 1"
+    );
+    assert!(
+        res.files[0].score > res.files[1].score,
+        "Rank 1 score must exceed neighbor score"
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -440,7 +574,8 @@ fn test_11_provenance_and_explanation_completeness() {
 // ----------------------------------------------------------------------------
 #[test]
 fn test_12_deterministic_repeated_retrieval() {
-    let angular_path = Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
+    let angular_path =
+        Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
     if !angular_path.exists() {
         return;
     }
@@ -474,7 +609,8 @@ fn test_13_external_and_unresolved_dependency_handling() {
 import { MissingLocal } from './missing_local';
 export class App {}
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -505,7 +641,8 @@ fn test_14_go_and_java_compatibility() {
 type Server struct { port int }
 func NewServer(p int) *Server { return &Server{port: p} }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         java_src.join("UserService.java"),
@@ -514,7 +651,8 @@ public class UserService {
     public boolean authenticate(String u, String p) { return true; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     analyze(&ws).unwrap();
 
@@ -524,7 +662,12 @@ public class UserService {
 
     // Query Java UserService
     let res_java = context(&ws, "UserService authenticate", 2000).unwrap();
-    assert!(res_java.files.iter().any(|f| f.path.contains("UserService.java")));
+    assert!(
+        res_java
+            .files
+            .iter()
+            .any(|f| f.path.contains("UserService.java"))
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }
@@ -544,7 +687,11 @@ fn test_15_missing_or_invalidated_entities() {
 
     // Verify it's present
     let res1 = context(&ws, "TempService", 2000).unwrap();
-    assert!(res1.files.iter().any(|f| f.path.contains("temp_service.rs")));
+    assert!(
+        res1.files
+            .iter()
+            .any(|f| f.path.contains("temp_service.rs"))
+    );
 
     // Delete the file
     let _ = fs::remove_file(&file_path);
@@ -552,7 +699,12 @@ fn test_15_missing_or_invalidated_entities() {
 
     // Deleted file should no longer be returned as an active context file
     let res2 = context(&ws, "TempService", 2000).unwrap();
-    assert!(!res2.files.iter().any(|f| f.path.contains("temp_service.rs")));
+    assert!(
+        !res2
+            .files
+            .iter()
+            .any(|f| f.path.contains("temp_service.rs"))
+    );
 
     let _ = fs::remove_dir_all(&ws);
 }

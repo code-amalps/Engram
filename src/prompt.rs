@@ -11,7 +11,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::flywheel::{parse_task_and_planned_files, preflight_task, PreflightOptions};
+use crate::flywheel::{PreflightOptions, parse_task_and_planned_files, preflight_task};
 use crate::storage::root_path;
 
 // ---------------------------------------------------------------------------
@@ -434,10 +434,14 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
 
     // Classification logic — deterministic, zero-cost, local-first
     let (classification, reason) = if effective_file_count >= 2 {
-        (TaskComplexity::Standard, format!(
-            "Multiple files detected ({} file references: {}); requires full context and contract workflow.",
-            effective_file_count, detected_files.join(", ")
-        ))
+        (
+            TaskComplexity::Standard,
+            format!(
+                "Multiple files detected ({} file references: {}); requires full context and contract workflow.",
+                effective_file_count,
+                detected_files.join(", ")
+            ),
+        )
     } else if effective_file_count == 0 {
         (TaskComplexity::Standard,
          "No target files specified; scope cannot be established safely. Defaulting to full workflow.".to_string())
@@ -475,8 +479,13 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
                 .to_string(),
         )
     } else if single_explicit_file && has_trivial_action_keywords {
-        (TaskComplexity::Trivial,
-         format!("Single file ('{}') with trivial action keyword and clean boundaries; eligible for bypass.", detected_files[0]))
+        (
+            TaskComplexity::Trivial,
+            format!(
+                "Single file ('{}') with trivial action keyword and clean boundaries; eligible for bypass.",
+                detected_files[0]
+            ),
+        )
     } else {
         (TaskComplexity::Standard,
          "Insufficient trivial signals or unrecognized task pattern; defaulting to full workflow.".to_string())

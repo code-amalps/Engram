@@ -8,7 +8,7 @@
 //! Exits 0 silently on clean, authorized commits without model calls.
 //! Blocks commits with non-zero exit code and actionable recovery guidance on violations.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::{Path, PathBuf};
 

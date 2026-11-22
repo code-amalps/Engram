@@ -311,7 +311,11 @@ impl BudgetPacker {
         deduped_items.sort_by(|a, b| {
             a.tier
                 .cmp(&b.tier)
-                .then(b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+                .then(
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
                 .then(a.file.cmp(&b.file))
                 .then(a.symbol.cmp(&b.symbol))
                 .then(a.id.cmp(&b.id))
@@ -342,7 +346,8 @@ impl BudgetPacker {
 
             // Conditional Tier 4 check: only include complete blocks if remaining budget > 40%
             // and detail_level is Full, unless the item content is already contracted
-            if item.tier == PriorityTier::Tier4Conditional && self.detail_level != DetailLevel::Full {
+            if item.tier == PriorityTier::Tier4Conditional && self.detail_level != DetailLevel::Full
+            {
                 omitted_tokens += item_tokens;
                 omissions.push(OmissionEntry {
                     context_item_id: item.id.clone(),
@@ -353,7 +358,9 @@ impl BudgetPacker {
                     original_token_count: item_tokens,
                     included_token_count: 0,
                     omitted_token_count: item_tokens,
-                    omission_reason: "Implementation block omitted by default (opt-in via detail_level=full)".to_string(),
+                    omission_reason:
+                        "Implementation block omitted by default (opt-in via detail_level=full)"
+                            .to_string(),
                     omission_status: "COMPLETELY_OMITTED".to_string(),
                     retrievable_via_targeted_request: true,
                 });
@@ -498,7 +505,7 @@ mod tests {
             file: "t2.ts".to_string(),
             item_type: ContextItemType::MemberSignature,
             tier: PriorityTier::Tier2High,
-            score: 50.0, // higher score, but lower tier
+            score: 50.0,                 // higher score, but lower tier
             content: "word ".repeat(40), // 40 tokens
             line_range: None,
         };

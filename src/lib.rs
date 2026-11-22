@@ -56,4 +56,3 @@ pub mod build_info {
         env!("ENGRAM_BUILD_PROFILE")
     );
 }
-

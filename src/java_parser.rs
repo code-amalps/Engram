@@ -4,12 +4,12 @@
 //! Maven `pom.xml` and Gradle `build.gradle` dependency parsing,
 //! Interface implementation matching, and test convention linking.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tree_sitter::{Node, Parser as TsParser};
 
-use crate::analyzer::{node_text, Relationship, Symbol};
+use crate::analyzer::{Relationship, Symbol, node_text};
 use crate::storage::hash;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -14,9 +14,9 @@
 
 //! 4. Provenance Explanation Accuracy: Produce verifiable, causal reasons for blast radius.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,33 +29,27 @@ use crate::model::EvidenceTier;
 use crate::storage::root_path;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 
 pub enum ImpactCategory {
+    Direct, // The target symbol or enclosing definition
 
-    Direct,          // The target symbol or enclosing definition
+    Test, // Test suites asserting against the target (TESTS)
 
-    Test,            // Test suites asserting against the target (TESTS)
+    Implementation, // Struct ↔ Interface structural implementation (IMPLEMENTS)
 
-    Implementation,  // Struct ↔ Interface structural implementation (IMPLEMENTS)
-
-    Caller,          // Functions/methods referencing or invoking the target
+    Caller, // Functions/methods referencing or invoking the target
 
     ImportDependent, // Workspace packages importing the target package (IMPORTS)
 
-    Configuration,   // Manifests, environment, or ecosystem configurations
+    Configuration, // Manifests, environment, or ecosystem configurations
 
-    Historical,      // Statistically mined Git co-change coupling
-
+    Historical, // Statistically mined Git co-change coupling
 }
 
 impl ImpactCategory {
-
     pub fn as_str(&self) -> &'static str {
-
         match self {
-
             Self::Direct => "DIRECT",
 
             Self::Implementation => "IMPLEMENTATION",
@@ -69,11 +63,8 @@ impl ImpactCategory {
             Self::Configuration => "CONFIGURATION",
 
             Self::Historical => "HISTORICAL",
-
         }
-
     }
-
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -147,7 +138,6 @@ pub struct ImpactMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct ImpactCone {
-
     pub target_symbol: String,
 
     pub target_file: Option<String>,
@@ -169,43 +159,29 @@ pub struct ImpactCone {
     pub configuration_entities: Vec<ImpactEntity>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-
     pub metrics: Option<ImpactMetrics>,
-
 }
 
 impl ImpactCone {
-
     /// Total count of all entities across categories.
 
     pub fn total_entities(&self) -> usize {
-
         self.direct_entities.len()
-
             + self.implementation_entities.len()
-
             + self.caller_entities.len()
-
             + self.test_entities.len()
-
             + self.import_dependent_entities.len()
-
             + self.historical_entities.len()
-
             + self.configuration_entities.len()
-
     }
 
     /// Retrieve all unique file paths in the impact cone.
 
     pub fn all_affected_paths(&self) -> Vec<String> {
-
         let mut paths = HashSet::new();
 
         for e in self.all_entities() {
-
             paths.insert(e.path.clone());
-
         }
 
         let mut sorted: Vec<String> = paths.into_iter().collect();
@@ -213,13 +189,11 @@ impl ImpactCone {
         sorted.sort();
 
         sorted
-
     }
 
     /// Retrieve all entities in deterministic priority order.
 
     pub fn all_entities(&self) -> Vec<&ImpactEntity> {
-
         let mut out = Vec::new();
 
         out.extend(&self.direct_entities);
@@ -237,7 +211,6 @@ impl ImpactCone {
         out.extend(&self.configuration_entities);
 
         out
-
     }
 
     /// Retrieve all first-party entities in the impact cone.
@@ -298,16 +271,11 @@ impl ImpactCone {
         sorted
     }
 
-
-
     /// Access traversal metrics if computed.
 
     pub fn metrics(&self) -> Option<&ImpactMetrics> {
-
         self.metrics.as_ref()
-
     }
-
 }
 
 /// Compute the multi-hop Impact Cone for a given target symbol or file.
@@ -365,7 +333,11 @@ pub fn classify_dependency(
         if workspace_files.contains(&clean) || workspace_files.contains(file_part) {
             return DependencyClassification::Workspace;
         }
-        if clean.starts_with('@') || clean.starts_with("std::") || clean.starts_with("core::") || clean.starts_with("java.") {
+        if clean.starts_with('@')
+            || clean.starts_with("std::")
+            || clean.starts_with("core::")
+            || clean.starts_with("java.")
+        {
             return DependencyClassification::External;
         }
         return DependencyClassification::Workspace;
@@ -394,7 +366,10 @@ pub fn classify_dependency(
         if !file_part.contains('/') && !file_part.contains('\\') && !file_part.contains('.') {
             return DependencyClassification::External;
         }
-        if file_part.starts_with('@') || file_part.starts_with("std::") || file_part.starts_with("rxjs") {
+        if file_part.starts_with('@')
+            || file_part.starts_with("std::")
+            || file_part.starts_with("rxjs")
+        {
             return DependencyClassification::External;
         }
     }
@@ -408,7 +383,8 @@ pub fn is_external_node(
     kind: &str,
     workspace_files: &HashSet<String>,
 ) -> bool {
-    classify_dependency(node, rel_is_ext, kind, workspace_files) == DependencyClassification::External
+    classify_dependency(node, rel_is_ext, kind, workspace_files)
+        == DependencyClassification::External
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -498,9 +474,8 @@ pub fn compute_impact_cone_with_budget(
         if let Some(exact) = exact_opt {
             Some(exact)
         } else {
-            let mut suffix_stmt = conn.prepare(
-                "SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC",
-            )?;
+            let mut suffix_stmt = conn
+                .prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
             let matches: Vec<String> = suffix_stmt
                 .query_map([cand], |r| r.get(0))?
                 .filter_map(|r| r.ok())
@@ -704,17 +679,22 @@ pub fn compute_impact_cone_with_budget(
             })?;
 
             for row in rows.flatten() {
-                let (source_id, target, kind, evidence, confidence, _rel_path, line, rel_is_ext_int) = row;
+                let (
+                    source_id,
+                    target,
+                    kind,
+                    evidence,
+                    confidence,
+                    _rel_path,
+                    line,
+                    rel_is_ext_int,
+                ) = row;
                 traversed_edges += 1;
                 let target_clean = target.trim();
                 let target_file_part = target_clean.split("::").next().unwrap_or(target_clean);
 
-                let classification = classify_dependency(
-                    target_clean,
-                    rel_is_ext_int != 0,
-                    &kind,
-                    &workspace_files,
-                );
+                let classification =
+                    classify_dependency(target_clean, rel_is_ext_int != 0, &kind, &workspace_files);
                 let is_ext = classification == DependencyClassification::External;
                 let is_unresolved = classification == DependencyClassification::Unresolved;
 
@@ -723,10 +703,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::Implementation,
                         match classification {
                             DependencyClassification::External => {
-                                format!("IMPLEMENTS external interface {} (line {})", target_clean, line)
+                                format!(
+                                    "IMPLEMENTS external interface {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("IMPLEMENTS unresolved interface {} (line {})", target_clean, line)
+                                format!(
+                                    "IMPLEMENTS unresolved interface {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("IMPLEMENTS interface {} (line {})", target_clean, line)
@@ -751,10 +737,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::Caller,
                         match classification {
                             DependencyClassification::External => {
-                                format!("CALLS external invocation target {} (line {})", target_clean, line)
+                                format!(
+                                    "CALLS external invocation target {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("CALLS unresolved invocation target {} (line {})", target_clean, line)
+                                format!(
+                                    "CALLS unresolved invocation target {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("CALLS invocation target {} (line {})", target_clean, line)
@@ -765,13 +757,22 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::ImportDependent,
                         match classification {
                             DependencyClassification::External => {
-                                format!("IMPORTS external dependency {} (line {})", target_clean, line)
+                                format!(
+                                    "IMPORTS external dependency {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("IMPORTS unresolved dependency target {} (line {})", target_clean, line)
+                                format!(
+                                    "IMPORTS unresolved dependency target {} (line {})",
+                                    target_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
-                                format!("IMPORTS dependency target {} (line {})", target_clean, line)
+                                format!(
+                                    "IMPORTS dependency target {} (line {})",
+                                    target_clean, line
+                                )
                             }
                         },
                     ),
@@ -779,10 +780,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::ImportDependent,
                         match classification {
                             DependencyClassification::External => {
-                                format!("{} external relationship to {} (line {})", kind, target_clean, line)
+                                format!(
+                                    "{} external relationship to {} (line {})",
+                                    kind, target_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("{} unresolved relationship to {} (line {})", kind, target_clean, line)
+                                format!(
+                                    "{} unresolved relationship to {} (line {})",
+                                    kind, target_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("{} relationship to {} (line {})", kind, target_clean, line)
@@ -919,17 +926,22 @@ pub fn compute_impact_cone_with_budget(
             )?;
 
             for row in rows.flatten() {
-                let (source_id, target, kind, evidence, confidence, _rel_path, line, rel_is_ext_int) = row;
+                let (
+                    source_id,
+                    target,
+                    kind,
+                    evidence,
+                    confidence,
+                    _rel_path,
+                    line,
+                    rel_is_ext_int,
+                ) = row;
                 traversed_edges += 1;
                 let source_clean = source_id.trim();
                 let source_file_part = source_clean.split("::").next().unwrap_or(source_clean);
 
-                let classification = classify_dependency(
-                    source_clean,
-                    rel_is_ext_int != 0,
-                    &kind,
-                    &workspace_files,
-                );
+                let classification =
+                    classify_dependency(source_clean, rel_is_ext_int != 0, &kind, &workspace_files);
                 let is_ext = classification == DependencyClassification::External;
                 let is_unresolved = classification == DependencyClassification::Unresolved;
 
@@ -938,10 +950,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::Implementation,
                         match classification {
                             DependencyClassification::External => {
-                                format!("Implemented by external struct {} (line {})", source_clean, line)
+                                format!(
+                                    "Implemented by external struct {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("Implemented by unresolved struct {} (line {})", source_clean, line)
+                                format!(
+                                    "Implemented by unresolved struct {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("Implemented by struct {} (line {})", source_clean, line)
@@ -952,10 +970,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::Test,
                         match classification {
                             DependencyClassification::External => {
-                                format!("Asserted by external test file {} (line {})", source_clean, line)
+                                format!(
+                                    "Asserted by external test file {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("Asserted by unresolved test file {} (line {})", source_clean, line)
+                                format!(
+                                    "Asserted by unresolved test file {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("Asserted by test file {} (line {})", source_clean, line)
@@ -966,10 +990,16 @@ pub fn compute_impact_cone_with_budget(
                         ImpactCategory::Caller,
                         match classification {
                             DependencyClassification::External => {
-                                format!("Invoked by external caller {} (line {})", source_clean, line)
+                                format!(
+                                    "Invoked by external caller {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Unresolved => {
-                                format!("Invoked by unresolved caller {} (line {})", source_clean, line)
+                                format!(
+                                    "Invoked by unresolved caller {} (line {})",
+                                    source_clean, line
+                                )
                             }
                             DependencyClassification::Workspace => {
                                 format!("Invoked by caller {} (line {})", source_clean, line)
@@ -1070,7 +1100,9 @@ pub fn compute_impact_cone_with_budget(
         }
 
         // C. Statistical Git Co-Change Signals (Historical Evidence)
-        if let Ok(cochanges) = crate::git_history::get_cochanges_for_file_conn(conn, &curr_file, 0.25) {
+        if let Ok(cochanges) =
+            crate::git_history::get_cochanges_for_file_conn(conn, &curr_file, 0.25)
+        {
             for cochange in cochanges {
                 let partner = cochange.target_file.replace('\\', "/");
                 if visited_nodes.contains(&partner) {
@@ -1167,26 +1199,30 @@ pub fn compute_impact_cone_with_budget(
     // Prune categories to budget and record omissions
     let mut omissions = Vec::new();
     if opts.max_entities_per_category < usize::MAX {
-        let mut prune_category = |entities: &mut Vec<ImpactEntity>, cat_name: &str, priority: usize| {
-            if entities.len() > opts.max_entities_per_category {
-                let dropped = entities.split_off(opts.max_entities_per_category);
-                for item in dropped {
-                    omissions.push(crate::budget::OmissionEntry {
-                        context_item_id: item.entity_id.clone(),
-                        symbol: item.symbol_name.clone(),
-                        file: item.path.clone(),
-                        context_type: cat_name.to_string(),
-                        priority_tier: priority,
-                        original_token_count: 50,
-                        included_token_count: 0,
-                        omitted_token_count: 50,
-                        omission_reason: format!("Exceeded max_entities_per_category limit ({})", opts.max_entities_per_category),
-                        omission_status: "CAPACITY_PRUNED".to_string(),
-                        retrievable_via_targeted_request: true,
-                    });
+        let mut prune_category =
+            |entities: &mut Vec<ImpactEntity>, cat_name: &str, priority: usize| {
+                if entities.len() > opts.max_entities_per_category {
+                    let dropped = entities.split_off(opts.max_entities_per_category);
+                    for item in dropped {
+                        omissions.push(crate::budget::OmissionEntry {
+                            context_item_id: item.entity_id.clone(),
+                            symbol: item.symbol_name.clone(),
+                            file: item.path.clone(),
+                            context_type: cat_name.to_string(),
+                            priority_tier: priority,
+                            original_token_count: 50,
+                            included_token_count: 0,
+                            omitted_token_count: 50,
+                            omission_reason: format!(
+                                "Exceeded max_entities_per_category limit ({})",
+                                opts.max_entities_per_category
+                            ),
+                            omission_status: "CAPACITY_PRUNED".to_string(),
+                            retrievable_via_targeted_request: true,
+                        });
+                    }
                 }
-            }
-        };
+            };
 
         prune_category(&mut import_dependent_entities, "IMPORT_DEPENDENT", 3);
         prune_category(&mut caller_entities, "CALLER", 3);
@@ -1263,9 +1299,7 @@ pub fn compute_impact_cone_with_budget(
         metrics: None,
     };
 
-    let payload_bytes = serde_json::to_string(&cone)
-        .map(|s| s.len())
-        .unwrap_or(0);
+    let payload_bytes = serde_json::to_string(&cone).map(|s| s.len()).unwrap_or(0);
     let estimated_tokens = (payload_bytes + 3) / 4;
 
     let metrics = ImpactMetrics {
@@ -1320,13 +1354,17 @@ fn record_or_merge_entity(
     }
     entry.hop_distance = entry.hop_distance.min(hop_distance);
     // Classification precedence: Workspace > External > Unresolved
-    if entry.classification == DependencyClassification::Unresolved && classification != DependencyClassification::Unresolved {
+    if entry.classification == DependencyClassification::Unresolved
+        && classification != DependencyClassification::Unresolved
+    {
         entry.classification = classification;
-    } else if entry.classification == DependencyClassification::External && classification == DependencyClassification::Workspace {
+    } else if entry.classification == DependencyClassification::External
+        && classification == DependencyClassification::Workspace
+    {
         entry.classification = classification;
     }
     entry.is_external = entry.classification == DependencyClassification::External;
-    
+
     // Deduplicate and cap relationships
     if !entry.relationships.iter().any(|r| {
         r.source == rel.source
@@ -1400,7 +1438,10 @@ pub fn format_impact_explanation(cone: &ImpactCone) -> String {
                 DependencyClassification::Unresolved => " [UNRESOLVED]",
                 DependencyClassification::Workspace => "",
             };
-            out.push_str(&format!("    • {}{} (hop {})\n", e.path, ext_tag, e.hop_distance));
+            out.push_str(&format!(
+                "    • {}{} (hop {})\n",
+                e.path, ext_tag, e.hop_distance
+            ));
         }
     }
 
@@ -1433,11 +1474,17 @@ pub fn format_impact_explanation(cone: &ImpactCone) -> String {
         out.push_str("\n📊 TRAVERSAL METRICS\n");
         out.push_str(&format!("  Total Nodes: {}\n", m.total_nodes));
         out.push_str(&format!("  First-Party Nodes: {}\n", m.first_party_nodes));
-        out.push_str(&format!("  External Terminal Nodes: {}\n", m.external_terminal_nodes));
+        out.push_str(&format!(
+            "  External Terminal Nodes: {}\n",
+            m.external_terminal_nodes
+        ));
         out.push_str(&format!("  Unresolved Nodes: {}\n", m.unresolved_nodes));
         out.push_str(&format!("  Traversed Edges: {}\n", m.traversed_edges));
         out.push_str(&format!("  Pruned Edges: {}\n", m.pruned_edges));
-        out.push_str(&format!("  Max Traversal Depth: {}\n", m.max_traversal_depth));
+        out.push_str(&format!(
+            "  Max Traversal Depth: {}\n",
+            m.max_traversal_depth
+        ));
         out.push_str(&format!("  Payload Size: {} bytes\n", m.payload_bytes));
         out.push_str(&format!("  Estimated Tokens: ~{}\n", m.estimated_tokens));
     }
@@ -1466,7 +1513,6 @@ mod tests {
     #[test]
 
     fn test_impact_category_ordering_precedence() {
-
         assert!(ImpactCategory::Direct < ImpactCategory::Test);
 
         assert!(ImpactCategory::Test < ImpactCategory::Implementation);
@@ -1476,7 +1522,5 @@ mod tests {
         assert!(ImpactCategory::Caller < ImpactCategory::ImportDependent);
 
         assert!(ImpactCategory::ImportDependent < ImpactCategory::Historical);
-
     }
-
 }

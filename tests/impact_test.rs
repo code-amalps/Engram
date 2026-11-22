@@ -10,7 +10,9 @@ use engram::compiler::context;
 use engram::contract::{
     create_contract, create_contract_with_impact, evaluate_impact_against_contract,
 };
-use engram::impact::{compute_impact_cone, format_impact_explanation, ImpactEntity, DependencyClassification};
+use engram::impact::{
+    DependencyClassification, ImpactEntity, compute_impact_cone, format_impact_explanation,
+};
 use engram::storage::db;
 
 fn setup_go_ecommerce_fixture() -> PathBuf {
@@ -389,33 +391,39 @@ fn test_generic_symbol_and_qualified_symbol_containment() {
     // A. Suffix resolution
     let cone_suffix = compute_impact_cone(&conn, &root, "auth.service.ts", 2).unwrap();
     assert!(
-        cone_suffix
-            .import_dependent_entities
-            .iter()
-            .any(|e| e.path.replace('\\', "/").ends_with("src/components/login.component.ts")),
+        cone_suffix.import_dependent_entities.iter().any(|e| e
+            .path
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "Suffix resolution for 'auth.service.ts' must find login.component.ts: {:?}",
         cone_suffix.import_dependent_entities
     );
 
     // B. Canonical path resolution
-    let cone_canonical = compute_impact_cone(&conn, &root, "src/services/auth.service.ts", 2).unwrap();
+    let cone_canonical =
+        compute_impact_cone(&conn, &root, "src/services/auth.service.ts", 2).unwrap();
     assert!(
-        cone_canonical
-            .import_dependent_entities
-            .iter()
-            .any(|e| e.path.replace('\\', "/").ends_with("src/components/login.component.ts")),
+        cone_canonical.import_dependent_entities.iter().any(|e| e
+            .path
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "Canonical path query must find login.component.ts"
     );
 
     // C. Qualified symbol resolution
-    let cone_qual = compute_impact_cone(&conn, &root, "src/services/auth.service.ts::AuthService", 2).unwrap();
+    let cone_qual =
+        compute_impact_cone(&conn, &root, "src/services/auth.service.ts::AuthService", 2).unwrap();
     assert!(
-        cone_qual.direct_entities.iter().any(|e| e.symbol_name.as_deref() == Some("AuthService")),
+        cone_qual
+            .direct_entities
+            .iter()
+            .any(|e| e.symbol_name.as_deref() == Some("AuthService")),
         "Qualified target must resolve AuthService"
     );
 
     // D. Qualified generic method 'constructor' stays contained to auth.service.ts
-    let cone_ctor_qual = compute_impact_cone(&conn, &root, "src/services/auth.service.ts::constructor", 2).unwrap();
+    let cone_ctor_qual =
+        compute_impact_cone(&conn, &root, "src/services/auth.service.ts::constructor", 2).unwrap();
     for e in &cone_ctor_qual.direct_entities {
         assert_eq!(
             e.path.replace('\\', "/"),
@@ -429,7 +437,11 @@ fn test_generic_symbol_and_qualified_symbol_containment() {
     let guard_suffix = engram::guard::impact(&root, "auth.service.ts").unwrap();
     let rev_deps_suffix = guard_suffix["reverse_dependencies"].as_array().unwrap();
     assert!(
-        rev_deps_suffix.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/login.component.ts")),
+        rev_deps_suffix.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "guard::impact with suffix 'auth.service.ts' must find login.component.ts: {:?}",
         rev_deps_suffix
     );
@@ -437,7 +449,11 @@ fn test_generic_symbol_and_qualified_symbol_containment() {
     let guard_canonical = engram::guard::impact(&root, "src/services/auth.service.ts").unwrap();
     let rev_deps_canonical = guard_canonical["reverse_dependencies"].as_array().unwrap();
     assert!(
-        rev_deps_canonical.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/login.component.ts")),
+        rev_deps_canonical.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "guard::impact with canonical path must find login.component.ts"
     );
 
@@ -510,7 +526,11 @@ fn test_windows_path_normalization_and_ambiguous_suffix_resolution() {
     assert_eq!(win_canonical.get("ambiguous"), None);
     let rev_deps = win_canonical["reverse_dependencies"].as_array().unwrap();
     assert!(
-        rev_deps.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/dashboard.component.ts")),
+        rev_deps.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/dashboard.component.ts")),
         "Windows canonical path must resolve and find dashboard.component.ts"
     );
 
@@ -518,13 +538,20 @@ fn test_windows_path_normalization_and_ambiguous_suffix_resolution() {
     assert_eq!(win_suffix.get("ambiguous"), None);
     let rev_deps_win_suf = win_suffix["reverse_dependencies"].as_array().unwrap();
     assert!(
-        rev_deps_win_suf.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/dashboard.component.ts")),
+        rev_deps_win_suf.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/dashboard.component.ts")),
         "Windows suffix path must resolve and find dashboard.component.ts"
     );
 
     let cone_win = compute_impact_cone(&conn, &root, r"src\common\logger.service.ts", 2).unwrap();
     assert!(
-        cone_win.import_dependent_entities.iter().any(|e| e.path.replace('\\', "/").ends_with("src/components/dashboard.component.ts")),
+        cone_win.import_dependent_entities.iter().any(|e| e
+            .path
+            .replace('\\', "/")
+            .ends_with("src/components/dashboard.component.ts")),
         "compute_impact_cone must accept Windows backslash paths"
     );
 
@@ -538,16 +565,43 @@ fn test_windows_path_normalization_and_ambiguous_suffix_resolution() {
         "Bare suffix matching two files must report ambiguous: true"
     );
     let matches = guard_ambiguous["matches"].as_array().unwrap();
-    assert_eq!(matches.len(), 2, "Must list exactly 2 matching candidate paths");
-    let match_strs: Vec<String> = matches.iter().filter_map(|m| m.as_str().map(|s| s.replace('\\', "/"))).collect();
-    assert!(match_strs.iter().any(|s| s.ends_with("src/admin/auth.service.ts")));
-    assert!(match_strs.iter().any(|s| s.ends_with("src/services/auth.service.ts")));
-    assert!(guard_ambiguous["reverse_dependencies"].as_array().unwrap().is_empty());
+    assert_eq!(
+        matches.len(),
+        2,
+        "Must list exactly 2 matching candidate paths"
+    );
+    let match_strs: Vec<String> = matches
+        .iter()
+        .filter_map(|m| m.as_str().map(|s| s.replace('\\', "/")))
+        .collect();
+    assert!(
+        match_strs
+            .iter()
+            .any(|s| s.ends_with("src/admin/auth.service.ts"))
+    );
+    assert!(
+        match_strs
+            .iter()
+            .any(|s| s.ends_with("src/services/auth.service.ts"))
+    );
+    assert!(
+        guard_ambiguous["reverse_dependencies"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let cone_ambiguous_err = compute_impact_cone(&conn, &root, "auth.service.ts", 2);
-    assert!(cone_ambiguous_err.is_err(), "compute_impact_cone must error on ambiguous suffix");
+    assert!(
+        cone_ambiguous_err.is_err(),
+        "compute_impact_cone must error on ambiguous suffix"
+    );
     let err_msg = cone_ambiguous_err.unwrap_err().to_string();
-    assert!(err_msg.contains("ambiguous"), "Error message must indicate ambiguity: {}", err_msg);
+    assert!(
+        err_msg.contains("ambiguous"),
+        "Error message must indicate ambiguity: {}",
+        err_msg
+    );
 
     // -------------------------------------------------------------
     // Test 3: Exact canonical paths still resolving deterministically
@@ -556,11 +610,19 @@ fn test_windows_path_normalization_and_ambiguous_suffix_resolution() {
     assert_eq!(guard_services.get("ambiguous"), None);
     let deps_services = guard_services["reverse_dependencies"].as_array().unwrap();
     assert!(
-        deps_services.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/login.component.ts")),
+        deps_services.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "src/services/auth.service.ts must resolve only to login.component.ts"
     );
     assert!(
-        !deps_services.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/admin.component.ts")),
+        !deps_services.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/admin.component.ts")),
         "src/services/auth.service.ts must NOT link to admin.component.ts"
     );
 
@@ -568,28 +630,49 @@ fn test_windows_path_normalization_and_ambiguous_suffix_resolution() {
     assert_eq!(guard_admin.get("ambiguous"), None);
     let deps_admin = guard_admin["reverse_dependencies"].as_array().unwrap();
     assert!(
-        deps_admin.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/admin.component.ts")),
+        deps_admin.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/admin.component.ts")),
         "src/admin/auth.service.ts must resolve only to admin.component.ts"
     );
     assert!(
-        !deps_admin.iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/login.component.ts")),
+        !deps_admin.iter().any(|d| d["source"]
+            .as_str()
+            .unwrap_or("")
+            .replace('\\', "/")
+            .ends_with("src/components/login.component.ts")),
         "src/admin/auth.service.ts must NOT link to login.component.ts"
     );
 
     let guard_suf_admin = engram::guard::impact(&root, "admin/auth.service.ts").unwrap();
     assert_eq!(guard_suf_admin.get("ambiguous"), None);
-    assert!(guard_suf_admin["reverse_dependencies"].as_array().unwrap().iter().any(|d| d["source"].as_str().unwrap_or("").replace('\\', "/").ends_with("src/components/admin.component.ts")));
+    assert!(
+        guard_suf_admin["reverse_dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["source"]
+                .as_str()
+                .unwrap_or("")
+                .replace('\\', "/")
+                .ends_with("src/components/admin.component.ts"))
+    );
 
     // -------------------------------------------------------------
     // Test 4: Qualified symbols remaining correctly scoped
     // -------------------------------------------------------------
-    let guard_qual = engram::guard::impact(&root, r"src\services\auth.service.ts::AuthService").unwrap();
+    let guard_qual =
+        engram::guard::impact(&root, r"src\services\auth.service.ts::AuthService").unwrap();
     assert_eq!(guard_qual.get("ambiguous"), None);
-    assert_eq!(guard_qual["resolved_target"], "src/services/auth.service.ts::AuthService");
+    assert_eq!(
+        guard_qual["resolved_target"],
+        "src/services/auth.service.ts::AuthService"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
-
 
 // =============================================================================
 // PHASE 4C: WORKSPACE-BOUNDED DEPENDENCY GRAPH & IMPACT TRAVERSAL TESTS
@@ -628,7 +711,10 @@ fn test_phase4c_first_party_traversal() {
 
     // 1. Direct entity is root.ts
     assert_eq!(cone.direct_entities.len(), 1);
-    assert_eq!(cone.direct_entities[0].path.replace('\\', "/"), "src/core/root.ts");
+    assert_eq!(
+        cone.direct_entities[0].path.replace('\\', "/"),
+        "src/core/root.ts"
+    );
     assert!(!cone.direct_entities[0].is_external);
 
     // 2. Hop 1 entity is middle.ts (first-party)
@@ -716,7 +802,11 @@ export class HelperService {
 
     // 2. All external entities must have is_external == true
     for ext in &ext_entities {
-        assert!(ext.is_external, "Entity {} must be flagged is_external", ext.path);
+        assert!(
+            ext.is_external,
+            "Entity {} must be flagged is_external",
+            ext.path
+        );
         assert!(
             ext.reason.contains("external") || ext.reason.contains("IMPORTS"),
             "Entity reason must reflect external provenance: {}",
@@ -740,7 +830,9 @@ export class HelperService {
     // 4. First-party entity is helper.service.ts
     let fp_entities = cone.first_party_entities();
     assert!(
-        fp_entities.iter().any(|e| e.path.replace('\\', "/").ends_with("helper.service.ts")),
+        fp_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").ends_with("helper.service.ts")),
         "helper.service.ts must be first-party"
     );
 
@@ -756,9 +848,21 @@ fn test_phase4c_depth_boundaries() {
     fs::create_dir_all(root.join("src")).unwrap();
 
     fs::write(root.join("src/step4.ts"), "export class Step4 {}\n").unwrap();
-    fs::write(root.join("src/step3.ts"), "import { Step4 } from './step4';\nexport class Step3 {}\n").unwrap();
-    fs::write(root.join("src/step2.ts"), "import { Step3 } from './step3';\nexport class Step2 {}\n").unwrap();
-    fs::write(root.join("src/step1.ts"), "import { Step2 } from './step2';\nexport class Step1 {}\n").unwrap();
+    fs::write(
+        root.join("src/step3.ts"),
+        "import { Step4 } from './step4';\nexport class Step3 {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/step2.ts"),
+        "import { Step3 } from './step3';\nexport class Step2 {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/step1.ts"),
+        "import { Step2 } from './step2';\nexport class Step1 {}\n",
+    )
+    .unwrap();
 
     analyze(&root).unwrap();
     let conn = db(&root).unwrap();
@@ -766,31 +870,82 @@ fn test_phase4c_depth_boundaries() {
     // Depth 0: only direct entity
     let cone0 = compute_impact_cone(&conn, &root, "src/step1.ts", 0).unwrap();
     assert_eq!(cone0.total_entities(), 1);
-    assert_eq!(cone0.direct_entities[0].path.replace('\\', "/"), "src/step1.ts");
+    assert_eq!(
+        cone0.direct_entities[0].path.replace('\\', "/"),
+        "src/step1.ts"
+    );
 
     // Depth 1: step1 (direct) + step2 (hop 1)
     let cone1 = compute_impact_cone(&conn, &root, "src/step1.ts", 1).unwrap();
     let paths1 = cone1.all_affected_paths();
-    assert!(paths1.iter().any(|p| p.replace('\\', "/").ends_with("step1.ts")));
-    assert!(paths1.iter().any(|p| p.replace('\\', "/").ends_with("step2.ts")));
-    assert!(!paths1.iter().any(|p| p.replace('\\', "/").ends_with("step3.ts")));
-    assert!(!paths1.iter().any(|p| p.replace('\\', "/").ends_with("step4.ts")));
+    assert!(
+        paths1
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step1.ts"))
+    );
+    assert!(
+        paths1
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step2.ts"))
+    );
+    assert!(
+        !paths1
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step3.ts"))
+    );
+    assert!(
+        !paths1
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step4.ts"))
+    );
 
     // Depth 2: step1 + step2 (hop 1) + step3 (hop 2)
     let cone2 = compute_impact_cone(&conn, &root, "src/step1.ts", 2).unwrap();
     let paths2 = cone2.all_affected_paths();
-    assert!(paths2.iter().any(|p| p.replace('\\', "/").ends_with("step1.ts")));
-    assert!(paths2.iter().any(|p| p.replace('\\', "/").ends_with("step2.ts")));
-    assert!(paths2.iter().any(|p| p.replace('\\', "/").ends_with("step3.ts")));
-    assert!(!paths2.iter().any(|p| p.replace('\\', "/").ends_with("step4.ts")));
+    assert!(
+        paths2
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step1.ts"))
+    );
+    assert!(
+        paths2
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step2.ts"))
+    );
+    assert!(
+        paths2
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step3.ts"))
+    );
+    assert!(
+        !paths2
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step4.ts"))
+    );
 
     // Depth 3: step1 + step2 (hop 1) + step3 (hop 2) + step4 (hop 3)
     let cone3 = compute_impact_cone(&conn, &root, "src/step1.ts", 3).unwrap();
     let paths3 = cone3.all_affected_paths();
-    assert!(paths3.iter().any(|p| p.replace('\\', "/").ends_with("step1.ts")));
-    assert!(paths3.iter().any(|p| p.replace('\\', "/").ends_with("step2.ts")));
-    assert!(paths3.iter().any(|p| p.replace('\\', "/").ends_with("step3.ts")));
-    assert!(paths3.iter().any(|p| p.replace('\\', "/").ends_with("step4.ts")));
+    assert!(
+        paths3
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step1.ts"))
+    );
+    assert!(
+        paths3
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step2.ts"))
+    );
+    assert!(
+        paths3
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step3.ts"))
+    );
+    assert!(
+        paths3
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("step4.ts"))
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -803,9 +958,21 @@ fn test_phase4c_circular_dependencies() {
     }
     fs::create_dir_all(root.join("src")).unwrap();
 
-    fs::write(root.join("src/a.ts"), "import { B } from './b';\nexport class A {}\n").unwrap();
-    fs::write(root.join("src/b.ts"), "import { C } from './c';\nexport class B {}\n").unwrap();
-    fs::write(root.join("src/c.ts"), "import { A } from './a';\nexport class C {}\n").unwrap();
+    fs::write(
+        root.join("src/a.ts"),
+        "import { B } from './b';\nexport class A {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/b.ts"),
+        "import { C } from './c';\nexport class B {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/c.ts"),
+        "import { A } from './a';\nexport class C {}\n",
+    )
+    .unwrap();
 
     analyze(&root).unwrap();
     let conn = db(&root).unwrap();
@@ -841,8 +1008,16 @@ fn test_phase4c_duplicate_paths_diamond() {
     fs::create_dir_all(root.join("src")).unwrap();
 
     fs::write(root.join("src/bottom.ts"), "export class Bottom {}\n").unwrap();
-    fs::write(root.join("src/left.ts"), "import { Bottom } from './bottom';\nexport class Left {}\n").unwrap();
-    fs::write(root.join("src/right.ts"), "import { Bottom } from './bottom';\nexport class Right {}\n").unwrap();
+    fs::write(
+        root.join("src/left.ts"),
+        "import { Bottom } from './bottom';\nexport class Left {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/right.ts"),
+        "import { Bottom } from './bottom';\nexport class Right {}\n",
+    )
+    .unwrap();
     fs::write(
         root.join("src/top.ts"),
         "import { Left } from './left';\nimport { Right } from './right';\nexport class Top {}\n",
@@ -904,12 +1079,16 @@ export class Consumer {}
     let cone = compute_impact_cone(&conn, &root, "src/consumer.ts", 2).unwrap();
 
     assert!(
-        cone.first_party_entities().iter().any(|e| e.path.replace('\\', "/").ends_with("valid.ts")),
+        cone.first_party_entities()
+            .iter()
+            .any(|e| e.path.replace('\\', "/").ends_with("valid.ts")),
         "valid.ts must be found as first party"
     );
 
     assert!(
-        cone.external_entities().iter().any(|e| e.path == "non-existent-npm-package"),
+        cone.external_entities()
+            .iter()
+            .any(|e| e.path == "non-existent-npm-package"),
         "Unresolved package must be handled as external terminal node"
     );
 
@@ -936,7 +1115,10 @@ fn test_phase4c_invalidated_entities_handling() {
 
     let cone_before = compute_impact_cone(&conn, &root, "src/origin.ts", 2).unwrap();
     assert!(
-        cone_before.all_affected_paths().iter().any(|p| p.replace('\\', "/").ends_with("target.ts")),
+        cone_before
+            .all_affected_paths()
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("target.ts")),
         "target.ts must be present initially"
     );
 
@@ -948,7 +1130,10 @@ fn test_phase4c_invalidated_entities_handling() {
 
     let cone_after = compute_impact_cone(&conn, &root, "src/origin.ts", 2).unwrap();
     assert!(
-        !cone_after.all_affected_paths().iter().any(|p| p.replace('\\', "/").ends_with("target.ts")),
+        !cone_after
+            .all_affected_paths()
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("target.ts")),
         "Invalidated relationship target must NOT appear in cone"
     );
 
@@ -1009,11 +1194,22 @@ describe('AuthService', () => {
 
     let cone = compute_impact_cone(&conn, &root, "src/app/auth.service.ts", 2).unwrap();
 
-    assert_eq!(cone.direct_entities[0].path.replace('\\', "/"), "src/app/auth.service.ts");
+    assert_eq!(
+        cone.direct_entities[0].path.replace('\\', "/"),
+        "src/app/auth.service.ts"
+    );
 
     let fp_paths = cone.first_party_paths();
-    assert!(fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("login.component.ts")));
-    assert!(fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("auth.service.spec.ts")));
+    assert!(
+        fp_paths
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("login.component.ts"))
+    );
+    assert!(
+        fp_paths
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("auth.service.spec.ts"))
+    );
 
     let ext_paths = cone.external_paths();
     assert!(ext_paths.iter().any(|p| p == "@angular/core"));
@@ -1067,7 +1263,10 @@ fn test_phase4c_deterministic_ordering() {
 
 #[test]
 fn test_phase4c_scenario_b_payload_and_coverage() {
-    let root = std::env::temp_dir().join(format!("engram_phase4c_scenario_b_{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "engram_phase4c_scenario_b_{}",
+        uuid::Uuid::new_v4()
+    ));
     if root.exists() {
         let _ = fs::remove_dir_all(&root);
     }
@@ -1190,11 +1389,23 @@ export class AppComponent {
     let inflation = bytes_d2 as f64 / bytes_d1 as f64;
 
     eprintln!("\n=================== SCENARIO B PAYLOAD MEASUREMENT ===================");
-    eprintln!("Depth-1 Payload: {} bytes (est. {} tokens)", bytes_d1, m1.estimated_tokens);
-    eprintln!("Depth-2 Payload: {} bytes (est. {} tokens)", bytes_d2, m2.estimated_tokens);
+    eprintln!(
+        "Depth-1 Payload: {} bytes (est. {} tokens)",
+        bytes_d1, m1.estimated_tokens
+    );
+    eprintln!(
+        "Depth-2 Payload: {} bytes (est. {} tokens)",
+        bytes_d2, m2.estimated_tokens
+    );
     eprintln!("Payload Inflation Factor: {:.4}x", inflation);
-    eprintln!("Depth-2 Nodes: {} total (First-party: {}, External terminal: {})", m2.total_nodes, m2.first_party_nodes, m2.external_terminal_nodes);
-    eprintln!("Traversed Edges: {}, Pruned Edges: {}", m2.traversed_edges, m2.pruned_edges);
+    eprintln!(
+        "Depth-2 Nodes: {} total (First-party: {}, External terminal: {})",
+        m2.total_nodes, m2.first_party_nodes, m2.external_terminal_nodes
+    );
+    eprintln!(
+        "Traversed Edges: {}, Pruned Edges: {}",
+        m2.traversed_edges, m2.pruned_edges
+    );
 
     // 1. Depth-2 retrieval payload: no more than 45 KB (46,080 bytes)
     assert!(
@@ -1213,10 +1424,30 @@ export class AppComponent {
     // 3. First-party dependency coverage: at least 95%
     let fp_paths = cone_d2.first_party_paths();
     let mut covered = 0usize;
-    if fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("auth.actions.ts")) { covered += 1; }
-    if fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("local-storage.service.ts")) { covered += 1; }
-    if fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("core.module.ts")) { covered += 1; }
-    if fp_paths.iter().any(|p| p.replace('\\', "/").ends_with("auth.effects.spec.ts")) { covered += 1; }
+    if fp_paths
+        .iter()
+        .any(|p| p.replace('\\', "/").ends_with("auth.actions.ts"))
+    {
+        covered += 1;
+    }
+    if fp_paths
+        .iter()
+        .any(|p| p.replace('\\', "/").ends_with("local-storage.service.ts"))
+    {
+        covered += 1;
+    }
+    if fp_paths
+        .iter()
+        .any(|p| p.replace('\\', "/").ends_with("core.module.ts"))
+    {
+        covered += 1;
+    }
+    if fp_paths
+        .iter()
+        .any(|p| p.replace('\\', "/").ends_with("auth.effects.spec.ts"))
+    {
+        covered += 1;
+    }
 
     let expected_fp = 4usize;
     let coverage = covered as f64 / expected_fp as f64;
@@ -1239,7 +1470,9 @@ export class AppComponent {
 
 #[test]
 fn test_phase4c_golden_angular_scenario_b_replay() {
-    let angular_path = std::path::Path::new(r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter");
+    let angular_path = std::path::Path::new(
+        r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter",
+    );
     if !angular_path.exists() {
         eprintln!("Golden Angular repo not found, skipping");
         return;
@@ -1254,7 +1487,10 @@ fn test_phase4c_golden_angular_scenario_b_replay() {
     let cone_d1 = match compute_impact_cone(&conn, angular_path, "AuthEffects", 1) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("AuthEffects not indexed in Golden Angular ({}), skipping", e);
+            eprintln!(
+                "AuthEffects not indexed in Golden Angular ({}), skipping",
+                e
+            );
             return;
         }
     };
@@ -1268,11 +1504,23 @@ fn test_phase4c_golden_angular_scenario_b_replay() {
     let inflation = bytes_d2 as f64 / bytes_d1 as f64;
 
     eprintln!("\n=================== GOLDEN ANGULAR SCENARIO B REPLAY ===================");
-    eprintln!("Depth-1 Payload: {} bytes (est. {} tokens)", bytes_d1, m1.estimated_tokens);
-    eprintln!("Depth-2 Payload: {} bytes (est. {} tokens)", bytes_d2, m2.estimated_tokens);
+    eprintln!(
+        "Depth-1 Payload: {} bytes (est. {} tokens)",
+        bytes_d1, m1.estimated_tokens
+    );
+    eprintln!(
+        "Depth-2 Payload: {} bytes (est. {} tokens)",
+        bytes_d2, m2.estimated_tokens
+    );
     eprintln!("Payload Inflation Factor: {:.4}x", inflation);
-    eprintln!("Depth-2 Nodes: {} total (First-party: {}, External terminal: {})", m2.total_nodes, m2.first_party_nodes, m2.external_terminal_nodes);
-    eprintln!("Traversed Edges: {}, Pruned Edges: {}", m2.traversed_edges, m2.pruned_edges);
+    eprintln!(
+        "Depth-2 Nodes: {} total (First-party: {}, External terminal: {})",
+        m2.total_nodes, m2.first_party_nodes, m2.external_terminal_nodes
+    );
+    eprintln!(
+        "Traversed Edges: {}, Pruned Edges: {}",
+        m2.traversed_edges, m2.pruned_edges
+    );
 }
 
 #[test]
@@ -1284,8 +1532,12 @@ fn test_phase4c2_three_state_dependency_classification() {
     fs::create_dir_all(root.join("src")).unwrap();
 
     // 1. Resolved relative workspace import (leaf)
-    fs::write(root.join("src/leaf.ts"), "export class LeafService {}
-").unwrap();
+    fs::write(
+        root.join("src/leaf.ts"),
+        "export class LeafService {}
+",
+    )
+    .unwrap();
 
     // 2. Resolved relative workspace import (middle)
     fs::write(
@@ -1329,11 +1581,15 @@ export class EntryComponent {}
     // 1. Verify WORKSPACE classification: successfully resolved first-party dependencies
     let fp_entities = cone.first_party_entities();
     assert!(
-        fp_entities.iter().any(|e| e.path.replace('\\', "/").ends_with("middle.ts")),
+        fp_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").ends_with("middle.ts")),
         "middle.ts must be classified as WORKSPACE"
     );
     assert!(
-        fp_entities.iter().any(|e| e.path.replace('\\', "/").ends_with("leaf.ts")),
+        fp_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").ends_with("leaf.ts")),
         "leaf.ts must be classified as WORKSPACE"
     );
     for e in &fp_entities {
@@ -1348,7 +1604,9 @@ export class EntryComponent {}
         "@angular/core must be classified as EXTERNAL"
     );
     assert!(
-        ext_entities.iter().any(|e| e.path == "std" || e.path.starts_with("std::")),
+        ext_entities
+            .iter()
+            .any(|e| e.path == "std" || e.path.starts_with("std::")),
         "std::collections::HashMap must be classified as EXTERNAL"
     );
     assert!(
@@ -1363,32 +1621,56 @@ export class EntryComponent {}
     // 3. Verify UNRESOLVED classification: missing, invalid, or stale workspace targets
     let unres_entities = cone.unresolved_entities();
     assert!(
-        unres_entities.iter().any(|e| e.path.replace('\\', "/").ends_with("unresolved_rel.ts")),
+        unres_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").ends_with("unresolved_rel.ts")),
         "unresolved_rel.ts must be classified as UNRESOLVED"
     );
     assert!(
-        unres_entities.iter().any(|e| e.path.replace('\\', "/").contains("missing_workspace.ts")),
+        unres_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").contains("missing_workspace.ts")),
         "missing_workspace.ts must be classified as UNRESOLVED"
     );
     assert!(
-        unres_entities.iter().any(|e| e.path.replace('\\', "/").contains("stale.ts")),
+        unres_entities
+            .iter()
+            .any(|e| e.path.replace('\\', "/").contains("stale.ts")),
         "stale.ts must be classified as UNRESOLVED"
     );
     for e in &unres_entities {
         assert_eq!(e.classification, DependencyClassification::Unresolved);
-        assert!(!e.is_external, "Unresolved dependencies must NOT be flagged as external!");
+        assert!(
+            !e.is_external,
+            "Unresolved dependencies must NOT be flagged as external!"
+        );
     }
 
     // 4. Verify Metrics Separation
-    assert_eq!(m.unresolved_nodes, 3, "Exactly 3 unresolved nodes must be tracked");
-    assert_eq!(m.external_terminal_nodes, 3, "Exactly 3 external terminal nodes (@angular/core, std::*, @ngrx/store)");
-    assert_eq!(m.first_party_nodes, 3, "Exactly 3 first-party nodes (entry, middle, leaf)");
-    assert_eq!(m.total_nodes, 9, "Total nodes must equal 3 FP + 3 Ext + 3 Unresolved");
+    assert_eq!(
+        m.unresolved_nodes, 3,
+        "Exactly 3 unresolved nodes must be tracked"
+    );
+    assert_eq!(
+        m.external_terminal_nodes, 3,
+        "Exactly 3 external terminal nodes (@angular/core, std::*, @ngrx/store)"
+    );
+    assert_eq!(
+        m.first_party_nodes, 3,
+        "Exactly 3 first-party nodes (entry, middle, leaf)"
+    );
+    assert_eq!(
+        m.total_nodes, 9,
+        "Total nodes must equal 3 FP + 3 Ext + 3 Unresolved"
+    );
 
     // 5. Verify Unresolved Dependencies Do NOT Trigger Traversal Outside Workspace
     //    None of the unresolved targets should spawn outgoing or incoming secondary expansions.
     for e in &unres_entities {
-        assert_eq!(e.hop_distance, 1, "Unresolved targets must remain at discovery hop (1)");
+        assert_eq!(
+            e.hop_distance, 1,
+            "Unresolved targets must remain at discovery hop (1)"
+        );
     }
 
     let _ = fs::remove_dir_all(&root);
@@ -1420,12 +1702,24 @@ export class Service {}
 
     // Confirmed external dependency
     assert_eq!(m.external_terminal_nodes, 1);
-    assert!(cone.external_paths().contains(&"@angular/common".to_string()));
+    assert!(
+        cone.external_paths()
+            .contains(&"@angular/common".to_string())
+    );
 
     // Unresolved local dependency must NOT be counted as confirmed external
     assert_eq!(m.unresolved_nodes, 1);
-    assert!(!cone.external_paths().iter().any(|p| p.contains("non_existent_local")));
-    assert!(cone.unresolved_paths().iter().any(|p| p.contains("non_existent_local")));
+    assert!(
+        !cone
+            .external_paths()
+            .iter()
+            .any(|p| p.contains("non_existent_local"))
+    );
+    assert!(
+        cone.unresolved_paths()
+            .iter()
+            .any(|p| p.contains("non_existent_local"))
+    );
 
     let _ = fs::remove_dir_all(&root);
 }

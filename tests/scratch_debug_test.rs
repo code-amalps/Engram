@@ -1,8 +1,7 @@
-
-use std::fs;
 use engram::analyzer::analyze;
-use engram::storage::db;
 use engram::impact::compute_impact_cone;
+use engram::storage::db;
+use std::fs;
 
 #[test]
 fn test_debug_missing_deps() {
@@ -28,7 +27,10 @@ export class Consumer {}
 
     println!("All entities:");
     for e in cone.all_entities() {
-        println!("  path: {:<30} is_ext: {:<6} class: {:?}", e.path, e.is_external, e.classification);
+        println!(
+            "  path: {:<30} is_ext: {:<6} class: {:?}",
+            e.path, e.is_external, e.classification
+        );
     }
 
     let _ = fs::remove_dir_all(&root);

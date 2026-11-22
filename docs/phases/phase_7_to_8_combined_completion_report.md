@@ -14,6 +14,14 @@
 
 ---
 
+> [!NOTE]
+> **Phase 7.3–8.0.1 Remediation & Clarification Addendum (2026-11-22):**  
+> An independent forensic audit reconciled the following items:
+> 1. **Turn-0 Provenance:** The Turn-0 instruction engine (`src/instructions.rs`) and its 13 tests were authored in Phase 2 Stage 5 (October 2026) and preserved at baseline `2df1cac`. Phase 8.0 work consisted of independent verification, regression execution, and comparative efficiency measurement, not greenfield implementation.
+> 2. **GitHub Actions Remediation:** The unresolvable `actions/cache` hash in Run #64 was repaired and pinned to verified immutable SHA `1bd1e32a3bdc45362d1e726936510720a7c30a57` (`v4.2.0`), formatting was applied across all files, and fatal raw-pointer Clippy errors were resolved in `src/empirical_live/security.rs`.
+> 3. **Governance Alignment:** All legal records are reconciled to `TECHNICAL_SOURCE_CORRESPONDENCE_VERIFIED_LEGAL_REVIEW_PENDING`.
+> 4. **Accounting Model:** Full context accounting models are established in `docs/phases/phase_8_0_1_turn0_efficiency_evidence_audit.md`.
+
 ## 1. Executive Summary
 
 This report concludes the four-phase milestone bridging Engram from its published **v1.5.4 Candidate 5 Developer Preview** to the **v1.6 Efficiency-First Architecture**. All four gates were executed in strict sequence with zero regression, zero unauthorized tag movements, zero release asset modification, and zero live provider network calls.

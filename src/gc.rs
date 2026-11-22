@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::doctor::{diagnose_memory_health, LivenessStatus};
+use crate::doctor::{LivenessStatus, diagnose_memory_health};
 use crate::memory::{
-    load_durable_memories, save_durable_memories, DurableMemory, DurableMemoryDocument,
-    MemoryCandidate, MemoryLifecycleState,
+    DurableMemory, DurableMemoryDocument, MemoryCandidate, MemoryLifecycleState,
+    load_durable_memories, save_durable_memories,
 };
 use crate::storage::{cache_dir, db, root_path};
 

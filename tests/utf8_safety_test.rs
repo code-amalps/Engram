@@ -1,6 +1,6 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use serde_json::{json, Value};
-use engram::mcp::{safe_truncate_str, enforce_mcp_envelope_boundary, compute_envelope_bytes};
+use engram::mcp::{compute_envelope_bytes, enforce_mcp_envelope_boundary, safe_truncate_str};
+use serde_json::{Value, json};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// 1. ASCII text at exactly 1,500 bytes.
 #[test]
@@ -40,7 +40,7 @@ fn test_utf8_04_multibyte_crossing_boundary() {
     input.push('•');
     input.push_str("extra_content");
     assert_eq!(input.len(), 1514);
-    
+
     // In previous implementation: &input[..1500] panics because byte 1500 is within '•' (bytes 1498..1501)
     let truncated = safe_truncate_str(&input, 1500);
     assert_eq!(truncated.len(), 1498);
@@ -81,12 +81,12 @@ fn test_utf8_07_emoji() {
     let truncated = safe_truncate_str(input, 5);
     assert_eq!(truncated.len(), 4);
     assert_eq!(truncated, "🦀");
-    
+
     // Boundary 7: still only keeps the 1st emoji (4 bytes).
     let truncated2 = safe_truncate_str(input, 7);
     assert_eq!(truncated2.len(), 4);
     assert_eq!(truncated2, "🦀");
-    
+
     // Boundary 8: keeps both crab and rocket (8 bytes).
     let truncated3 = safe_truncate_str(input, 8);
     assert_eq!(truncated3.len(), 8);
@@ -100,7 +100,12 @@ fn test_utf8_08_mixed_ascii_and_multibyte_sweep() {
     // Exhaustive sweep: test EVERY possible byte boundary from 0 to input.len() + 10
     for limit in 0..=(input.len() + 10) {
         let truncated = safe_truncate_str(input, limit);
-        assert!(truncated.len() <= limit, "Truncated length {} must be <= limit {}", truncated.len(), limit);
+        assert!(
+            truncated.len() <= limit,
+            "Truncated length {} must be <= limit {}",
+            truncated.len(),
+            limit
+        );
         // Assert valid UTF-8 and valid prefix substring
         assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
         assert!(input.starts_with(truncated));
@@ -130,13 +135,13 @@ fn test_utf8_11_repeated_truncation() {
     let input = "•".repeat(500); // 1500 bytes
     let t1 = safe_truncate_str(&input, 1000); // 999 bytes (333 bullets)
     assert_eq!(t1.len(), 999);
-    
+
     // Idempotent when called with same or larger limit
     let t2 = safe_truncate_str(t1, 1000);
     assert_eq!(t1, t2);
     let t3 = safe_truncate_str(t1, 1500);
     assert_eq!(t1, t3);
-    
+
     // Further reduction
     let t4 = safe_truncate_str(t1, 500); // 498 bytes (166 bullets)
     assert_eq!(t4.len(), 498);
@@ -161,14 +166,19 @@ fn test_utf8_12_valid_serialized_json_after_truncation() {
             }
         ]
     });
-    
+
     // Enforce under tight 1024-byte boundary which exercises multiple compaction levels
     let res = enforce_mcp_envelope_boundary("engram_inspect_symbol", payload, 1024, &json!(1));
     let env_bytes = compute_envelope_bytes(&json!(1), &res);
-    assert!(env_bytes <= 1024, "Final envelope bytes ({}) must be <= 1024", env_bytes);
-    
+    assert!(
+        env_bytes <= 1024,
+        "Final envelope bytes ({}) must be <= 1024",
+        env_bytes
+    );
+
     let content_text = res["content"][0]["text"].as_str().expect("Valid text");
-    let parsed: Value = serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
+    let parsed: Value =
+        serde_json::from_str(content_text).expect("Must parse cleanly as valid JSON");
     assert!(parsed.is_object());
 }
 
@@ -191,13 +201,8 @@ fn test_utf8_deterministic_panic_reproduction() {
     );
 
     // 2. Assert that safe_truncate_str DOES NOT panic and returns clean valid UTF-8!
-    let safe_result = catch_unwind(AssertUnwindSafe(|| {
-        safe_truncate_str(&buggy_input, 1500)
-    }));
-    assert!(
-        safe_result.is_ok(),
-        "safe_truncate_str MUST NOT panic!"
-    );
+    let safe_result = catch_unwind(AssertUnwindSafe(|| safe_truncate_str(&buggy_input, 1500)));
+    assert!(safe_result.is_ok(), "safe_truncate_str MUST NOT panic!");
     let safe_str = safe_result.unwrap();
     assert_eq!(safe_str.len(), 1498);
     assert_eq!(safe_str, &buggy_input[..1498]);
@@ -217,7 +222,8 @@ fn test_utf8_14_mcp_inspect_symbol_end_to_end_no_panic() {
   process() { return "ok"; }
 }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     for i in 1..=25 {
         std::fs::write(
@@ -240,7 +246,11 @@ fn test_utf8_14_mcp_inspect_symbol_end_to_end_no_panic() {
         .expect("mcp_call engram_inspect_symbol must succeed without panicking");
 
     let env_bytes = compute_envelope_bytes(&json!(1), &res);
-    assert!(env_bytes <= 16384, "Envelope bytes {} must be <= 16384", env_bytes);
+    assert!(
+        env_bytes <= 16384,
+        "Envelope bytes {} must be <= 16384",
+        env_bytes
+    );
 
     let content_text = res["content"][0]["text"].as_str().expect("text");
     let parsed: Value = serde_json::from_str(content_text).expect("Valid JSON");

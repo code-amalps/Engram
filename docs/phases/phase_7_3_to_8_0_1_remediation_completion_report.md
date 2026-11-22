@@ -41,7 +41,7 @@ All published release assets, legacy tags, and commit histories remain untouched
 - **Action Pinning Remediation:**
   - `actions/checkout`: `b4ffde65f46336ab88eb53be808477a3936bae11` (`v4.1.1`)
   - `actions/cache`: `1bd1e32a3bdc45362d1e726936510720a7c30a57` (`v4.2.0`)
-  - `dtolnay/rust-toolchain`: `df2a88e9fe4098bad09cb42c3dec7187f15861fc` (`master`)
+  - `dtolnay/rust-toolchain`: `39008827e6b4319a349e9a42dfc90579dd25f1ca` (`stable`, with `toolchain: stable` parameter)
 - **Code Quality Gates:**
   - Removed `continue-on-error: true`.
   - Ran `cargo fmt --all`. `cargo fmt --all -- --check` now exits with **Code 0**.

@@ -43,7 +43,7 @@ All third-party actions in `.github/workflows/ci.yml` have been inspected agains
 | :--- | :---: | :--- | :--- |
 | `actions/checkout` | v4.1.1 | `b4ffde65f46336ab88eb53be808477a3936bae11` | GitHub API commit verification (`actions/checkout@b4ffde...`) |
 | `actions/cache` | v4.2.0 | `1bd1e32a3bdc45362d1e726936510720a7c30a57` | GitHub API commit verification (`actions/cache@1bd1e3...`) |
-| `dtolnay/rust-toolchain` | master | `df2a88e9fe4098bad09cb42c3dec7187f15861fc` | GitHub API commit verification (`dtolnay/rust-toolchain@df2a88...`) |
+| `dtolnay/rust-toolchain` | stable | `39008827e6b4319a349e9a42dfc90579dd25f1ca` | GitHub API commit verification (`dtolnay/rust-toolchain@390088...`, with explicit `toolchain: stable` input) |
 
 Zero mutable tags (`@stable`, `@v4`, `@master`) remain in `.github/workflows/ci.yml`.
 

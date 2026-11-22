@@ -311,7 +311,7 @@ engram setup --remove --apply  # Safely disconnect Engram and strip managed bloc
 > 
 > **Why this solves high token consumption:**  
 > - Without Engram, Droid scans or dumps entire files across your codebase to answer queries, burning thousands of unnecessary tokens.
-> - With Engram connected, `AGENTS.md` and `.factory/mcp.json` give Droid precise, zero-turn AST context via `engram_preflight` and `engram_inspect_symbol`. Droid queries only the exact functions and types it needs, cutting token usage by over 80%.
+> - With Engram connected, `AGENTS.md` and `.factory/mcp.json` give Droid precise, zero-turn AST context via `engram_preflight` and `engram_inspect_symbol`. Droid queries targeted function and type signatures rather than dumping whole repositories. *(Note: While designed to substantially reduce token consumption, quantitative token reduction varies by repository and model; formal empirical validation via live matched-pair benchmark suites is currently under evaluation).*
 
 #### How Engram Protects Your Existing Files:
 - **Zero Rule Loss (Managed Blocks):** If `AGENTS.md`, `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**

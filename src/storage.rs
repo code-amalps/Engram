@@ -378,6 +378,11 @@ pub fn init_db(conn: &mut Connection) -> Result<()> {
         );"
     )?;
 
+    conn.execute(
+        "INSERT OR IGNORE INTO metadata(key, value) VALUES('index_generation', '1')",
+        [],
+    )?;
+
     for (table, column, definition) in [
         ("files", "analysis_key", "TEXT NOT NULL DEFAULT ''"),
         ("revisions", "analysis_key", "TEXT NOT NULL DEFAULT ''"),
@@ -411,6 +416,7 @@ pub fn db(root: &Path) -> Result<Connection> {
     let dir = cache_dir(root)?;
     fs::create_dir_all(&dir)?;
     let mut conn = Connection::open(dir.join("derived_symbols.db"))?;
+    conn.busy_timeout(std::time::Duration::from_secs(15))?;
     init_db(&mut conn)?;
     Ok(conn)
 }
@@ -420,6 +426,7 @@ pub fn db_at_path(db_file: &Path) -> Result<Connection> {
         fs::create_dir_all(parent)?;
     }
     let mut conn = Connection::open(db_file)?;
+    conn.busy_timeout(std::time::Duration::from_secs(15))?;
     init_db(&mut conn)?;
     Ok(conn)
 }

@@ -2208,7 +2208,13 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
          ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         [&rev],
     )?;
+    tx.execute(
+        "INSERT INTO metadata(key, value) VALUES('index_generation', '1')
+         ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)",
+        [],
+    )?;
     tx.commit()?;
+    crate::compiler::clear_workspace_cache(&root);
 
     // Sync ecosystem manifest intelligence into analytical store
     if let Ok(eco) = crate::manifest::detect_ecosystem(&root) {

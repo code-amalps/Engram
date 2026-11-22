@@ -16,6 +16,20 @@ use crate::storage::{db, root_path};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Safely truncates a string slice to at most `max_bytes` without slicing inside a multi-byte UTF-8 character boundary.
+/// If `max_bytes` falls inside a character, the boundary is moved backwards to the start of that character.
+/// If `max_bytes == 0` or less than the first character's byte length, returns an empty string slice `""`.
+pub fn safe_truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !s.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &s[..boundary]
+}
+
 /// Validate that a user-provided file path resides strictly inside the workspace root.
 /// Helper to normalize verbatim prefixes and path casing for component-aware containment.
 fn normalize_for_containment(p: &Path) -> PathBuf {
@@ -172,7 +186,327 @@ pub fn tool_error(msg: impl Into<String>) -> Value {
     })
 }
 
-pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
+
+/// Resolve the configured response byte ceiling.
+/// Precedence:
+/// 1. Tool argument "max_bytes" or "byte_limit" (clamped to 1024..=65536)
+/// 2. Environment variable ENGRAM_MCP_MAX_BYTES (clamped to 1024..=65536)
+/// 3. Default: 16,384 bytes (16 KB)
+pub fn resolve_byte_limit(args: &Value) -> usize {
+    if let Some(limit) = args
+        .get("max_bytes")
+        .and_then(|v| v.as_u64())
+        .or_else(|| args.get("byte_limit").and_then(|v| v.as_u64()))
+    {
+        return (limit as usize).clamp(1024, 65536);
+    }
+    if let Ok(env_val) = std::env::var("ENGRAM_MCP_MAX_BYTES") {
+        if let Ok(limit) = env_val.trim().parse::<usize>() {
+            return limit.clamp(1024, 65536);
+        }
+    }
+    16_384
+}
+
+/// Compute the exact UTF-8 serialized byte length of the complete JSON-RPC response,
+/// including the JSON-RPC envelope, tool result wrapper, and trailing newline.
+pub fn compute_envelope_bytes(id: &Value, tool_res: &Value) -> usize {
+    let rpc_msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": tool_res
+    });
+    serde_json::to_vec(&rpc_msg)
+        .map(|v| v.len() + 1)
+        .unwrap_or(usize::MAX)
+}
+
+/// Enforce universal response boundary across every MCP endpoint.
+/// Progressively sheds payload content through structured levels:
+/// - Level 0: Pretty-printed response within budget.
+/// - Level 1: Compact JSON (eliminate unnecessary whitespace/indentation).
+/// - Level 2: Condense narrative explanations and retrieval guidance.
+/// - Level 3: Prune low-priority entities, warnings, and memories.
+/// - Level 4: Truncate omission manifest sample entries to minimal form (counts only).
+/// - Level 5: Condense code excerpts to minimal signature/stub.
+/// - Level 6: Minimal valid response containing essential target identification and payload-truncated notification.
+/// - Level 7: Structured JSON error response indicating context exceeds boundary.
+pub fn enforce_mcp_envelope_boundary(
+    tool_name: &str,
+    mut payload: Value,
+    byte_limit: usize,
+    id: &Value,
+) -> Value {
+    // Level 0: Pretty-printed response within budget
+    if let Ok(pretty_str) = serde_json::to_string_pretty(&payload) {
+        let tool_res = json!({
+            "content": [{
+                "type": "text",
+                "text": pretty_str
+            }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 1: Compact JSON (eliminate whitespace/indentation)
+    if let Ok(compact_str) = serde_json::to_string(&payload) {
+        let tool_res = json!({
+            "content": [{
+                "type": "text",
+                "text": compact_str
+            }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 2: Condense narrative explanations and retrieval guidance
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(exp) = obj.get_mut("explanation").and_then(|v| v.as_str().map(str::to_string)) {
+            if exp.len() > 150 {
+                let truncated = safe_truncate_str(&exp, 150);
+                obj.insert("explanation".to_string(), json!(format!("{}... [Condensed]", truncated)));
+            }
+        }
+        if let Some(guidance) = obj.get_mut("targeted_retrieval_guidance") {
+            *guidance = json!("Use engram_inspect_symbol for omitted items.");
+        }
+        if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+            if let Some(g) = man.get_mut("targeted_retrieval_guidance") {
+                *g = json!("Use engram_inspect_symbol for omitted items.");
+            }
+        }
+        if let Some(summary) = obj.get_mut("summary").and_then(|v| v.as_str().map(str::to_string)) {
+            if summary.len() > 100 {
+                let truncated = safe_truncate_str(&summary, 100);
+                obj.insert("summary".to_string(), json!(format!("{}... [Condensed]", truncated)));
+            }
+        }
+        if let Some(na) = obj.get_mut("next_action").and_then(|v| v.as_str().map(str::to_string)) {
+            if na.len() > 80 {
+                obj.insert("next_action".to_string(), json!("Proceed with planned changes."));
+            }
+        }
+    }
+    if let Ok(compact_str) = serde_json::to_string(&payload) {
+        let tool_res = json!({
+            "content": [{ "type": "text", "text": compact_str }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 3: Prune low-priority entities, warnings, and memories
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(mem) = obj.get_mut("memories") {
+            *mem = json!([]);
+        }
+        if let Some(mc) = obj.get_mut("memory_conflicts") {
+            *mc = json!([]);
+        }
+        if let Some(cw) = obj.get_mut("cochange_warnings").and_then(|v| v.as_array_mut()) {
+            if cw.len() > 1 {
+                cw.truncate(1);
+            }
+        }
+        if let Some(gr) = obj.get_mut("governing_rules").and_then(|v| v.as_array_mut()) {
+            if gr.len() > 2 {
+                gr.truncate(2);
+            }
+        }
+        if let Some(rd) = obj.get_mut("relevant_decisions") {
+            *rd = json!([]);
+        }
+        let mut shed_from_cone = 0;
+        if let Some(cone) = obj.get_mut("impact_cone").and_then(|v| v.as_object_mut()) {
+            if let Some(hist) = cone.get_mut("historical_entities").and_then(|v| v.as_array_mut()) {
+                shed_from_cone += hist.len();
+                hist.clear();
+            }
+            if let Some(deps) = cone.get_mut("import_dependent_entities").and_then(|v| v.as_array_mut()) {
+                if deps.len() > 1 {
+                    shed_from_cone += deps.len() - 1;
+                    deps.truncate(1);
+                }
+            }
+            if let Some(deps) = cone.get_mut("dependency_entities").and_then(|v| v.as_array_mut()) {
+                if deps.len() > 1 {
+                    deps.truncate(1);
+                }
+            }
+        }
+        if shed_from_cone > 0 {
+            if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+                man.insert("budget_status".to_string(), json!("OMISSIONS_RECORDED"));
+                let cur = man.get("omitted_items_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                man.insert("omitted_items_count".to_string(), json!(cur + shed_from_cone as u64));
+            }
+        }
+        if let Some(files) = obj.get_mut("target_files").and_then(|v| v.as_array_mut()) {
+            for f in files.iter_mut() {
+                if let Some(fobj) = f.as_object_mut() {
+                    fobj.insert("provenance".to_string(), json!([]));
+                }
+            }
+        }
+    }
+    if let Ok(compact_str) = serde_json::to_string(&payload) {
+        let tool_res = json!({
+            "content": [{ "type": "text", "text": compact_str }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 4: Truncate omission manifest sample entries to minimal form (counts only)
+    if let Some(obj) = payload.as_object_mut() {
+        let mut shed_from_cone_l4 = 0;
+        if let Some(cone) = obj.get_mut("impact_cone").and_then(|v| v.as_object_mut()) {
+            if let Some(direct) = cone.get_mut("direct_entities").and_then(|v| v.as_array_mut()) {
+                if direct.len() > 1 {
+                    direct.truncate(1);
+                }
+            }
+            if let Some(deps) = cone.get_mut("import_dependent_entities").and_then(|v| v.as_array_mut()) {
+                shed_from_cone_l4 += deps.len();
+                deps.clear();
+            }
+        }
+        if let Some(man) = obj.get_mut("omission_manifest").and_then(|v| v.as_object_mut()) {
+            man.insert("sample_omissions".to_string(), json!([]));
+            man.insert("omission_manifest".to_string(), json!([]));
+            man.insert("omission_reasons".to_string(), json!({}));
+            man.insert("manifest_truncated".to_string(), json!(true));
+            if shed_from_cone_l4 > 0 {
+                man.insert("budget_status".to_string(), json!("OMISSIONS_RECORDED"));
+                let cur = man.get("omitted_items_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                man.insert("omitted_items_count".to_string(), json!(cur + shed_from_cone_l4 as u64));
+            }
+        }
+        if let Some(gaps) = obj.get_mut("ambiguity_gaps").and_then(|v| v.as_array_mut()) {
+            if gaps.len() > 1 {
+                gaps.truncate(1);
+            }
+        }
+        if let Some(viols) = obj.get_mut("violations").and_then(|v| v.as_array_mut()) {
+            if viols.len() > 1 {
+                viols.truncate(1);
+            }
+        }
+    }
+    if let Ok(compact_str) = serde_json::to_string(&payload) {
+        let tool_res = json!({
+            "content": [{ "type": "text", "text": compact_str }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 5: Condense code excerpts to minimal signature/stub
+    if let Some(obj) = payload.as_object_mut() {
+        if obj.contains_key("code_excerpt") {
+            obj.insert("code_excerpt".to_string(), json!(null));
+        }
+        if let Some(files) = obj.get_mut("target_files").and_then(|v| v.as_array_mut()) {
+            for f in files.iter_mut() {
+                if let Some(fobj) = f.as_object_mut() {
+                    fobj.insert("content".to_string(), json!(""));
+                }
+            }
+            if files.len() > 2 {
+                files.truncate(2);
+            }
+        }
+        obj.insert("explanation".to_string(), json!(""));
+        obj.insert("active_contract".to_string(), json!(null));
+        obj.insert("authorization".to_string(), json!(null));
+    }
+    if let Ok(compact_str) = serde_json::to_string(&payload) {
+        let tool_res = json!({
+            "content": [{ "type": "text", "text": compact_str }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 6: Minimal valid response containing essential target identification and payload_truncated
+    let mut min_payload = json!({
+        "status": payload.get("status").cloned().unwrap_or_else(|| json!("READY")),
+        "payload_truncated": true,
+        "truncation_reason": "Serialized response exceeded max_bytes limit; non-essential fields shed.",
+        "byte_limit": byte_limit
+    });
+    if let Some(t) = payload.get("target") {
+        min_payload["target"] = t.clone();
+    }
+    if let Some(tf) = payload.get("target_file") {
+        min_payload["target_file"] = tf.clone();
+    }
+    if let Some(t) = payload.get("task") {
+        let task_str = t.as_str().unwrap_or("");
+        let condensed_task = if task_str.len() > 60 { safe_truncate_str(task_str, 60) } else { task_str };
+        min_payload["task"] = json!(condensed_task);
+    }
+    if let Some(cid) = payload.get("contract_id") {
+        min_payload["contract_id"] = cid.clone();
+    }
+
+    if let Ok(compact_str) = serde_json::to_string(&min_payload) {
+        let tool_res = json!({
+            "content": [{ "type": "text", "text": compact_str }],
+            "isError": false
+        });
+        if compute_envelope_bytes(id, &tool_res) <= byte_limit {
+            return tool_res;
+        }
+    }
+
+    // Level 7: Structured error response
+    let err_msg = format!(
+        "Response boundary error: response cannot fit within max_bytes={} budget for {}. Query with narrower parameters.",
+        byte_limit, tool_name
+    );
+    let err_json = json!({
+        "error": "BOUNDARY_EXCEEDED",
+        "message": err_msg,
+        "byte_limit": byte_limit
+    });
+    let err_str = serde_json::to_string(&err_json).unwrap_or_else(|_| r#"{"error":"BOUNDARY_EXCEEDED"}"#.to_string());
+    let err_res = json!({
+        "content": [{
+            "type": "text",
+            "text": err_str
+        }],
+        "isError": true
+    });
+    if compute_envelope_bytes(id, &err_res) <= byte_limit {
+        return err_res;
+    }
+
+    // Extreme fallback
+    json!({
+        "content": [{
+            "type": "text",
+            "text": r#"{"error":"OVERSIZED"}"#
+        }],
+        "isError": true
+    })
+}
+
+pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
     let root = root_path(root)?;
     match name {
         "engram_prepare_task" | "engram_prepare" => {
@@ -235,7 +569,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             // Adaptive bypass evaluation for small/trivial leaf tasks
             let signals = crate::prompt::classify_task_complexity(&core_task);
             if signals.classification == crate::prompt::TaskComplexity::Trivial && !no_bypass {
-                return Ok(json_result(json!({
+                return Ok(json!({
                     "status": "BYPASS_TRIVIAL",
                     "task": core_task,
                     "classification": "TRIVIAL",
@@ -261,7 +595,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "is_reused_contract": false,
                     "reused_reason": Value::Null,
                     "next_action": "Task classified as trivial leaf edit. Proceed directly to implementation without Change Contract overhead. Call engram_postflight only if compliance audit is desired."
-                })));
+                }));
             }
 
             // 2. Context compilation
@@ -278,7 +612,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
 
             // 4. Return structured response
             if details {
-                Ok(json_result(json!({
+                Ok(json!({
                     "status": match preflight_res.status {
                         crate::flywheel::PreflightStatus::ReadyForImplementation => "READY",
                         crate::flywheel::PreflightStatus::Blocked => "BLOCKED",
@@ -298,7 +632,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     } else {
                         "Change Contract locked. Proceed to edit expected files. Re-run engram_prepare_task if new files are needed."
                     }
-                })))
+                }))
             } else {
                 let status_str = match preflight_res.status {
                     crate::flywheel::PreflightStatus::ReadyForImplementation => "READY",
@@ -342,7 +676,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "Change Contract locked. Proceed to edit expected files. Re-run engram_prepare_task if new files are needed."
                 };
 
-                Ok(json_result(json!({
+                Ok(json!({
                     "status": status_str,
                     "contract_id": preflight_res.contract_id,
                     "contract_version": preflight_res.contract_version,
@@ -366,7 +700,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "is_reused_contract": preflight_res.is_reused_contract,
                     "reused_reason": preflight_res.reused_reason,
                     "next_action": next_action,
-                })))
+                }))
             }
         }
         "engram_get_context" => {
@@ -381,7 +715,11 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if budget == 0 {
                 bail!("Token budget must be greater than 0");
             }
+            let byte_limit = resolve_byte_limit(args);
             let detail_level_str = args["detail_level"].as_str().unwrap_or("");
+            let is_compact = args["compact"]
+                .as_bool()
+                .unwrap_or_else(|| detail_level_str.eq_ignore_ascii_case("compact"));
             let full_blocks = args["full_blocks"]
                 .as_bool()
                 .or_else(|| args["include_bodies"].as_bool())
@@ -391,7 +729,36 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 .or_else(|| args["verbose"].as_bool())
                 .unwrap_or(false);
 
-            let detail_level = if full_blocks || details {
+            let adaptive = args["adaptive"].as_bool().unwrap_or(false);
+            let bypass_trivial = args["bypass_trivial"].as_bool().unwrap_or(adaptive);
+            let no_bypass = args["no_bypass"].as_bool().unwrap_or(false);
+
+            if bypass_trivial && !no_bypass {
+                let signals = crate::prompt::classify_task_complexity(task);
+                if signals.classification == crate::prompt::TaskComplexity::Trivial {
+                    return Ok(json!({
+                        "status": "BYPASS_TRIVIAL",
+                        "task": task,
+                        "classification": "TRIVIAL",
+                        "reason": signals.reason,
+                        "net_benefit": "NEGATIVE_RETRIEVAL_OVERHEAD_EXCEEDS_SAVINGS",
+                        "target_files": [],
+                        "governing_rules": [],
+                        "cochange_warnings": [],
+                        "relevant_decisions": [],
+                        "ambiguity_gaps": [],
+                        "token_budget": budget,
+                        "estimated_tokens": 0,
+                        "confidence": "HIGH",
+                        "omission_manifest": Value::Null,
+                        "next_action": "Task classified as trivial leaf edit. Context retrieval bypassed to preserve token budget. Proceed directly with edits."
+                    }));
+                }
+            }
+
+            let detail_level = if is_compact {
+                crate::budget::DetailLevel::Compact
+            } else if full_blocks || details {
                 crate::budget::DetailLevel::Full
             } else {
                 crate::budget::DetailLevel::Contracted
@@ -399,28 +766,79 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
 
             let subpath = args["subpath"].as_str();
             let language = args["language"].as_str();
+            let target_symbols: Option<Vec<String>> = args["symbols"].as_array().map(|arr| {
+                arr.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect()
+            });
 
-            let ctx = crate::compiler::context_scoped_with_detail(
+            let ctx = crate::compiler::context_scoped_optimized(
                 &root,
                 task,
                 budget,
                 subpath,
                 language,
                 detail_level,
+                target_symbols.as_deref(),
             )?;
 
+            // Build bounded omission manifest to prevent repository-wide enumeration bloat
+            let bounded_omission_manifest = if let Some(ref raw_man) = ctx.omission_manifest {
+                let total_omitted = raw_man.omitted_items_count;
+                let mut reason_counts: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
+                for entry in &raw_man.omission_manifest {
+                    *reason_counts
+                        .entry(entry.omission_reason.clone())
+                        .or_insert(0) += 1;
+                }
+
+                // Sample at most 3 to 5 omitted entries, prioritized by priority_tier ascending
+                let sample_limit = if byte_limit <= 4096 { 2 } else { 4 };
+                let mut sorted_entries = raw_man.omission_manifest.clone();
+                sorted_entries.sort_by_key(|e| e.priority_tier);
+                let sample_entries: Vec<_> =
+                    sorted_entries.into_iter().take(sample_limit).collect();
+                let manifest_truncated = total_omitted > sample_entries.len();
+                let unrepresented = total_omitted.saturating_sub(sample_entries.len());
+
+                Some(json!({
+                    "budget_status": raw_man.budget_status,
+                    "budget_tokens_limit": raw_man.budget_tokens_limit,
+                    "budget_tokens_estimated": raw_man.budget_tokens_estimated,
+                    "reserved_metadata_tokens": raw_man.reserved_metadata_tokens,
+                    "packed_tokens": raw_man.packed_tokens,
+                    "remaining_tokens": raw_man.remaining_tokens,
+                    "omitted_tokens": raw_man.omitted_tokens,
+                    "included_items_count": raw_man.included_items_count,
+                    "omitted_items_count": total_omitted,
+                    "omission_reasons": reason_counts,
+                    "manifest_truncated": manifest_truncated,
+                    "unrepresented_omissions_count": unrepresented,
+                    "sample_omissions": sample_entries,
+                    "omission_manifest": sample_entries,
+                    "targeted_retrieval_guidance": "Full repository omission list suppressed to preserve token budget. Use engram_inspect_symbol(target) or targeted engram_get_context(subpath=...) to inspect specific omitted components."
+                }))
+            } else {
+                None
+            };
+
             if details {
-                Ok(json_result(serde_json::to_value(ctx)?))
+                let mut ctx_val = serde_json::to_value(&ctx)?;
+                if let Some(ref bounded_man) = bounded_omission_manifest {
+                    ctx_val["omission_manifest"] = bounded_man.clone();
+                }
+                Ok(ctx_val)
             } else {
                 let target_files: Vec<Value> = ctx
                     .files
                     .iter()
+                    .take(8)
                     .map(|f| {
+                        let prov: Vec<String> = f.provenance.iter().take(3).cloned().collect();
                         json!({
                             "path": f.path,
                             "level": f.level,
                             "score": (f.score * 100.0).round() / 100.0,
-                            "provenance": f.provenance,
+                            "provenance": prov,
                             "content": f.content,
                         })
                     })
@@ -431,7 +849,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     ctx.cochange_alerts.iter().take(5).cloned().collect();
                 let relevant_decisions: Vec<String> =
                     ctx.relevant_memories.iter().take(5).cloned().collect();
-                Ok(json_result(json!({
+                Ok(json!({
                     "status": "READY",
                     "task": ctx.task,
                     "target_files": target_files,
@@ -442,9 +860,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "token_budget": ctx.token_budget,
                     "estimated_tokens": ctx.estimated_tokens,
                     "confidence": ctx.confidence,
-                    "omission_manifest": ctx.omission_manifest,
+                    "omission_manifest": bounded_omission_manifest,
                     "next_action": "Plan changes within target files and run engram_preflight with planned_files."
-                })))
+                }))
             }
         }
         "engram_inspect_symbol" => {
@@ -460,17 +878,46 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 validate_workspace_path(&root, target)?;
             }
             let depth = args["depth"].as_u64().unwrap_or(2).clamp(1, 3) as usize;
+            let entity_limit = args["max_entities"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
+            let byte_limit = args["max_bytes"]
+                .as_u64()
+                .or_else(|| args["byte_limit"].as_u64())
+                .unwrap_or(16_384)
+                .clamp(1024, 65536) as usize;
 
             crate::analyzer::ensure_fresh(&root)?;
             let conn = db(&root)?;
-            let cone = crate::impact::compute_impact_cone(&conn, &root, target, depth)?;
+            let budget_opts = crate::impact::ImpactBudgetOptions {
+                max_depth: depth,
+                max_entities_per_category: entity_limit,
+                max_relationships_per_entity: 5,
+                prioritize_workspace: true,
+            };
+            let (cone, mut omissions) = crate::impact::compute_impact_cone_with_budget(
+                &conn,
+                &root,
+                target,
+                budget_opts,
+            )?;
             let active_contract = crate::contract::get_active_contract(&root).ok().flatten();
             let authorization = active_contract
                 .as_ref()
                 .map(|c| crate::contract::evaluate_impact_against_contract(c, &cone));
-            let explanation = crate::impact::format_impact_explanation(&cone);
+
+            // Generate bounded explanation: full format bounded by the already pruned cone
+            let raw_explanation = crate::impact::format_impact_explanation(&cone);
+            let mut explanation = if raw_explanation.len() > 1500 {
+                let truncated = safe_truncate_str(&raw_explanation, 1500);
+                format!(
+                    "{}\n... [Explanation condensed to fit context budget]",
+                    truncated
+                )
+            } else {
+                raw_explanation
+            };
+
             let affected_paths = cone.all_affected_paths();
-            let audit_memories = crate::memory::query_scoped_memories(
+            let mut audit_memories = crate::memory::query_scoped_memories(
                 &root,
                 target,
                 &affected_paths,
@@ -478,6 +925,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 true,
             )
             .unwrap_or_default();
+            if audit_memories.len() > 5 {
+                audit_memories.truncate(5);
+            }
             let memory_conflicts = crate::memory::detect_memory_conflicts(&audit_memories);
 
             let mut code_excerpt = None;
@@ -505,7 +955,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 }
             }
 
-            Ok(json_result(json!({
+            let mut res_json = json!({
                 "target": cone.target_symbol,
                 "target_file": cone.target_file,
                 "line_range": line_range,
@@ -517,7 +967,117 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 "explanation": explanation,
                 "memories": audit_memories,
                 "memory_conflicts": memory_conflicts,
-            })))
+            });
+
+            // Enforce serialized byte ceiling via structured progressive shedding
+            let mut serialized = serde_json::to_string(&res_json)?;
+            if serialized.len() > byte_limit {
+                // 1. Condense explanation further
+                if explanation.len() > 300 {
+                    let truncated = safe_truncate_str(&explanation, 300);
+                    explanation = format!("{}\n... [Condensed]", truncated);
+                    res_json["explanation"] = json!(explanation);
+                    serialized = serde_json::to_string(&res_json)?;
+                }
+                // 2. Shed Tier 5 historical entities
+                if serialized.len() > byte_limit {
+                    if let Some(cone_obj) = res_json.get_mut("impact_cone") {
+                        if let Some(hist) = cone_obj.get_mut("historical_entities") {
+                            if let Some(arr) = hist.as_array_mut() {
+                                for item in arr.drain(..) {
+                                    omissions.push(crate::budget::OmissionEntry {
+                                        context_item_id: item["entity_id"].as_str().unwrap_or("").to_string(),
+                                        symbol: None,
+                                        file: item["path"].as_str().unwrap_or("").to_string(),
+                                        context_type: "HISTORICAL_ENTITY".to_string(),
+                                        priority_tier: 5,
+                                        original_token_count: 50,
+                                        included_token_count: 0,
+                                        omitted_token_count: 50,
+                                        omission_reason: "Byte limit exceeded; shed Tier 5 entity".to_string(),
+                                        omission_status: "CAPACITY_PRUNED".to_string(),
+                                        retrievable_via_targeted_request: true,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    serialized = serde_json::to_string(&res_json)?;
+                }
+                // 3. Shed code_excerpt if oversized
+                if serialized.len() > byte_limit {
+                    if let Some(exc) = res_json.get_mut("code_excerpt") {
+                        if let Some(s) = exc.as_str() {
+                            if s.len() > 400 {
+                                let truncated = safe_truncate_str(s, 250);
+                                *exc = json!(format!("{}\n// ... [Excerpt truncated to fit context budget]", truncated));
+                                res_json["completeness"] = json!("CONTRACTED");
+                            }
+                        }
+                    }
+                    serialized = serde_json::to_string(&res_json)?;
+                }
+                // 4. Shed import_dependent_entities down to 1 if still over limit
+                if serialized.len() > byte_limit {
+                    if let Some(cone_obj) = res_json.get_mut("impact_cone") {
+                        if let Some(deps) = cone_obj.get_mut("import_dependent_entities") {
+                            if let Some(arr) = deps.as_array_mut() {
+                                if arr.len() > 1 {
+                                    for item in arr.drain(1..) {
+                                        omissions.push(crate::budget::OmissionEntry {
+                                            context_item_id: item["entity_id"].as_str().unwrap_or("").to_string(),
+                                            symbol: None,
+                                            file: item["path"].as_str().unwrap_or("").to_string(),
+                                            context_type: "IMPORT_DEPENDENT_ENTITY".to_string(),
+                                            priority_tier: 3,
+                                            original_token_count: 50,
+                                            included_token_count: 0,
+                                            omitted_token_count: 50,
+                                            omission_reason: "Byte limit exceeded; pruned excess dependent entities".to_string(),
+                                            omission_status: "CAPACITY_PRUNED".to_string(),
+                                            retrievable_via_targeted_request: true,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    serialized = serde_json::to_string(&res_json)?;
+                }
+                // 5. If STILL over limit, truncate explanation and clear code_excerpt
+                if serialized.len() > byte_limit {
+                    res_json["explanation"] = json!("... [Condensed to fit budget]");
+                    res_json["code_excerpt"] = json!(null);
+                    serialized = serde_json::to_string(&res_json)?;
+                }
+            }
+
+            let total_omitted = omissions.len();
+            let omitted_tokens = total_omitted * 50;
+            // Cap detailed omission entries in payload to prevent manifest itself from bloating the payload
+            let max_omissions = if byte_limit <= 4096 { 2 } else { 5 };
+            let sample_omissions: Vec<_> = omissions.into_iter().take(max_omissions).collect();
+            let manifest = crate::budget::OmissionManifest {
+                budget_status: if total_omitted > 0 {
+                    "OMISSIONS_RECORDED".to_string()
+                } else {
+                    "PACKED_WITHIN_BUDGET".to_string()
+                },
+                budget_tokens_limit: byte_limit / 4,
+                budget_tokens_estimated: (serialized.len() + 3) / 4,
+                reserved_metadata_tokens: 150,
+                packed_tokens: (serialized.len() + 3) / 4,
+                remaining_tokens: (byte_limit.saturating_sub(serialized.len()) + 3) / 4,
+                omitted_tokens,
+                serialized_payload_bytes: serialized.len(),
+                included_items_count: cone.total_entities().saturating_sub(total_omitted),
+                omitted_items_count: total_omitted,
+                omission_manifest: sample_omissions,
+            };
+            res_json["omission_manifest"] = serde_json::to_value(&manifest)?;
+            res_json["budget_bytes_limit"] = json!(byte_limit);
+
+            Ok(res_json)
         }
         "engram_why" => {
             let target = args["target"]
@@ -533,7 +1093,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             }
             crate::analyzer::ensure_fresh(&root)?;
             let expl = crate::archaeology::explain_why(&root, target)?;
-            Ok(json_result(serde_json::to_value(expl)?))
+            Ok(serde_json::to_value(expl)?)
         }
         "engram_get_impact" => {
             let target = args["target"]
@@ -547,7 +1107,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if target.contains('/') || target.contains('\\') || target.contains('.') {
                 validate_workspace_path(&root, target)?;
             }
-            Ok(json_result(impact(&root, target)?))
+            Ok(impact(&root, target)?)
         }
         "engram_get_cochanges" => {
             let file_path = args["file_path"].as_str().unwrap_or("").trim();
@@ -560,7 +1120,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 .unwrap_or(0.25)
                 .clamp(0.0, 1.0);
             let signals = get_cochanges_for_file(&root, file_path, min_prob)?;
-            Ok(json_result(serde_json::to_value(signals)?))
+            Ok(serde_json::to_value(signals)?)
         }
         "engram_get_memory" => {
             let query = args["query"].as_str().unwrap_or("");
@@ -579,10 +1139,10 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
 
             if query.is_empty() && files.is_empty() {
                 let doc = load_durable_memories(&root)?;
-                Ok(json_result(serde_json::to_value(doc.memories)?))
+                Ok(serde_json::to_value(doc.memories)?)
             } else {
                 let memories = query_relevant_memories(&root, query, &files)?;
-                Ok(json_result(serde_json::to_value(memories)?))
+                Ok(serde_json::to_value(memories)?)
             }
         }
         "engram_record_decision" => {
@@ -632,7 +1192,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let memory = record_provisional_decision(
                 &root, title, statement, reason, modules, files, None, actor,
             )?;
-            Ok(json_result(serde_json::to_value(memory)?))
+            Ok(serde_json::to_value(memory)?)
         }
         "engram_check_constitution" => {
             let conn = db(&root)?;
@@ -652,15 +1212,15 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             };
 
             let violations = evaluate_rules(&root, &changed_files, &conn)?;
-            Ok(json_result(serde_json::to_value(violations)?))
+            Ok(serde_json::to_value(violations)?)
         }
         "engram_get_ecosystem" => {
             let report = crate::manifest::detect_ecosystem(&root)?;
-            Ok(json_result(serde_json::to_value(report)?))
+            Ok(serde_json::to_value(report)?)
         }
         "engram_doctor" => {
             let report = crate::doctor::diagnose_memory_health(&root)?;
-            Ok(json_result(serde_json::to_value(report)?))
+            Ok(serde_json::to_value(report)?)
         }
         "engram_preflight" => {
             let task = args["task"].as_str().unwrap_or("").trim();
@@ -711,7 +1271,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let res = crate::flywheel::preflight_task(&root, &opts)?;
 
             if details {
-                Ok(json_result(serde_json::to_value(res)?))
+                Ok(serde_json::to_value(res)?)
             } else {
                 let governing_rule_ids: Vec<String> = res
                     .governing_policies
@@ -738,7 +1298,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "Change Contract locked. Proceed to edit expected files. Re-run preflight with planned_files if new files are needed."
                 };
 
-                Ok(json_result(json!({
+                Ok(json!({
                     "status": status_str,
                     "contract_id": res.contract_id,
                     "contract_version": res.contract_version,
@@ -751,7 +1311,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "is_reused_contract": res.is_reused_contract,
                     "reused_reason": res.reused_reason,
                     "next_action": next_action,
-                })))
+                }))
             }
         }
         "engram_postflight" => {
@@ -850,7 +1410,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let is_compliant = res.scope_status == crate::flywheel::LocalScopeStatus::Compliant;
 
             if details {
-                Ok(json_result(json!({
+                Ok(json!({
                     "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
                         "PASS"
                     } else {
@@ -879,9 +1439,9 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "exit_code": res.exit_code,
                     "next_action": next_action,
                     "report": serde_json::to_value(&res)?,
-                })))
+                }))
             } else {
-                Ok(json_result(json!({
+                Ok(json!({
                     "verdict": if res.verdict == crate::flywheel::LocalPostflightVerdict::PassScopeOnlyUnverified {
                         "PASS"
                     } else {
@@ -900,7 +1460,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                     "constitution_passed": res.constitution_violations.is_empty(),
                     "summary": res.summary,
                     "next_action": next_action,
-                })))
+                }))
             }
         }
         "engram_recover" => {
@@ -919,7 +1479,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 contract_id.to_string()
             };
             let rep = crate::recovery::recover_contract(&root, &id)?;
-            Ok(json_result(serde_json::to_value(rep)?))
+            Ok(serde_json::to_value(rep)?)
         }
         "engram_drift" => {
             let module = args["module"].as_str().map(str::to_string);
@@ -944,7 +1504,7 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
                 staleness_threshold: threshold,
             };
             let rep = crate::drift::analyze_drift(&root, &opts)?;
-            Ok(json_result(serde_json::to_value(rep)?))
+            Ok(serde_json::to_value(rep)?)
         }
         "engram_ratify_decision" => {
             let decision_id = args["decision_id"]
@@ -957,10 +1517,16 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let commit = args["commit"].as_str();
 
             let mem = crate::memory::ratify_decision(&root, decision_id, by, reason, commit)?;
-            Ok(json_result(serde_json::to_value(mem)?))
+            Ok(serde_json::to_value(mem)?)
         }
         _ => Err(anyhow!("Unknown tool: {name}")),
     }
+}
+
+pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
+    let byte_limit = resolve_byte_limit(args);
+    let payload = mcp_call_raw(root, name, args)?;
+    Ok(enforce_mcp_envelope_boundary(name, payload, byte_limit, &json!(1)))
 }
 
 pub fn core_tools_definitions() -> Value {
@@ -973,7 +1539,12 @@ pub fn core_tools_definitions() -> Value {
                 "properties": {
                     "task": { "type": "string", "description": "The coding task goal or intent" },
                     "token_budget": { "type": "integer", "description": "Context token budget limit" },
-                    "details": { "type": "boolean", "description": "Return full verbose excerpts" }
+                    "details": { "type": "boolean", "description": "Return full verbose excerpts" },
+                    "compact": { "type": "boolean", "description": "Progressive disclosure: return compact symbol signatures only (no excerpt bodies)" },
+                    "detail_level": { "type": "string", "enum": ["compact", "contracted", "full"], "description": "Level of detail: compact (signatures), contracted (bounded), or full" },
+                    "symbols": { "type": "array", "items": { "type": "string" }, "description": "Targeted symbol filter: excerpt only these specific symbols" },
+                    "adaptive": { "type": "boolean", "description": "Enable adaptive small-task bypass to save tokens on self-contained tasks" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
                 },
                 "required": ["task"]
             }
@@ -985,7 +1556,9 @@ pub fn core_tools_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "target": { "type": "string", "description": "Target symbol or file path" },
-                    "depth": { "type": "integer", "description": "Dependency depth (1-3)" }
+                    "depth": { "type": "integer", "description": "Dependency depth (1-3, default 2)" },
+                    "max_entities": { "type": "integer", "description": "Maximum entities per category (default 10)" },
+                    "max_bytes": { "type": "integer", "description": "Maximum response size in bytes (default 16384)" }
                 },
                 "required": ["target"]
             }
@@ -999,7 +1572,8 @@ pub fn core_tools_definitions() -> Value {
                     "task": { "type": "string", "description": "The coding task goal or intent" },
                     "token_budget": { "type": "integer", "description": "Context token budget limit" },
                     "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Optional forbidden boundary patterns" },
-                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Planned target files for validation" }
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Planned target files for validation" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
                 },
                 "required": ["task"]
             }
@@ -1012,7 +1586,8 @@ pub fn core_tools_definitions() -> Value {
                 "properties": {
                     "contract_id": { "type": "string", "description": "Active Change Contract ID" },
                     "strict": { "type": "boolean", "description": "Fail if unexpected files modified" },
-                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed" }
+                    "test_evidence": { "type": "boolean", "description": "Whether validation tests passed" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
                 }
             }
         }
@@ -1057,7 +1632,9 @@ pub fn all_tools_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "target": { "type": "string", "description": "Target symbol or file path to inspect" },
-                    "depth": { "type": "integer", "minimum": 1, "maximum": 3, "description": "Dependency traversal depth (default 2)" }
+                    "depth": { "type": "integer", "minimum": 1, "maximum": 3, "description": "Dependency traversal depth (default 2)" },
+                    "max_entities": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Maximum entities per category (default 10)" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum response size in bytes (default 16384)" }
                 },
                 "required": ["target"]
             }
@@ -1489,8 +2066,9 @@ pub fn mcp(root: &Path) -> Result<()> {
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let args = &req["params"]["arguments"];
-                let tool_res = match mcp_call(&root, name, args) {
-                    Ok(v) => v,
+                let byte_limit = resolve_byte_limit(args);
+                let tool_res = match mcp_call_raw(&root, name, args) {
+                    Ok(payload) => enforce_mcp_envelope_boundary(name, payload, byte_limit, &id),
                     Err(e) => tool_error(e.to_string()),
                 };
                 Ok(tool_res)

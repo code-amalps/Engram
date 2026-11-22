@@ -37,3 +37,23 @@ pub mod recovery;
 pub mod setup;
 pub mod storage;
 pub mod telemetry;
+
+pub mod build_info {
+    pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+    pub const GIT_COMMIT: &str = env!("ENGRAM_BUILD_GIT_COMMIT");
+    pub const GIT_DIRTY: &str = env!("ENGRAM_BUILD_GIT_DIRTY");
+    pub const RUSTC_VERSION: &str = env!("ENGRAM_BUILD_RUSTC");
+    pub const BUILD_PROFILE: &str = env!("ENGRAM_BUILD_PROFILE");
+    pub const VERSION_FULL: &str = concat!(
+        env!("CARGO_PKG_VERSION"),
+        "\ncommit: ",
+        env!("ENGRAM_BUILD_GIT_COMMIT"),
+        "\ndirty: ",
+        env!("ENGRAM_BUILD_GIT_DIRTY"),
+        "\nrustc: ",
+        env!("ENGRAM_BUILD_RUSTC"),
+        "\nprofile: ",
+        env!("ENGRAM_BUILD_PROFILE")
+    );
+}
+

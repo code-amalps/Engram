@@ -5,7 +5,94 @@ use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    sync::{Mutex, OnceLock},
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexStateFingerprint {
+    pub workspace_canonical: std::path::PathBuf,
+    pub index_generation: i64,
+    pub files_count: i64,
+    pub files_hash_sum: i64,
+    pub active_entities_count: i64,
+    pub memory_version: String,
+    pub head_revision: String,
+}
+
+pub fn compute_index_fingerprint(root: &Path, conn: &rusqlite::Connection) -> rusqlite::Result<IndexStateFingerprint> {
+    let workspace_canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let index_generation: i64 = conn
+        .query_row(
+            "SELECT CAST(COALESCE(value, '1') AS INTEGER) FROM metadata WHERE key='index_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    let head_revision: String = conn
+        .query_row(
+            "SELECT COALESCE(value, 'initial') FROM metadata WHERE key='head_revision'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "initial".into());
+    let (files_count, files_hash_sum): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(content_hash)), 0) FROM files",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+    let active_entities_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM entity_versions WHERE invalidated_at_revision IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let mem_ver = std::fs::metadata(root.join(".engram").join("memory.yaml"))
+        .and_then(|m| m.modified())
+        .map(|t| format!("{:?}", t))
+        .unwrap_or_else(|_| "none".into());
+
+    Ok(IndexStateFingerprint {
+        workspace_canonical,
+        index_generation,
+        files_count,
+        files_hash_sum,
+        active_entities_count,
+        memory_version: mem_ver,
+        head_revision,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    fingerprint: IndexStateFingerprint,
+    result: ContextResult,
+    last_accessed: std::time::Instant,
+}
+
+static COMPILED_CONTEXT_CACHE: OnceLock<Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
+const MAX_CACHE_ENTRIES: usize = 64;
+
+pub fn clear_context_cache() {
+    if let Some(cache) = COMPILED_CONTEXT_CACHE.get() {
+        if let Ok(mut lock) = cache.lock() {
+            lock.clear();
+        }
+    }
+}
+
+pub fn clear_workspace_cache(root: &Path) {
+    if let Some(cache) = COMPILED_CONTEXT_CACHE.get() {
+        if let Ok(mut lock) = cache.lock() {
+            let canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+            let canon_str = canon.display().to_string();
+            let root_str = root.display().to_string();
+            lock.retain(|k, _| !k.starts_with(&canon_str) && !k.starts_with(&root_str));
+        }
+    }
+}
 
 use crate::analyzer::{ensure_fresh, estimate_tokens, tokens};
 use crate::constitution::{format_constraints, load_constitution};
@@ -118,6 +205,18 @@ pub fn context_scoped_with_detail(
     language: Option<&str>,
     detail_level: crate::budget::DetailLevel,
 ) -> Result<ContextResult> {
+    context_scoped_optimized(root, task, budget, subpath, language, detail_level, None)
+}
+
+pub fn context_scoped_optimized(
+    root: &Path,
+    task: &str,
+    budget: usize,
+    subpath: Option<&str>,
+    language: Option<&str>,
+    detail_level: crate::budget::DetailLevel,
+    target_symbols: Option<&[String]>,
+) -> Result<ContextResult> {
     let normalized_subpath = subpath
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
@@ -132,6 +231,34 @@ pub fn context_scoped_with_detail(
     let root = root_path(root)?;
     ensure_fresh(&root)?;
     let conn = db(&root)?;
+
+    let fingerprint = compute_index_fingerprint(&root, &conn).ok();
+
+    let canon_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let cache_key = format!(
+        "{}:{}:{}:{}:{}:{:?}:{:?}",
+        canon_root.display(),
+        task,
+        budget,
+        subpath.unwrap_or(""),
+        language.unwrap_or(""),
+        detail_level,
+        target_symbols
+    );
+
+    if let Some(ref fp) = fingerprint {
+        if let Some(cache) = COMPILED_CONTEXT_CACHE.get() {
+            if let Ok(mut guard) = cache.lock() {
+                if let Some(entry) = guard.get_mut(&cache_key) {
+                    if &entry.fingerprint == fp {
+                        entry.last_accessed = std::time::Instant::now();
+                        return Ok(entry.result.clone());
+                    }
+                }
+            }
+        }
+    }
+
     let terms = tokens(task);
 
     // 1. Load active constitution constraints
@@ -503,6 +630,7 @@ pub fn context_scoped_with_detail(
     used += overhead_tokens;
 
     let mut all_selected_symbols = Vec::new();
+    let mut seen_signatures = HashSet::<String>::new();
 
     for (path, score) in candidates {
         let (lang, body) = match doc_map.get(&path) {
@@ -534,17 +662,79 @@ pub fn context_scoped_with_detail(
             }
         }
 
+        // Task-aware symbol ranking within the file
+        let compute_symbol_score = |sym_name: &str, sym_sig: &str| -> f64 {
+            let mut sym_score = 0.0;
+            let sym_lower = sym_name.to_ascii_lowercase();
+            if let Some(targets) = target_symbols {
+                if targets.iter().any(|t| t.eq_ignore_ascii_case(sym_name)) {
+                    sym_score += 5000.0;
+                }
+            }
+            if potential_symbols.iter().any(|ps| ps.eq_ignore_ascii_case(sym_name)) {
+                sym_score += 2000.0;
+            }
+            for term in &terms {
+                if sym_lower == *term {
+                    sym_score += 1000.0;
+                } else if sym_lower.contains(term) && term.len() >= 3 {
+                    sym_score += 300.0;
+                } else if sym_sig.to_ascii_lowercase().contains(term) && term.len() >= 3 {
+                    sym_score += 100.0;
+                }
+            }
+            sym_score
+        };
+
+        syms_meta.sort_by(|a, b| {
+            let sa = compute_symbol_score(&a.1, &a.5);
+            let sb = compute_symbol_score(&b.1, &b.5);
+            sb.total_cmp(&sa).then_with(|| a.3.cmp(&b.3))
+        });
+
+        let has_targeted_symbols = target_symbols.is_some() || syms_meta.iter().any(|s| compute_symbol_score(&s.1, &s.5) >= 1000.0);
+
         let body_lines: Vec<&str> = body.lines().collect();
         let remaining_tokens = limit.saturating_sub(used);
         let max_chars = remaining_tokens.saturating_mul(4).max(220);
 
         let mut content = format!("FILE {path} [{lang}]\n");
 
-        if !syms_meta.is_empty() {
+        if detail_level == crate::budget::DetailLevel::Compact {
+            content.push_str("SYMBOLS (COMPACT METADATA):\n");
+            for (_ent_id, name, kind, start_line, end_line, sig) in &syms_meta {
+                let sig_key = format!("{}::{}", name, sig);
+                if seen_signatures.contains(&sig_key) {
+                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"));
+                    continue;
+                }
+                seen_signatures.insert(sig_key);
+                content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"));
+            }
+        } else if !syms_meta.is_empty() {
             content.push_str("SYMBOLS & CODE EXCERPTS:\n");
             let mut chars_available = max_chars.saturating_sub(content.len());
 
             for (ent_id, name, kind, start_line, end_line, sig) in &syms_meta {
+                let sym_score = compute_symbol_score(name, sig);
+                let is_requested = if has_targeted_symbols {
+                    sym_score >= 1000.0
+                } else {
+                    true
+                };
+
+                let sig_key = format!("{}::{}", name, sig);
+                if seen_signatures.contains(&sig_key) {
+                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"));
+                    continue;
+                }
+                seen_signatures.insert(sig_key);
+
+                if !is_requested {
+                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"));
+                    continue;
+                }
+
                 if chars_available < 60 {
                     content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [TRUNCATED: Budget Exceeded]\n"));
                     continue;
@@ -799,7 +989,7 @@ pub fn context_scoped_with_detail(
         omission_manifest: omissions,
     };
 
-    Ok(ContextResult {
+    let final_res = ContextResult {
         task: task.into(),
         project: root
             .file_name()
@@ -821,7 +1011,32 @@ pub fn context_scoped_with_detail(
         subpath_filter: normalized_subpath,
         language_filter: canonical_lang.map(String::from),
         omission_manifest: Some(omission_manifest),
-    })
+    };
+
+    if let Some(fp) = fingerprint {
+        let cache = COMPILED_CONTEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(mut guard) = cache.lock() {
+            if guard.len() >= MAX_CACHE_ENTRIES {
+                if let Some((oldest_key, _)) = guard
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.last_accessed)
+                    .map(|(k, v)| (k.clone(), v.last_accessed))
+                {
+                    guard.remove(&oldest_key);
+                }
+            }
+            guard.insert(
+                cache_key,
+                CacheEntry {
+                    fingerprint: fp,
+                    result: final_res.clone(),
+                    last_accessed: std::time::Instant::now(),
+                },
+            );
+        }
+    }
+
+    Ok(final_res)
 }
 
 pub fn format_explain(res: &ContextResult) -> String {

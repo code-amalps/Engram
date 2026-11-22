@@ -52,7 +52,7 @@ use storage::{cache_dir, project_id, root_path};
 #[derive(Parser)]
 #[command(
     name = "engram",
-    version,
+    version = engram::build_info::VERSION_FULL,
     about = "Local engineering memory and change intelligence for AI coding agents"
 )]
 struct Cli {

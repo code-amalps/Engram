@@ -112,6 +112,8 @@ impl PriorityTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DetailLevel {
+    /// Compact signatures and metadata only (no excerpt bodies).
+    Compact,
     /// Contracted signatures by default (empty structural bodies `{ /* ... */ }`).
     Contracted,
     /// Complete implementation blocks when explicitly opted-in.

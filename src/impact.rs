@@ -411,6 +411,25 @@ pub fn is_external_node(
     classify_dependency(node, rel_is_ext, kind, workspace_files) == DependencyClassification::External
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ImpactBudgetOptions {
+    pub max_depth: usize,
+    pub max_entities_per_category: usize,
+    pub max_relationships_per_entity: usize,
+    pub prioritize_workspace: bool,
+}
+
+impl Default for ImpactBudgetOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: 2,
+            max_entities_per_category: 10,
+            max_relationships_per_entity: 5,
+            prioritize_workspace: true,
+        }
+    }
+}
+
 /// Compute the multi-hop Impact Cone for a given target symbol or file.
 pub fn compute_impact_cone(
     conn: &Connection,
@@ -418,8 +437,33 @@ pub fn compute_impact_cone(
     target: &str,
     max_depth: usize,
 ) -> Result<ImpactCone> {
+    compute_impact_cone_with_budget(
+        conn,
+        root,
+        target,
+        ImpactBudgetOptions {
+            max_depth,
+            max_entities_per_category: usize::MAX,
+            max_relationships_per_entity: usize::MAX,
+            prioritize_workspace: false,
+        },
+    )
+    .map(|(cone, _)| cone)
+}
+
+/// Compute the multi-hop Impact Cone with deterministic budgeting and omission tracking.
+pub fn compute_impact_cone_with_budget(
+    conn: &Connection,
+    root: &Path,
+    target: &str,
+    opts: ImpactBudgetOptions,
+) -> Result<(ImpactCone, Vec<crate::budget::OmissionEntry>)> {
     let _root = root_path(root)?;
-    let max_depth = if max_depth == 0 { 0 } else { max_depth.min(3) };
+    let max_depth = if opts.max_depth == 0 {
+        0
+    } else {
+        opts.max_depth.min(3)
+    };
     let normalized_path_target = target.trim().replace('\\', "/");
     let trimmed_target = normalized_path_target.as_str();
     let norm_target = crate::go_parser::normalize_go_symbol_name(trimmed_target);
@@ -769,6 +813,7 @@ pub fn compute_impact_cone(
                     prov,
                     is_ext,
                     classification,
+                    opts.max_relationships_per_entity,
                 );
 
                 if is_ext {
@@ -992,6 +1037,7 @@ pub fn compute_impact_cone(
                     prov,
                     is_ext,
                     classification,
+                    opts.max_relationships_per_entity,
                 );
 
                 if is_ext {
@@ -1064,6 +1110,7 @@ pub fn compute_impact_cone(
                     prov,
                     false,
                     DependencyClassification::Workspace,
+                    opts.max_relationships_per_entity,
                 );
 
                 visited_nodes.insert(partner.clone());
@@ -1098,8 +1145,13 @@ pub fn compute_impact_cone(
 
     // Sort entities within each category by hop distance, then path, then symbol name for deterministic outputs
     let sort_fn = |a: &ImpactEntity, b: &ImpactEntity| {
-        a.hop_distance
-            .cmp(&b.hop_distance)
+        let ext_cmp = if opts.prioritize_workspace {
+            a.is_external.cmp(&b.is_external)
+        } else {
+            std::cmp::Ordering::Equal
+        };
+        ext_cmp
+            .then_with(|| a.hop_distance.cmp(&b.hop_distance))
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.symbol_name.cmp(&b.symbol_name))
     };
@@ -1111,6 +1163,38 @@ pub fn compute_impact_cone(
     import_dependent_entities.sort_by(sort_fn);
     historical_entities.sort_by(sort_fn);
     configuration_entities.sort_by(sort_fn);
+
+    // Prune categories to budget and record omissions
+    let mut omissions = Vec::new();
+    if opts.max_entities_per_category < usize::MAX {
+        let mut prune_category = |entities: &mut Vec<ImpactEntity>, cat_name: &str, priority: usize| {
+            if entities.len() > opts.max_entities_per_category {
+                let dropped = entities.split_off(opts.max_entities_per_category);
+                for item in dropped {
+                    omissions.push(crate::budget::OmissionEntry {
+                        context_item_id: item.entity_id.clone(),
+                        symbol: item.symbol_name.clone(),
+                        file: item.path.clone(),
+                        context_type: cat_name.to_string(),
+                        priority_tier: priority,
+                        original_token_count: 50,
+                        included_token_count: 0,
+                        omitted_token_count: 50,
+                        omission_reason: format!("Exceeded max_entities_per_category limit ({})", opts.max_entities_per_category),
+                        omission_status: "CAPACITY_PRUNED".to_string(),
+                        retrievable_via_targeted_request: true,
+                    });
+                }
+            }
+        };
+
+        prune_category(&mut import_dependent_entities, "IMPORT_DEPENDENT", 3);
+        prune_category(&mut caller_entities, "CALLER", 3);
+        prune_category(&mut implementation_entities, "IMPLEMENTATION", 2);
+        prune_category(&mut test_entities, "TEST", 5);
+        prune_category(&mut historical_entities, "HISTORICAL", 5);
+        prune_category(&mut configuration_entities, "CONFIGURATION", 3);
+    }
 
     // Also sort relationships within each entity deterministically
     let sort_rel = |a: &ImpactRelationship, b: &ImpactRelationship| {
@@ -1198,7 +1282,7 @@ pub fn compute_impact_cone(
 
     cone.metrics = Some(metrics);
 
-    Ok(cone)
+    Ok((cone, omissions))
 }
 
 fn record_or_merge_entity(
@@ -1211,6 +1295,7 @@ fn record_or_merge_entity(
     reason: String,
     is_external: bool,
     classification: DependencyClassification,
+    max_relationships_per_entity: usize,
 ) {
     let key = file_path.to_string();
     let entry = entities.entry(key).or_insert_with(|| ImpactEntity {
@@ -1241,7 +1326,18 @@ fn record_or_merge_entity(
         entry.classification = classification;
     }
     entry.is_external = entry.classification == DependencyClassification::External;
-    entry.relationships.push(rel);
+    
+    // Deduplicate and cap relationships
+    if !entry.relationships.iter().any(|r| {
+        r.source == rel.source
+            && r.target == rel.target
+            && r.category == rel.category
+            && r.provenance == rel.provenance
+    }) {
+        if entry.relationships.len() < max_relationships_per_entity {
+            entry.relationships.push(rel);
+        }
+    }
 }
 
 fn parse_evidence_tier(tier: &str) -> EvidenceTier {

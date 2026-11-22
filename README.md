@@ -210,6 +210,18 @@ Engram supports both MCP-connected IDEs and non-MCP environments through a non-d
 
 No compiler, Node.js, or Python runtime required.
 
+> [!NOTE]
+> **Latest Developer Preview: v1.5.4 Candidate 5 (Windows x64)**  
+> To test the latest AST context engine, dual-tier MCP surface, and deterministic change-guard contracts:  
+> 1. Download [**`engram-preview-v1.5.4-cand5-clean-windows-x64.zip`**](https://github.com/code-amalps/Engram/releases/tag/v1.5.4-cand5) from [GitHub Releases](https://github.com/code-amalps/Engram/releases/tag/v1.5.4-cand5).  
+> 2. Verify archive integrity in PowerShell:  
+>    ```powershell
+>    Get-FileHash .\engram-preview-v1.5.4-cand5-clean-windows-x64.zip -Algorithm SHA256
+>    # Expected: CDD34117E217C44DE0C0F2BD860C04A64350EAEF500A4FC1B39FCABE9B85FF2E
+>    ```  
+> 3. Extract `bin\engram.exe` to a folder on your `PATH`. Verify with `engram --version`.  
+> 4. Review the [Known Limitations Register](docs/governance/KNOWN_LIMITATIONS_REGISTER.md) and [Security Policy](docs/security-and-privacy.md).
+
 #### Windows Installation
 
 **Option A: 1-Click GUI Installer (`.exe`) [Recommended for Windows & Factory.ai]**

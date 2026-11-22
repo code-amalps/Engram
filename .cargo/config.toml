@@ -1,0 +1,7 @@
+# Engram Cargo Configuration for Deterministic Builds
+# Target: Windows x86_64 MSVC Linker
+
+[target.x86_64-pc-windows-msvc]
+# /BREPRO instructs link.exe to eliminate nondeterministic timestamps in COFF header
+# and generate deterministic CodeView PDB GUIDs from input object hashes.
+rustflags = ["-C", "link-arg=/BREPRO"]

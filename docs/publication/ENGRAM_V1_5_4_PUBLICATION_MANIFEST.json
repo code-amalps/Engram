@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.3.0",
+  "publication_status": "READY_FOR_PUBLICATION_EXECUTION",
+  "publication_target": {
+    "repository": "code-amalps/Engram",
+    "branch": "feature/phase2-stage5-remediation",
+    "target_commit": "2df1cac683435314ffd7ad52369e6d20198fae0d",
+    "proposed_tag": "v1.5.4-cand5",
+    "release_title": "Engram v1.5.4 Candidate 5",
+    "prerelease": true,
+    "draft": false,
+    "latest_stable": false
+  },
+  "asset_specification": {
+    "filename": "engram-preview-v1.5.4-cand5-clean-windows-x64.zip",
+    "relative_path": "releases/engram-preview-v1.5.4-cand5-clean-windows-x64.zip",
+    "size_bytes": 4303797,
+    "sha256": "CDD34117E217C44DE0C0F2BD860C04A64350EAEF500A4FC1B39FCABE9B85FF2E",
+    "mime_type": "application/zip",
+    "platform": "windows-x64",
+    "executable_sha256": "1C5DD68B499298ACE1F6BFFBB4028951DD30C63500604CB355CC0A307E09AD38",
+    "executable_version": "1.5.4"
+  },
+  "package_inventory": {
+    "total_files": 16,
+    "payload_files": 14,
+    "metadata_files": 2,
+    "archive_integrity_verified": true,
+    "byte_for_byte_extraction_verified": true
+  },
+  "build_provenance": {
+    "distribution_binary_status": {
+      "role": "Official Distribution Executable (Option B Clean Build)",
+      "commit": "625461beb76d1b87027f9687e2fa010ee2973f2c",
+      "dirty": false,
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "profile": "release",
+      "sha256": "1C5DD68B499298ACE1F6BFFBB4028951DD30C63500604CB355CC0A307E09AD38",
+      "offline_build_exit_code": 0,
+      "provenance_reconciliation": "Demonstrated 100% core code identity via PE section parsing. 0 bytes difference across .text, .data, .pdata, and .reloc. Only 24 bytes difference due to MSVC linker TimeDateStamp and random CodeView PDB GUID.",
+      "rationale": "Pristine AGPL-3.0 source correspondence, dirty: false metadata, 100% reproducible from committed Git tree"
+    },
+    "historical_benchmark_binary_status": {
+      "role": "Preserved Historical Benchmark Baseline (Option A)",
+      "commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+      "dirty": true,
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "profile": "release",
+      "sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+      "archive_sha256": "7C355109EEB8BE7B08301080FD660DE4A4A23DD12AFE89F008546C32FB3C1741",
+      "rationale": "Maintains 100% cryptographic continuity to Phase 5.9.2.5 offline deterministic benchmarks and Phase 5.9.2.6 audit"
+    }
+  },
+  "benchmark_provenance": {
+    "provenance_marker": "SYNTHETIC_SIMULATED_USAGE",
+    "simulation_protocol": "v3.0.0",
+    "seed": 59002,
+    "workloads_count": 6,
+    "candidate5_wire_tokens": 7589,
+    "native_wire_tokens": 30113,
+    "candidate5_wire_tokens_ex_workload_e": 6550,
+    "native_wire_tokens_ex_workload_e": 10512,
+    "live_provider_usage_measured": false,
+    "financial_savings_claimed": false
+  },
+  "compliance_audit": {
+    "license_file_present": true,
+    "license_type": "GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)",
+    "cargo_toml_license": "AGPL-3.0-or-later",
+    "security_disclosure_present": true,
+    "security_doc_path": "docs/security-and-privacy.md",
+    "archive_secret_scan_findings": 0,
+    "proposed_tag": "v1.5.4-cand5",
+    "tag_collision_checked": true,
+    "tag_collisions_found": 0,
+    "legal_review_status": "LEGAL_REVIEW_PENDING"
+  },
+  "validation_metrics": {
+    "total_offline_assertions": 235,
+    "assertions_passed": 235,
+    "assertions_failed": 0,
+    "actual_mcp_integration_scenarios": 8,
+    "security_reliability_scenarios": 5,
+    "archive_smoke_scenarios": 8
+  }
+}

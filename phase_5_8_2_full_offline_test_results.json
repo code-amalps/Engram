@@ -1,0 +1,72 @@
+{
+  "phase": "5.8.2",
+  "audit_type": "INDEPENDENT_TEST_RECONCILIATION_AND_REAUDIT",
+  "execution_mode": "STRICTLY_OFFLINE",
+  "timestamp": "2026-11-22T06:35:26Z",
+  "reconciliation_findings": {
+    "phase_5_8_1_header_claimed_rust": 146,
+    "phase_5_8_1_header_claimed_python": 21,
+    "phase_5_8_1_header_claimed_total": 167,
+    "phase_5_8_1_table_sum_rust": 151,
+    "phase_5_8_1_table_sum_python": 21,
+    "phase_5_8_1_table_sum_total": 172,
+    "reconciliation_explanation": "Phase 5.8.1 summary header omitted one 5-test target (151 - 5 = 146). The true count of the curated focal suite is 151 Rust tests and 21 Python tests (total 172)."
+  },
+  "focal_regression_suite_summary": {
+    "total_targets": 11,
+    "total_rust_tests": 151,
+    "rust_passed": 151,
+    "rust_failed": 0,
+    "total_python_tests": 21,
+    "python_passed": 21,
+    "python_failed": 0,
+    "total_focal_tests": 172,
+    "pass_rate_pct": 100.0
+  },
+  "full_repository_suite_summary": {
+    "total_rust_binaries": 54,
+    "total_rust_tests": 659,
+    "rust_passed": 659,
+    "rust_failed": 0,
+    "rust_ignored": 0,
+    "total_python_tests": 21,
+    "python_passed": 21,
+    "python_failed": 0,
+    "total_tests_executed": 680,
+    "pass_rate_pct": 100.0,
+    "verdict": "100_PERCENT_OFFLINE_TEST_PASS"
+  },
+  "focal_rust_targets": [
+    { "target": "src/lib.rs", "tests": 24, "passed": 24, "failed": 0 },
+    { "target": "src/main.rs", "tests": 35, "passed": 35, "failed": 0 },
+    { "target": "tests/ast_extraction_test.rs", "tests": 13, "passed": 13, "failed": 0 },
+    { "target": "tests/cache_invalidation_test.rs", "tests": 13, "passed": 13, "failed": 0 },
+    { "target": "tests/query_router_test.rs", "tests": 15, "passed": 15, "failed": 0 },
+    { "target": "tests/storage_migration_test.rs", "tests": 11, "passed": 11, "failed": 0 },
+    { "target": "tests/telemetry_test.rs", "tests": 8, "passed": 8, "failed": 0 },
+    { "target": "tests/token_efficiency_test.rs", "tests": 5, "passed": 5, "failed": 0 },
+    { "target": "tests/turn0_injection_test.rs", "tests": 5, "passed": 5, "failed": 0 },
+    { "target": "tests/turn0_phase1_test.rs", "tests": 8, "passed": 8, "failed": 0 },
+    { "target": "tests/utf8_safety_test.rs", "tests": 14, "passed": 14, "failed": 0 }
+  ],
+  "python_suites": [
+    {
+      "suite": "benchmarks/matched-pair-harness/tests/test_tetrad_harness.py",
+      "framework": "pytest",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "duration_seconds": 67.48,
+      "scope": "Historical 4-arm tetrad backward compatibility"
+    },
+    {
+      "suite": "benchmarks/matched-pair-harness/tests/test_pentad_harness.py",
+      "framework": "pytest",
+      "tests": 20,
+      "passed": 20,
+      "failed": 0,
+      "duration_seconds": 466.53,
+      "scope": "Phase 5.8.1 5-arm pentad harness acceptance matrix"
+    }
+  ]
+}

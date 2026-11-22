@@ -1,0 +1,283 @@
+{
+  "schema_version": "2.0.0",
+  "phase_identifier": "5.4.24",
+  "baseline_branch": "feature/phase2-stage5-remediation",
+  "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "execution_mode": "STRICTLY_OFFLINE_READ_ONLY_ADVERSARIAL_FORENSIC_AUDIT",
+  "timestamp_utc": "2026-11-20T05:30:00Z",
+  "authorization_status": "NOT_AUTHORIZED",
+  "verdict": "AUDIT_DETECT_ONLY",
+  "final_guarantee_classification": "DETECT_AND_ABORT_ONLY",
+  "verdict_rationale": "The benchmark harness provides strict post-turn detection, automated acceptance rejection (Criterion 7), and immediate tetrad block aborts. However, because remote LLM providers emit token usage in discrete batches upon turn completion, in-flight token consumption cannot be observed or prevented mid-generation. Single-turn overshoot of up to ~20,000-31,500 tokens is structurally unpreventable but strictly non-compounding.",
+  "source_files_inspected": [
+    "benchmarks/matched-pair-harness/src/orchestrator.py",
+    "benchmarks/matched-pair-harness/src/runner.py",
+    "benchmarks/matched-pair-harness/src/telemetry.py",
+    "benchmarks/matched-pair-harness/src/isolation.py"
+  ],
+  "components_audited": [
+    {
+      "component": "Orchestrator.run_tetrad",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:2218-2239",
+      "enforcement_type": "PREVENTIVE",
+      "enforcement_point": "Pre-Arm Dispatch",
+      "description": "Enforces global headroom gate (G_rem >= 45,000) and clamps effective arm ceiling min(A_ceiling, G_rem)."
+    },
+    {
+      "component": "Orchestrator._execute_single_arm",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:1541-1634",
+      "enforcement_type": "PREVENTIVE",
+      "enforcement_point": "Arm Setup",
+      "description": "Sets runner max_tokens_ceiling to effective arm ceiling; provisions isolated sandbox."
+    },
+    {
+      "component": "CodexRunner.run",
+      "location": "benchmarks/matched-pair-harness/src/runner.py:702-952",
+      "enforcement_type": "PREVENTIVE_AND_DETECTIVE",
+      "enforcement_point": "Subprocess Loop",
+      "description": "Runs 50ms polling loop, reads stdout, tails session rollout, breaks on timeout, headroom trigger, or ceiling breach."
+    },
+    {
+      "component": "StreamingTokenTracker.process_line",
+      "location": "benchmarks/matched-pair-harness/src/runner.py:124-346",
+      "enforcement_type": "DETECTIVE",
+      "enforcement_point": "Streaming Line",
+      "description": "Parses token_usage_record, event_msg, and turn.completed; reconciles snapshots vs turn deltas; deduplicates events."
+    },
+    {
+      "component": "StreamingTokenTracker.check_pre_dispatch_headroom",
+      "location": "benchmarks/matched-pair-harness/src/runner.py:414-463",
+      "enforcement_type": "PREVENTIVE",
+      "enforcement_point": "Turn Boundary",
+      "description": "Prevents dispatching next turn if remaining < max(last_turn_request_tokens, 45,000)."
+    },
+    {
+      "component": "StreamingTokenTracker.is_guaranteed_pre_dispatch_boundary",
+      "location": "benchmarks/matched-pair-harness/src/runner.py:386-393",
+      "enforcement_type": "DETECTIVE",
+      "enforcement_point": "Boundary Evaluation",
+      "description": "Always returns False: confirms external 50ms polling cannot guarantee pre-dispatch interception."
+    },
+    {
+      "component": "terminate_pid_tree",
+      "location": "benchmarks/matched-pair-harness/src/isolation.py:70-87",
+      "enforcement_type": "HALTING",
+      "enforcement_point": "Process Lifecycle",
+      "description": "Executes taskkill /F /T /PID on Windows to terminate child process and all descendants."
+    },
+    {
+      "component": "Orchestrator._execute_single_arm (Post-Telemetry)",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:1666-1675",
+      "enforcement_type": "DETECTIVE",
+      "enforcement_point": "Post-Arm Parsing",
+      "description": "Overrides execution_status to TOKEN_CEILING_BREACHED and score to 0.0 if total_model_tokens > effective_ceiling."
+    },
+    {
+      "component": "Orchestrator.validate_telemetry_integrity",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:719-800",
+      "enforcement_type": "ACCEPTANCE_PROTECTION",
+      "enforcement_point": "Telemetry Validation",
+      "description": "Validates mathematical invariants: prompt + completion == total, cached + uncached == prompt."
+    },
+    {
+      "component": "Orchestrator.is_run_accepted",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:945-980",
+      "enforcement_type": "ACCEPTANCE_PROTECTION",
+      "enforcement_point": "Run Acceptance",
+      "description": "Criterion 7 formally rejects any run where total_model_tokens > configured_ceiling."
+    },
+    {
+      "component": "Orchestrator.run_tetrad (Safety Tripwire)",
+      "location": "benchmarks/matched-pair-harness/src/orchestrator.py:2258-2289",
+      "enforcement_type": "HALTING",
+      "enforcement_point": "Tetrad Loop",
+      "description": "Raises SafetyViolationError on ceiling breach; halts tetrad block with ABORTED_SAFETY_FAILURE, skipping remaining arms."
+    }
+  ],
+  "token_accounting_semantics": {
+    "prompt_tokens_cached_double_counting_prevented": true,
+    "reasoning_tokens_double_counting_prevented": true,
+    "invariant_prompt_plus_completion_equals_total": true,
+    "invariant_cached_plus_uncached_equals_prompt": true,
+    "reasoning_tokens_is_submetric_of_completion": true,
+    "observation_mode": "POST_TURN_BATCH_METRICS",
+    "in_flight_token_observability": "NONE_DURING_ACTIVE_GENERATION"
+  },
+  "process_cancellation_evaluation": {
+    "cancellation_triggers": [
+      "timeout_seconds elapsed",
+      "pre_dispatch_guard_triggered (remaining < 45,000 reserve)",
+      "token_ceiling_breached (effective_tokens > max_tokens_ceiling)",
+      "safety violation or unhandled exception"
+    ],
+    "detection_nature": "ASYNCHRONOUS_50MS_POLLING",
+    "cancellation_execution": "SYNCHRONOUS_ON_RUNNER_THREAD",
+    "local_termination_mechanism": "taskkill /F /T /PID <pid> followed by proc.kill() and proc.wait(1.0)",
+    "measured_local_termination_latency_ms": 298.56,
+    "trailing_buffer_reconciled": true,
+    "post_cancellation_success_possible": false,
+    "remote_provider_termination_guaranteed": false,
+    "remote_provider_limitation_explanation": "Closing the local socket sends TCP RST/FIN. Tokens already queued or in transit on provider GPUs before disconnect detection are billed. Upstream API does not provide mid-request token refunds."
+  },
+  "scenario_13_reproduction": {
+    "global_remaining": 100000,
+    "effective_arm_ceiling": 100000,
+    "provider_reported_tokens": 120000,
+    "overshoot_tokens": 20000,
+    "tracker_detected_crossing": true,
+    "post_telemetry_status_override": "TOKEN_CEILING_BREACHED",
+    "accepted_by_criterion_7": false,
+    "tetrad_block_status": "ABORTED_SAFETY_FAILURE",
+    "downstream_arms_dispatched": 0,
+    "downstream_arms_status": "SKIPPED_SAFETY_FAILURE",
+    "tokens_consumed_before_detection": 120000
+  },
+  "overshoot_bounds": {
+    "maximum_demonstrated_overshoot_tokens": 20000,
+    "maximum_theoretical_single_turn_overshoot_tokens": 31384,
+    "cascading_overshoot_possible": false,
+    "explanation": "Because any ceiling breach halts the tetrad block immediately and marks downstream arms SKIPPED_SAFETY_FAILURE, the total overshoot for the tetrad is strictly bounded to the single turn that breached the ceiling."
+  },
+  "adversarial_simulation_results": {
+    "total_scenarios": 20,
+    "passed": 20,
+    "failed": 0,
+    "scenarios": [
+      {"id": "B01", "result": "PASS", "description": "Usage remains below ceiling"},
+      {"id": "B02", "result": "PASS", "description": "Usage reaches ceiling during streaming"},
+      {"id": "B03", "result": "PASS", "description": "Usage crosses ceiling in a streaming event"},
+      {"id": "B04", "result": "PASS", "description": "Usage event arrives only after turn completion"},
+      {"id": "B05", "result": "PASS", "description": "Usage events arrive in batches"},
+      {"id": "B06", "result": "PASS", "description": "Duplicate usage event deduplication"},
+      {"id": "B07", "result": "PASS", "description": "Delayed usage event after cancellation"},
+      {"id": "B08", "result": "PASS", "description": "Out-of-order usage events preserved"},
+      {"id": "B09", "result": "PASS", "description": "Missing final usage event fails closed"},
+      {"id": "B10", "result": "PASS", "description": "Malformed usage event fails closed"},
+      {"id": "B11", "result": "PASS", "description": "Provider usage exceeds local estimate"},
+      {"id": "B12", "result": "PASS", "description": "Scenario 13 reproduction rejected"},
+      {"id": "B13", "result": "PASS", "description": "Process cancellation latency benchmark"},
+      {"id": "B14", "result": "PASS", "description": "Child process ignores graceful termination"},
+      {"id": "B15", "result": "PASS", "description": "Child process confirmed dead post-cancellation"},
+      {"id": "B16", "result": "PASS", "description": "Buffered usage arrives after process termination"},
+      {"id": "B17", "result": "PASS", "description": "Global budget exhausted during Arm 2"},
+      {"id": "B18", "result": "PASS", "description": "Diagnostic continuation during budget violation"},
+      {"id": "B19", "result": "PASS", "description": "Two overlapping usage callbacks thread safe"},
+      {"id": "B20", "result": "PASS", "description": "Final aggregate reaches global ceiling"}
+    ]
+  },
+  "regression_summary": {
+    "total_suites": 8,
+    "total_tests": 86,
+    "passed": 86,
+    "failed": 0,
+    "skipped": 0,
+    "all_exit_codes_zero": true,
+    "total_duration_seconds": 355.20,
+    "suite_results": [
+      {
+        "suite": "test_candidate_selection.py",
+        "duration_seconds": 1.16,
+        "exit_code": 0,
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_telemetry_semantics.py",
+        "duration_seconds": 1.60,
+        "exit_code": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_candidate_4_2_offline_certification.py",
+        "duration_seconds": 8.35,
+        "exit_code": 0,
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_task_b_budget_simulation.py",
+        "duration_seconds": 1.05,
+        "exit_code": 0,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_diagnostic_continuation.py",
+        "duration_seconds": 87.99,
+        "exit_code": 0,
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_tetrad_harness.py",
+        "duration_seconds": 47.78,
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_per_arm_candidate_identity.py",
+        "duration_seconds": 186.58,
+        "exit_code": 0,
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "test_phase_5_4_23_safety_remediation.py",
+        "duration_seconds": 20.69,
+        "exit_code": 0,
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "artifact_integrity_results": {
+    "branch_unchanged": true,
+    "head_unchanged": true,
+    "cand3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+    "cand4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+    "golden_repo_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "working_tree_preservation": true
+  },
+  "findings": [
+    {
+      "finding_id": "ENGRAM-5424-01",
+      "severity": "INFO",
+      "status": "PASS",
+      "title": "Detective-Only In-Flight Enforcement",
+      "explanation": "Active-turn model generation cannot be incrementally observed or prevented mid-turn because upstream LLM APIs report usage in discrete batches at turn completion. The system is inherently DETECT_AND_ABORT_ONLY during active generation."
+    },
+    {
+      "finding_id": "ENGRAM-5424-02",
+      "severity": "INFO",
+      "status": "PASS",
+      "title": "Local Process Termination vs Remote Provider Disconnect",
+      "explanation": "taskkill /F /T terminates local child processes in <300ms, closing network sockets. However, remote provider token billing cannot be refunded or guaranteed stopped instantaneously upon socket reset."
+    },
+    {
+      "finding_id": "ENGRAM-5424-03",
+      "severity": "INFO",
+      "status": "PASS",
+      "title": "Single-Turn Overshoot Bound & Non-Compounding Guarantee",
+      "explanation": "Single-turn overshoot is bounded to at most ~31,500 tokens (demonstrated 20,000 tokens). Cascading multi-turn or multi-arm overshoot is strictly prevented by immediate tetrad block aborts."
+    },
+    {
+      "finding_id": "ENGRAM-5424-04",
+      "severity": "INFO",
+      "status": "PASS",
+      "title": "Regression and Cryptographic Integrity",
+      "explanation": "Full 8-suite regression passed 86/86 tests with zero regressions; baseline hashes and working-tree modifications strictly preserved."
+    }
+  ],
+  "outstanding_blockers": []
+}

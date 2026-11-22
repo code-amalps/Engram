@@ -1,0 +1,188 @@
+{
+  "phase": "5.4.27",
+  "audit_type": "RELEASE_READINESS_AND_TECHNICAL_PREVIEW_CERTIFICATION",
+  "audit_mode": "STRICTLY_OFFLINE_READ_ONLY",
+  "timestamp": "2026-11-20T12:03:00+05:30",
+  "baseline": {
+    "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "branch": "feature/phase2-stage5-remediation",
+    "repository_path": "c:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+    "golden_repository_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7"
+  },
+  "working_tree_status": {
+    "staged_changes_count": 0,
+    "unstaged_modified_files_count": 9,
+    "unstaged_modified_files": [
+      "benchmarks/matched-pair-harness/schemas/run_telemetry.schema.json",
+      "benchmarks/matched-pair-harness/src/classifier.py",
+      "benchmarks/matched-pair-harness/src/evaluator.py",
+      "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "benchmarks/matched-pair-harness/src/runner.py",
+      "benchmarks/matched-pair-harness/src/telemetry.py",
+      "src/impact.rs",
+      "src/mcp.rs",
+      "src/storage.rs"
+    ],
+    "untracked_reports_count": 55,
+    "working_tree_discrepancy_explanation": "In previous turn opening command, git status ran in shell default directory AMstraLift which was on branch Dev and clean. Running git status in Engram confirms 9 tracked files have remained continuously unstaged across phases 5.4.17 through 5.4.27.",
+    "evidence_source": "git -C '...' status --short",
+    "confidence": "ABSOLUTE"
+  },
+  "product_and_binary_identity": {
+    "product_name": "Engram",
+    "product_version": "1.5.4",
+    "license": "AGPL-3.0-or-later",
+    "executable_name": "engram.exe",
+    "release_binary_path": "target\\release\\engram.exe",
+    "release_binary_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "candidate_4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "candidate_3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+    "installer_sha256": "6AEB32D84078190D5C519EE71703DBFABA1E25DA5C43A302EE3CF716F8229D76",
+    "is_benchmark_harness_part_of_product": false,
+    "standalone_operation_capable": true,
+    "embedded_database": "SQLite 3 (statically bundled via rusqlite)",
+    "embedded_parsers": "Tree-sitter (Rust, Go, TypeScript, JavaScript, Python, C#, Java)",
+    "evidence_source": "Cargo.toml, Get-FileHash, scripts/build_installer.ps1",
+    "confidence": "HIGH"
+  },
+  "build_reproducibility": {
+    "classification": "REPRODUCIBILITY_PARTIAL",
+    "lockfile_present": true,
+    "release_profile_optimized": true,
+    "pinned_rust_toolchain_present": false,
+    "git_commit_embedded_in_binary": false,
+    "uncommitted_working_tree_files_affect_build": true,
+    "compiler_version_on_host": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "evidence_source": "Cargo.lock, rustc --version, engram.exe --version",
+    "confidence": "HIGH"
+  },
+  "test_evidence": {
+    "classification": "TEST_EVIDENCE_AUTHENTIC_AND_VERIFIED",
+    "benchmark_harness_regression": {
+      "suites_count": 8,
+      "total_tests": 86,
+      "passed": 86,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 627.90,
+      "exit_code": 0,
+      "evidence_level": "PRODUCTION_COMPONENT_AND_MOCKED"
+    },
+    "installer_safety_test": {
+      "tests_passed": 8,
+      "tests_failed": 0,
+      "exit_code": 0,
+      "evidence_level": "PRODUCTION_PATH"
+    },
+    "attestation_policy_test": {
+      "tests_passed": 5,
+      "tests_failed": 0,
+      "exit_code": 0,
+      "evidence_level": "PRODUCTION_PATH"
+    },
+    "runtime_smoke_test": {
+      "subcommands_verified": ["--version", "init", "analyze", "bench", "doctor"],
+      "exit_code": 0,
+      "evidence_level": "PRODUCTION_PATH"
+    },
+    "evidence_source": "regression_summary.json, installer_safety_test.ps1, scratch/phase_5_4_27/smoke_test.ps1",
+    "confidence": "ABSOLUTE"
+  },
+  "security_findings": {
+    "hardcoded_secrets_found": 0,
+    "api_keys_in_source": "None (dummy strings in negative test assertions only)",
+    "network_telemetry": "None (100% local-first, zero outbound beacons)",
+    "temporary_files_isolated": true,
+    "path_traversal_guarded": true,
+    "subprocesses_sanitized": true,
+    "dependency_licenses_compatible_with_agpl": true,
+    "offline_cargo_audit_pending": true,
+    "evidence_source": "regex AST scan, Cargo.lock review",
+    "confidence": "HIGH"
+  },
+  "installation_and_compatibility": {
+    "installer_mechanisms": [
+      "PowerShell 1-Click (install.ps1)",
+      "Inno Setup GUI Installer (engram-setup.exe)",
+      "POSIX Shell Script (install.sh)"
+    ],
+    "fail_closed_checksum_verification": true,
+    "atomic_replacement_with_rollback": true,
+    "running_process_lock_protection": true,
+    "platform_matrix": {
+      "x86_64-pc-windows-msvc": "VERIFIED",
+      "x86_64-unknown-linux-musl": "PARTIALLY_VERIFIED",
+      "x86_64-apple-darwin": "PARTIALLY_VERIFIED",
+      "aarch64-apple-darwin": "PARTIALLY_VERIFIED",
+      "aarch64-pc-windows-msvc": "UNSUPPORTED",
+      "aarch64-unknown-linux-musl": "UNSUPPORTED"
+    },
+    "evidence_source": "tests/installer_safety_test.ps1, .github/workflows/release.yml",
+    "confidence": "HIGH"
+  },
+  "budget_and_concurrency_limitations": {
+    "cross_arm_dispatch_isolation": "PROVEN",
+    "local_process_termination_isolation": "PROVEN",
+    "local_async_task_isolation": "PROVEN",
+    "telemetry_finalization_isolation": "PROVEN",
+    "remote_provider_termination": "NOT_PROVEN",
+    "total_token_consumption_isolation": "NOT_PROVEN",
+    "timed_thread_join_liveness_check": false,
+    "phase_5_4_26_inconsistency_resolution": "Orchestrator sequential loop strictly prevents downstream arm dispatches, but internal candidate CLI (Codex) networking is an unobservable black box that may issue overlapping retries",
+    "evidence_source": "runner.py:1116-1117, orchestrator.py:2240-2260",
+    "confidence": "HIGH"
+  },
+  "blockers": {
+    "critical_blockers": [
+      {
+        "id": "B01",
+        "category": "REPOSITORY_INTEGRITY",
+        "description": "9 modified tracked files in working tree prevent clean release commit tagging",
+        "remediation": "Stage and commit changes to establish a clean working-tree baseline"
+      },
+      {
+        "id": "B02",
+        "category": "BINARY_PROVENANCE",
+        "description": "Binary does not embed Git commit SHA or toolchain version in --version output",
+        "remediation": "Add build.rs to inject git rev-parse HEAD and rustc version into binary metadata"
+      },
+      {
+        "id": "B03",
+        "category": "PERFORMANCE_CLAIMS",
+        "description": "Live Task B four-arm benchmark was not completed; token reduction claims are unproven in production",
+        "remediation": "Formally redact all live agent token reduction claims from public release notes"
+      },
+      {
+        "id": "B04",
+        "category": "SECURITY_SCAN",
+        "description": "Fresh online dependency vulnerability scan (cargo audit) was not run due to offline restrictions",
+        "remediation": "Execute cargo audit with active network connection prior to public distribution"
+      }
+    ],
+    "non_critical_blockers": [
+      {
+        "id": "B05",
+        "category": "DOCUMENTATION",
+        "description": "CHANGELOG.md is absent from repository root",
+        "remediation": "Create Keep-a-Changelog formatted CHANGELOG.md documenting v1.5.4"
+      },
+      {
+        "id": "B06",
+        "category": "TOOLCHAIN_PINNING",
+        "description": "No rust-toolchain.toml file pinning exact compiler version",
+        "remediation": "Add rust-toolchain.toml pinning stable channel"
+      }
+    ]
+  },
+  "unsupported_claims": [
+    "Engram consistently reduces LLM token consumption in live coding tasks",
+    "Engram accelerates coding agent completion speed",
+    "Candidate 4.2 outperforms Candidate 3 in live agent benchmarks",
+    "Adaptive activation improves live agent benchmark score"
+  ],
+  "recommended_release_channel": "INTERNAL_PREVIEW",
+  "final_verdict": "INTERNAL_PREVIEW_ONLY",
+  "release_authorization": "NOT_AUTHORIZED",
+  "live_benchmark_authorization": "NOT_AUTHORIZED"
+}

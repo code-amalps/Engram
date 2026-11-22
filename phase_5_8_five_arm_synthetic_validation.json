@@ -1,0 +1,80 @@
+{
+  "phase": "5.8",
+  "audit_type": "FIVE_ARM_SYNTHETIC_VALIDATION",
+  "timestamp": "2026-11-22T04:55:00Z",
+  "repository": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+  "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "evaluation_framework": {
+    "specified_arms": 5,
+    "operational_arms": 4,
+    "discrepancy": "HARNESS_IMPLEMENTED_AS_TETRAD_ONLY",
+    "arms_detail": [
+      {
+        "arm_id": "Arm A",
+        "label": "Native Codex Baseline",
+        "candidate": "native",
+        "harness_supported": true,
+        "mcp_active": false,
+        "synthetic_mean_tokens": 120000,
+        "acceptance_status": "ACCEPTED"
+      },
+      {
+        "arm_id": "Arm B",
+        "label": "Candidate 3 Always-On",
+        "candidate": "cand3",
+        "harness_supported": true,
+        "mcp_active": true,
+        "synthetic_mean_tokens": 85000,
+        "acceptance_status": "ACCEPTED"
+      },
+      {
+        "arm_id": "Arm C",
+        "label": "Candidate 4.2 Always-On",
+        "candidate": "cand4_2",
+        "harness_supported": true,
+        "mcp_active": true,
+        "synthetic_mean_tokens": 58000,
+        "acceptance_status": "ACCEPTED"
+      },
+      {
+        "arm_id": "Arm D",
+        "label": "Candidate 4.2 Adaptive",
+        "candidate": "cand4_2",
+        "harness_supported": true,
+        "mcp_active": true,
+        "synthetic_mean_tokens": 42000,
+        "acceptance_status": "ACCEPTED"
+      },
+      {
+        "arm_id": "Arm E",
+        "label": "Candidate 5 Optimized",
+        "candidate": "cand5",
+        "harness_supported": false,
+        "mcp_active": true,
+        "synthetic_mean_tokens": 13356,
+        "acceptance_status": "REJECTED_UNREGISTERED"
+      }
+    ]
+  },
+  "synthetic_simulations": {
+    "arm_e_vs_arm_a_relative_reduction": "88.87%",
+    "arm_e_vs_arm_b_relative_reduction": "84.29%",
+    "arm_e_vs_arm_c_relative_reduction": "76.97%",
+    "arm_e_vs_arm_d_relative_reduction": "68.20%",
+    "simulation_basis": "7_OPTIMIZATION_WEIGHTED_MODEL",
+    "token_estimation_ratio": "BYTES_DIV_3_8",
+    "empirical_validation": "UNVALIDATED_PENDING_LIVE_BENCHMARK"
+  },
+  "readiness_verdict": {
+    "harness_codebase_ready": false,
+    "blocker_details": [
+      "orchestrator.py CANDIDATE_LEDGER missing cand5",
+      "orchestrator.py self.arm_identities missing arm_e",
+      "orchestrator.py CLI choices missing cand5",
+      "orchestrator.py lacks run_pentad() orchestration loop",
+      "benchmarks/matched-pair-harness/bin/ lacks candidate-phase5 directory and binary"
+    ],
+    "verdict": "HARNESS_UNPREPARED"
+  }
+}

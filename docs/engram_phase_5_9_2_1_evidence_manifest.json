@@ -1,0 +1,212 @@
+{
+  "schema_version": "2.1.0",
+  "phase": "5.9.2.1",
+  "verdict": "BENCHMARK_INCOMPLETE_PROVIDER_USAGE",
+  "substantive_efficiency_verdict": "CANDIDATE5_TOKEN_SAVINGS_NOT_ESTABLISHED",
+  "timestamp": "2026-11-22T12:59:23Z",
+  "git_baseline": {
+    "expected_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "actual_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "branch": "feature/phase2-stage5-remediation",
+    "is_match": true
+  },
+  "protocol": {
+    "version": "3.0.0",
+    "name": "Controlled Runtime Pentad",
+    "seed": 59002,
+    "execution_policy": "diagnostic_continue",
+    "dependency_strategy": "copy",
+    "provider": "controlled",
+    "model": "gpt-5.6-luna",
+    "max_request_tokens": 60000,
+    "completion_allowance_per_turn": 4096
+  },
+  "budget_enforcement": {
+    "global_budget_ceiling": 1000000,
+    "pre_dispatch_safety_reserve": 45000,
+    "task_a_nominal_ceiling": 500000,
+    "task_a_consumed_tokens": 3219,
+    "task_b_dynamic_ceiling": 951781,
+    "task_b_consumed_tokens": 4176,
+    "total_tokens_consumed": 7395,
+    "aggregate_exposure_compliant": true,
+    "headroom_remaining_tokens": 992605,
+    "task_a_exit_code": 0,
+    "task_b_exit_code": 0
+  },
+  "candidate_measurements": {
+    "arm_a_native": {
+      "candidate": "native",
+      "binary": null,
+      "task_a": {
+        "prompt_tokens": 470,
+        "completion_tokens": 50,
+        "total_tokens": 520,
+        "score": 0.0,
+        "passed_all_requirements": false
+      },
+      "task_b": {
+        "prompt_tokens": 567,
+        "completion_tokens": 50,
+        "total_tokens": 617,
+        "score": 0.2,
+        "passed_all_requirements": false
+      },
+      "combined": {
+        "prompt_tokens": 1037,
+        "completion_tokens": 100,
+        "total_tokens": 1137,
+        "cost_usd": 0.000327
+      }
+    },
+    "arm_b_cand3": {
+      "candidate": "cand3",
+      "binary": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+      "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "task_a": {
+        "prompt_tokens": 741,
+        "completion_tokens": 50,
+        "total_tokens": 791,
+        "score": 0.0,
+        "passed_all_requirements": false
+      },
+      "task_b": {
+        "prompt_tokens": 838,
+        "completion_tokens": 50,
+        "total_tokens": 888,
+        "score": 0.2,
+        "passed_all_requirements": false
+      },
+      "combined": {
+        "prompt_tokens": 1579,
+        "completion_tokens": 100,
+        "total_tokens": 1679,
+        "cost_usd": 0.000436
+      }
+    },
+    "arm_c_cand42_always_on": {
+      "candidate": "cand4_2",
+      "binary": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "task_a": {
+        "prompt_tokens": 744,
+        "completion_tokens": 50,
+        "total_tokens": 794,
+        "score": 0.0,
+        "passed_all_requirements": false
+      },
+      "task_b": {
+        "prompt_tokens": 841,
+        "completion_tokens": 50,
+        "total_tokens": 891,
+        "score": 0.2,
+        "passed_all_requirements": false
+      },
+      "combined": {
+        "prompt_tokens": 1585,
+        "completion_tokens": 100,
+        "total_tokens": 1685,
+        "cost_usd": 0.000437
+      }
+    },
+    "arm_d_cand42_adaptive": {
+      "candidate": "cand4_2",
+      "binary": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "task_a": {
+        "prompt_tokens": 507,
+        "completion_tokens": 50,
+        "total_tokens": 557,
+        "score": 0.0,
+        "passed_all_requirements": false
+      },
+      "task_b": {
+        "prompt_tokens": 840,
+        "completion_tokens": 50,
+        "total_tokens": 890,
+        "score": 0.2,
+        "passed_all_requirements": false
+      },
+      "combined": {
+        "prompt_tokens": 1347,
+        "completion_tokens": 100,
+        "total_tokens": 1447,
+        "cost_usd": 0.000389
+      }
+    },
+    "arm_e_cand5_optimized": {
+      "candidate": "cand5",
+      "binary": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+      "sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+      "task_a": {
+        "prompt_tokens": 507,
+        "completion_tokens": 50,
+        "total_tokens": 557,
+        "score": 0.0,
+        "passed_all_requirements": false
+      },
+      "task_b": {
+        "prompt_tokens": 840,
+        "completion_tokens": 50,
+        "total_tokens": 890,
+        "score": 0.2,
+        "passed_all_requirements": false
+      },
+      "combined": {
+        "prompt_tokens": 1347,
+        "completion_tokens": 100,
+        "total_tokens": 1447,
+        "cost_usd": 0.000389
+      }
+    }
+  },
+  "comparative_analysis": {
+    "cand5_vs_native": {
+      "cand5_total_tokens": 1447,
+      "native_total_tokens": 1137,
+      "absolute_difference": 310,
+      "percentage_difference": "+27.26%",
+      "verdict": "CANDIDATE5_CONSUMED_MORE_TOKENS_THAN_NATIVE"
+    },
+    "cand5_vs_cand3": {
+      "cand5_total_tokens": 1447,
+      "cand3_total_tokens": 1679,
+      "absolute_difference": -232,
+      "percentage_difference": "-13.82%",
+      "verdict": "NOMINAL_SAVINGS_NO_MUTUAL_ACCEPTANCE"
+    },
+    "cand5_vs_cand42_always_on": {
+      "cand5_total_tokens": 1447,
+      "cand42_always_on_total_tokens": 1685,
+      "absolute_difference": -238,
+      "percentage_difference": "-14.12%",
+      "verdict": "NOMINAL_SAVINGS_NO_MUTUAL_ACCEPTANCE"
+    },
+    "cand5_vs_cand42_adaptive": {
+      "cand5_total_tokens": 1447,
+      "cand42_adaptive_total_tokens": 1447,
+      "absolute_difference": 0,
+      "percentage_difference": "0.00%",
+      "verdict": "ZERO_SAVINGS_IDENTICAL_CONSUMPTION"
+    }
+  },
+  "financial_summary": {
+    "rates": {
+      "prompt_per_million_usd": 0.20,
+      "completion_per_million_usd": 1.20
+    },
+    "total_prompt_tokens": 6895,
+    "total_completion_tokens": 500,
+    "total_tokens": 7395,
+    "actual_financial_cost_usd": 0.001979,
+    "authorized_budget_exposure_usd": 1.200000
+  },
+  "evidence_paths": {
+    "run_directory": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013",
+    "two_task_summary": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/two_task_pentad_summary.json",
+    "task_a_summary": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/task_a/pentad_summary.json",
+    "task_a_report": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/task_a/pentad_report.md",
+    "task_b_summary": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/task_b/pentad_summary.json",
+    "task_b_report": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/task_b/pentad_report.md"
+  }
+}

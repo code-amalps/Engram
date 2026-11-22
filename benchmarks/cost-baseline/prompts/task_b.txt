@@ -1,0 +1,1 @@
+Add a remember-me option to the authentication flow that persists the username across reloads.

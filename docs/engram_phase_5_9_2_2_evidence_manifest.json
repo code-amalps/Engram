@@ -1,0 +1,109 @@
+{
+  "schema_version": "2.1.0",
+  "phase": "5.9.2.2",
+  "verdict": "LIVE_TRANSPORT_CONFIGURATION_BLOCKED",
+  "timestamp": "2026-11-22T13:22:00Z",
+  "git_baseline": {
+    "expected_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "actual_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "branch": "feature/phase2-stage5-remediation",
+    "is_match": true
+  },
+  "root_cause_investigation": {
+    "failure_mode": "SILENT_MOCK_TRANSPORT_FALLBACK_AND_INCOMPLETE_LIVE_WIRING",
+    "source_evidence": [
+      {
+        "file": "benchmarks/matched-pair-harness/src/agent_runtime.py",
+        "line": 883,
+        "code": "self.transport = transport or MockProviderTransport(model=model)",
+        "finding": "ControlledRunner.__init__ hardcoded fallback to MockProviderTransport without checking self.provider."
+      },
+      {
+        "file": "benchmarks/matched-pair-harness/src/orchestrator.py",
+        "lines": "652-664",
+        "code": "self.runner = ControlledRunner(..., provider=self.provider)",
+        "finding": "Orchestrator did not construct or inject a live transport, passing None for transport."
+      },
+      {
+        "file": "benchmarks/matched-pair-harness/src/provider_transport.py",
+        "lines": "458, 480",
+        "code": "raise NotImplementedError('Live provider dispatch is NOT_AUTHORIZED during offline phases.')",
+        "finding": "OpenAICompatibleTransport dispatch was unpopulated from Phase 5.9.1 offline architecture phase."
+      },
+      {
+        "file": "benchmarks/matched-pair-harness/src/orchestrator.py",
+        "line": 1851,
+        "code": "provenance = 'SYNTHETIC_TEST' if self.is_dry_run else 'DIRECT_API'",
+        "finding": "TelemetryParser misclassified non-dry-run mock executions as DIRECT_API."
+      },
+      {
+        "file": "environment",
+        "variable": "OPENAI_API_KEY",
+        "status": "UNSET",
+        "finding": "No upstream provider credentials were set in the environment, causing silent fallback instead of fail-closed error."
+      }
+    ]
+  },
+  "remediation_implemented": {
+    "transport_factory": "Implemented create_provider_transport() enforcing explicit mock mode and fail-closed credential validation.",
+    "controlled_runner_refactor": "ControlledRunner now uses create_provider_transport() and fails closed with AuthenticationError if allow_live_network=True but credentials are missing.",
+    "orchestrator_refactor": "Orchestrator passes allow_live_network=True on live runs and records transport_identity, transport_name, and transport_allow_live_network in model telemetry.",
+    "provenance_correction": "TelemetryParser now verifies transport provider name; mock transport responses are labeled SYNTHETIC_TEST and prohibited from DIRECT_API.",
+    "live_dispatch_implemented": "Implemented full HTTP POST dispatch with bearer auth, JSON serialization, HTTP status mapping, usage extraction, and output token boundary enforcement in OpenAICompatibleTransport.dispatch().",
+    "multi_turn_verified": "Verified multi-turn agent tool calling lifecycle via 7 new tests in test_phase_5_9_2_2_live_transport_enforcement.py (all passing)."
+  },
+  "pre_dispatch_gate_results": {
+    "check_1_genuine_upstream_transport_selected": {
+      "status": "PASSED",
+      "details": "OpenAICompatibleTransport selected by ControlledRunner factory"
+    },
+    "check_2_mock_transport_not_selected": {
+      "status": "PASSED",
+      "details": "Mock transport prohibited on non-dry-run controlled provider runs"
+    },
+    "check_3_correct_model_and_endpoint": {
+      "status": "PASSED",
+      "details": "Model: gpt-5.6-luna, Endpoint: https://api.openai.com/v1"
+    },
+    "check_4_credentials_available_without_exposure": {
+      "status": "FAILED_BLOCKED",
+      "details": "OPENAI_API_KEY is not set in environment. Live dispatch failed closed."
+    },
+    "check_5_controlled_runtime_active": {
+      "status": "PASSED",
+      "details": "ControlledAgentRuntime and RequestReservationCoordinator active"
+    },
+    "check_6_candidate_identities_verified": {
+      "status": "PASSED",
+      "details": "All five arms match approved binary hashes"
+    },
+    "check_7_golden_repo_unchanged": {
+      "status": "PASSED",
+      "details": "Commit 1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2 verified"
+    },
+    "check_8_unique_output_directory": {
+      "status": "PASSED",
+      "details": "Previous live run runs/two_task_pentad_live_20261122_180013 preserved untouched"
+    },
+    "check_9_shared_budget_initialized": {
+      "status": "PASSED",
+      "details": "Global ceiling: 1,000,000 tokens, Safety reserve: 45,000 tokens"
+    },
+    "check_10_safety_stop_conditions_active": {
+      "status": "PASSED",
+      "details": "Output token boundary, request size gate (60k), and budget coordinator active"
+    },
+    "gate_verdict": "HALT_WITHOUT_DISPATCH"
+  },
+  "test_evidence": {
+    "test_controlled_transport_tests_passed": 24,
+    "test_phase_5_9_2_2_tests_passed": 7,
+    "total_regression_tests_passed": 31,
+    "test_execution_status": "ALL_PASSED"
+  },
+  "preserved_artifacts": {
+    "phase_5_9_2_1_run_directory": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013",
+    "phase_5_9_2_1_summary": "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013/two_task_pentad_summary.json",
+    "phase_5_9_2_1_execution_report": "phase_5_9_2_1_live_pentad_execution_report.md"
+  }
+}

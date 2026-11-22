@@ -1,0 +1,120 @@
+{
+  "phase": "5.4.28",
+  "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "verdict": "REMEDIATION_COMPLETE_SOURCE_BASELINE_READY",
+  "timestamp": "2026-11-20T12:35:00Z",
+  "authorizations": {
+    "git_commit": "NOT_AUTHORIZED",
+    "git_push": "NOT_AUTHORIZED",
+    "git_tag": "NOT_AUTHORIZED",
+    "live_llm_api": "NOT_AUTHORIZED",
+    "live_benchmark_dispatch": "NOT_AUTHORIZED",
+    "external_network_requests": "NOT_AUTHORIZED"
+  },
+  "remediations_completed": {
+    "nine_file_forensic_classification": {
+      "status": "COMPLETED",
+      "total_files_reviewed": 9,
+      "product_release_candidate": [
+        "src/storage.rs",
+        "src/impact.rs",
+        "src/mcp.rs"
+      ],
+      "benchmark_internal_only": [
+        "benchmarks/matched-pair-harness/schemas/run_telemetry.schema.json",
+        "benchmarks/matched-pair-harness/src/classifier.py",
+        "benchmarks/matched-pair-harness/src/evaluator.py",
+        "benchmarks/matched-pair-harness/src/orchestrator.py",
+        "benchmarks/matched-pair-harness/src/runner.py",
+        "benchmarks/matched-pair-harness/src/telemetry.py"
+      ],
+      "discards": 0,
+      "reversions": 0
+    },
+    "product_benchmark_boundary": {
+      "status": "COMPLETED",
+      "documentation": "PHASE_5_4_28_PRODUCT_BENCHMARK_BOUNDARY.md",
+      "layers_defined": [
+        "directory_structure",
+        "cargo_dependencies",
+        "language_runtimes",
+        "ci_cd_packaging",
+        "process_ipc"
+      ]
+    },
+    "build_provenance": {
+      "status": "COMPLETED",
+      "implementation": "build.rs",
+      "cli_flag": "--version",
+      "exposed_fields": [
+        "pkg_version",
+        "git_commit",
+        "git_dirty",
+        "rustc_version",
+        "build_profile"
+      ],
+      "tests_passing": "5/5"
+    },
+    "toolchain_pinning": {
+      "status": "COMPLETED",
+      "manifest": "rust-toolchain.toml",
+      "channel": "stable",
+      "profile": "minimal",
+      "target": "x86_64-pc-windows-msvc",
+      "active_rustc": "rustc 1.99.0 (b940084d7 2026-09-28)"
+    },
+    "changelog": {
+      "status": "COMPLETED",
+      "file": "CHANGELOG.md",
+      "format": "Keep a Changelog 1.1.0",
+      "version": "1.5.4",
+      "unverified_token_disclaimer_present": true
+    },
+    "binary_identity_investigation": {
+      "status": "COMPLETED",
+      "release_target_hash": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "candidate_4_2_hash": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "byte_difference_count": 0,
+      "packaging_workflow_verified": true
+    },
+    "claims_and_limitations_matrix": {
+      "status": "COMPLETED",
+      "documentation": "PHASE_5_4_28_PUBLIC_ALPHA_CLAIMS_MATRIX.md",
+      "verified_capabilities_count": 7,
+      "unverified_claims_disclaimed_count": 3
+    },
+    "source_baseline_preparation": {
+      "status": "COMPLETED",
+      "staged_commits_planned": 5,
+      "total_tracked_modified_files": 12,
+      "total_insertions": 2269,
+      "total_deletions": 137
+    }
+  },
+  "regression_evidence": {
+    "rust_tests_passed": 62,
+    "rust_tests_failed": 0,
+    "installer_tests_passed": 8,
+    "installer_tests_failed": 0,
+    "python_tests_passed": 38,
+    "python_tests_failed": 0,
+    "total_tests_passed": 108,
+    "total_tests_failed": 0,
+    "pass_rate_percentage": 100.0
+  },
+  "deliverables": [
+    "PHASE_5_4_28_NINE_FILE_FORENSIC_REVIEW.md",
+    "phase5_4_28_source_classification.json",
+    "PHASE_5_4_28_PRODUCT_BENCHMARK_BOUNDARY.md",
+    "PHASE_5_4_28_BUILD_PROVENANCE_IMPLEMENTATION.md",
+    "PHASE_5_4_28_TOOLCHAIN_PINNING.md",
+    "PHASE_5_4_28_CHANGELOG_EVIDENCE.md",
+    "PHASE_5_4_28_REGRESSION_AND_BUILD_EVIDENCE.md",
+    "PHASE_5_4_28_BINARY_IDENTITY_AND_ARTIFACT_MANIFEST.md",
+    "PHASE_5_4_28_PUBLIC_ALPHA_CLAIMS_MATRIX.md",
+    "PHASE_5_4_28_SOURCE_BASELINE_PREPARATION.md",
+    "PHASE_5_4_28_FINAL_REMEDIATION_REPORT.md",
+    "phase5_4_28_remediation_findings.json"
+  ]
+}

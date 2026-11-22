@@ -1,0 +1,121 @@
+{
+  "schema_version": "2.0.0",
+  "phase": "5.4.16",
+  "audit_type": "diagnostic_continuation_adversarial_audit",
+  "audit_timestamp": "2026-11-19T23:02:00Z",
+  "final_verdict": "CONDITIONALLY_VERIFIED_REMEDIATION_REQUIRED",
+  "summary": "Adversarial forensic audit of Phase 5.4.15 diagnostic continuation implementation. 48/48 offline tests pass, but forensic inspection identifies 4 defects in budget accounting, test fidelity, acceptance checking, and CLI flag precedence.",
+  "findings": [
+    {
+      "id": "FINDING-01",
+      "category": "baseline_integrity",
+      "classification": "VERIFIED",
+      "summary": "Repository baseline commit (7106a2f369fe79faf5f95449378a900ab8e8eddf), branch (feature/phase2-stage5-remediation), candidate binary hashes, Task B fixture hash (CD55DB0D...), and golden repository manifest (1c285608...) match Phase 5.4.15 baseline with 100% precision.",
+      "evidence_reference": "git log -1, Get-FileHash benchmarks/matched-pair-harness/bin/candidate-phase*/engram.exe",
+      "metrics": {
+        "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+        "cand3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "cand4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+        "golden_repo_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2"
+      }
+    },
+    {
+      "id": "FINDING-02",
+      "category": "test_fidelity_mock_bypass",
+      "classification": "DEFECT",
+      "summary": "In test_04_global_budget_exhaustion, the mock implementation (mock_exec) ignores the calculated effective arm ceiling (80,000) and returns 120,000 consumed tokens with SUCCESS status. While this tests the orchestrator's reaction to global ceiling breach, it masks the fact that runner.py was not verified to enforce the effective ceiling dynamically.",
+      "evidence_reference": "benchmarks/matched-pair-harness/tests/test_diagnostic_continuation.py:lines_182_194",
+      "impact": "Test passes synthetically but does not verify that runner.py constrains child processes to arm_max_tokens_ceiling.",
+      "remediation": "Update test_04 mock to simulate runner ceiling enforcement, returning TOKEN_CEILING_BREACHED when consumption exceeds arm_max_tokens_ceiling, or add an integration test exercising runner.run with effective ceiling capping."
+    },
+    {
+      "id": "FINDING-03",
+      "category": "global_budget_leakage",
+      "classification": "DEFECT",
+      "summary": "When an arm encounters telemetry parsing failure or crashes before writing events, total_model_tokens evaluates to 0 or None. The orchestrator accumulates 0 into cumulative_global_tokens, permitting subsequent diagnostic arms to launch without accounting for unmeasured model spend.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2056_2058",
+      "impact": "Unbounded global budget leakage during live runs if a preceding arm crashes after consuming substantial tokens.",
+      "remediation": "Incorporate conservative budget attribution: if telemetry_valid is False or total_model_tokens is missing, attribute effective_arm_ceiling or halt the block with ABORTED_UNCERTAIN_BUDGET."
+    },
+    {
+      "id": "FINDING-04",
+      "category": "acceptance_validation_defect",
+      "classification": "DEFECT",
+      "summary": "_is_accepted in run_tetrad only checks score == 1.0 and passed_all_requirements == True. It does not verify telemetry_valid == True or execution_status == 'SUCCESS'. If an arm passes functional requirements but has invalid telemetry, all_arms_accepted evaluates to True, resolving block status to DIAGNOSTIC_COMPLETE or ACCEPTED.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2118_2133",
+      "impact": "Block status reports complete acceptance even when telemetry integrity was violated on one or more arms.",
+      "remediation": "Update _is_accepted to require corr.get('passed_all_requirements', False) and (corr.get('score', 0.0) == 1.0) and run_dict.get('telemetry_valid', False) and run_dict.get('execution_status') == 'SUCCESS'."
+    },
+    {
+      "id": "FINDING-05",
+      "category": "cli_flag_precedence_ambiguity",
+      "classification": "DEFECT",
+      "summary": "orchestrator.py accepts both --no-stop-on-failure and --execution-policy. Passing --no-stop-on-failure alongside default execution_policy='strict' produces non-halting execution that resolves block status to MUTUAL_ACCEPTANCE_FAILURE instead of DIAGNOSTIC_INCOMPLETE, creating ambiguous operational semantics.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2094_2108, lines_2446_2452",
+      "impact": "Confusing CLI flag interactions and inconsistent block status reporting.",
+      "remediation": "Deprecate --no-stop-on-failure or add mutual exclusion validation in ArgumentParser."
+    },
+    {
+      "id": "FINDING-06",
+      "category": "headroom_guard_interaction",
+      "classification": "VERIFIED",
+      "summary": "Global headroom guard (global_remaining < headroom_reserve) operates before arm launch, while arm-level headroom guard (remaining < max(estimated_next_turn_cost, headroom_reserve)) operates during arm turn streaming. The interaction is mathematically sound and hierarchical.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2022_2032, src/runner.py:lines_985_988",
+      "metrics": {
+        "global_guard_timing": "Pre-arm launch",
+        "arm_guard_timing": "Streaming pre-dispatch turn boundary",
+        "hierarchical_enforcement": true
+      }
+    },
+    {
+      "id": "FINDING-07",
+      "category": "comparative_invalidation_gate",
+      "classification": "VERIFIED",
+      "summary": "compute_comparative_analysis with block_incomplete=True unconditionally invalidates all comparative efficiency claims, setting savings_claim_eligible=False, savings_claim_status='INVALIDATED_BY_ACCEPTANCE_FAILURE', and verdict='MUTUAL_ACCEPTANCE_FAILURE'.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_825_855, test_10",
+      "metrics": {
+        "savings_claim_eligible": false,
+        "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+        "verdict": "MUTUAL_ACCEPTANCE_FAILURE"
+      }
+    },
+    {
+      "id": "FINDING-08",
+      "category": "safety_overrides",
+      "classification": "VERIFIED",
+      "summary": "Candidate binary hash mismatch, golden repository manifest corruption, sandbox identity failure, global budget exhaustion, and KeyboardInterrupt override diagnostic continuation and immediately halt block execution.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2060_2086, test_06, test_07, test_12",
+      "metrics": {
+        "binary_mismatch_halt": "ABORTED_SAFETY_FAILURE",
+        "repo_corruption_halt": "ABORTED_SAFETY_FAILURE",
+        "budget_breach_halt": "ABORTED_GLOBAL_BUDGET",
+        "user_cancel_halt": "ABORTED_USER_CANCEL"
+      }
+    },
+    {
+      "id": "FINDING-09",
+      "category": "test_suite_reproducibility",
+      "classification": "VERIFIED",
+      "summary": "All 7 harness test suites (48 total tests) execute completely offline and pass with zero failures: test_diagnostic_continuation (12/12, 38.0s), test_per_arm_candidate_identity (10/10, 186.4s), test_phase_5_4_14_forensics (10/10, 0.004s), test_telemetry_semantics (4/4, 0.53s), test_candidate_selection (8/8, 0.30s), test_task_b_budget_simulation (3/3, 0.04s), test_tetrad_harness (1/1, 48.0s).",
+      "evidence_reference": "Offline test execution logs (Tasks 56944, 56956, 56960)",
+      "metrics": {
+        "total_tests_executed": 48,
+        "total_tests_passed": 48,
+        "total_failures": 0,
+        "total_errors": 0
+      }
+    },
+    {
+      "id": "FINDING-10",
+      "category": "live_model_dispatch_prohibition",
+      "classification": "VERIFIED",
+      "summary": "Zero live model calls or cloud API requests were made during Phase 5.4.16. All tests ran entirely against offline synthetic mocks and verified local fixtures.",
+      "evidence_reference": "Codex runner logs, ProcessTracker telemetry",
+      "metrics": {
+        "live_dispatches": 0,
+        "tokens_billed": 0
+      }
+    }
+  ]
+}

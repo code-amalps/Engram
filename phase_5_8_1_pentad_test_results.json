@@ -1,0 +1,112 @@
+{
+  "phase": "5.8.1",
+  "test_suite": "benchmarks/matched-pair-harness/tests/test_pentad_harness.py",
+  "framework": "pytest-9.1.1 / unittest",
+  "total_tests": 20,
+  "passed": 20,
+  "failed": 0,
+  "skipped": 0,
+  "duration_seconds": 152.3,
+  "results": [
+    {
+      "test_name": "test_01_successful_five_arm_dry_run",
+      "status": "PASSED",
+      "scope": "Verifies that 5-arm pentad dry-run executes across all 5 arms cleanly and populates runs dictionary."
+    },
+    {
+      "test_name": "test_02_all_five_arms_represented_in_report",
+      "status": "PASSED",
+      "scope": "Verifies that generated markdown report explicitly contains sections and rows for all 5 arms."
+    },
+    {
+      "test_name": "test_03_correct_ae_candidate_mapping",
+      "status": "PASSED",
+      "scope": "Verifies that Arm A -> Native, Arm B -> Cand3, Arm C -> Cand4.2 Always-On, Arm D -> Cand4.2 Adaptive, Arm E -> Cand5 Optimized."
+    },
+    {
+      "test_name": "test_04_candidate5_binary_hash_verification",
+      "status": "PASSED",
+      "scope": "Verifies that Candidate 5 binary cryptographic SHA-256 matches E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44 exactly."
+    },
+    {
+      "test_name": "test_05_missing_candidate5_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that orchestrator raises SafetyViolationError if Candidate 5 binary path does not exist."
+    },
+    {
+      "test_name": "test_06_missing_other_arms_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that orchestrator rejects execution if any arm from the 5-arm pentad specification is missing from order."
+    },
+    {
+      "test_name": "test_07_duplicate_arm_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that orchestrator rejects duplicate arms in execution order."
+    },
+    {
+      "test_name": "test_08_unknown_candidate_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that requesting an unregistered candidate version raises SafetyViolationError."
+    },
+    {
+      "test_name": "test_09_wrong_arm_identity_rejection",
+      "status": "PASSED",
+      "scope": "Verifies rejection of invalid arm names not conforming to pentad specification."
+    },
+    {
+      "test_name": "test_10_fixture_hash_mismatch_rejection",
+      "status": "PASSED",
+      "scope": "Verifies rejection of altered, dirty, or corrupted benchmark task fixtures."
+    },
+    {
+      "test_name": "test_11_candidate_binary_hash_mismatch_rejection",
+      "status": "PASSED",
+      "scope": "Verifies immediate pre-dispatch abort if candidate binary hash differs by even 1 bit from the ledger."
+    },
+    {
+      "test_name": "test_12_missing_telemetry_rejection",
+      "status": "PASSED",
+      "scope": "Verifies acceptance validator rejects runs with missing or invalid telemetry."
+    },
+    {
+      "test_name": "test_13_duplicate_telemetry_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that duplicate run IDs or telemetry records trigger validation failure."
+    },
+    {
+      "test_name": "test_14_incomplete_arm_rejection",
+      "status": "PASSED",
+      "scope": "Verifies that comparative analysis invalidates savings claims when an arm is incomplete."
+    },
+    {
+      "test_name": "test_15_per_arm_budget_overflow",
+      "status": "PASSED",
+      "scope": "Verifies that exceeding per-arm token ceiling overrides status to TOKEN_CEILING_BREACHED."
+    },
+    {
+      "test_name": "test_16_global_budget_overflow",
+      "status": "PASSED",
+      "scope": "Verifies that global cumulative token limit triggers immediate abort of subsequent arms."
+    },
+    {
+      "test_name": "test_17_stop_on_failure_behavior",
+      "status": "PASSED",
+      "scope": "Verifies that strict execution policy halts on first arm failure and skips remaining arms."
+    },
+    {
+      "test_name": "test_18_deterministic_execution_order_under_seed",
+      "status": "PASSED",
+      "scope": "Verifies identical PRNG seed produces identical arm execution permutation across runs."
+    },
+    {
+      "test_name": "test_19_correct_accounting_of_skipped_arms",
+      "status": "PASSED",
+      "scope": "Verifies that skipped downstream arms are correctly populated with SKIPPED status and error_message explanation."
+    },
+    {
+      "test_name": "test_20_prevention_of_comparisons_when_incomplete",
+      "status": "PASSED",
+      "scope": "Verifies comparative analysis returns MUTUAL_ACCEPTANCE_FAILURE / INCOMPLETE when any arm fails acceptance."
+    }
+  ]
+}

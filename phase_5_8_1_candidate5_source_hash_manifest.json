@@ -1,0 +1,447 @@
+﻿{
+    "phase":  "5.8.1",
+    "timestamp":  "2026-11-22T11:45:47.3464450+05:30",
+    "sources":  [
+                    {
+                        "path":  "src/analyzer.rs",
+                        "sha256":  "F189CDC15233F2E209DDF2E294D9FFE1882D50B8C69F0D23CAA56BC0A1C36E20",
+                        "size_bytes":  88176
+                    },
+                    {
+                        "path":  "src/archaeology.rs",
+                        "sha256":  "35EADF90FDC3EA679746486B2F2F1A270322257A4FA45AAEA0A1EA64137176B9",
+                        "size_bytes":  6626
+                    },
+                    {
+                        "path":  "src/bench.rs",
+                        "sha256":  "CB42E56A8FB5745AD4ACDA5910D951A22C7683DF35819CE2F9E8161A3B876265",
+                        "size_bytes":  129702
+                    },
+                    {
+                        "path":  "src/budget.rs",
+                        "sha256":  "A4C0785ADD2ED20D0CD1743C51D6700F153152E2431969F05E1A6CE7DB22804C",
+                        "size_bytes":  21025
+                    },
+                    {
+                        "path":  "src/ci_guard.rs",
+                        "sha256":  "9F9C6B9A7F692624F4F20A4ED6C91ABDEB99A8A6261A76B14DC556D78B87E82C",
+                        "size_bytes":  57452
+                    },
+                    {
+                        "path":  "src/compiler.rs",
+                        "sha256":  "29E20666A8E4E9826C49ACEE789C43F0315925F6F6741C9812AC61260101D506",
+                        "size_bytes":  45474
+                    },
+                    {
+                        "path":  "src/constitution.rs",
+                        "sha256":  "0110F3CD6A589AB696A5F35B0FB2946E4036C646FDC4A0CA29073D691715BA40",
+                        "size_bytes":  10898
+                    },
+                    {
+                        "path":  "src/contract.rs",
+                        "sha256":  "CD6C7539692459FF6B12B2FCB91F7C56FBA46A11E8EF0C2B19E14B11DA37A45F",
+                        "size_bytes":  73338
+                    },
+                    {
+                        "path":  "src/doctor.rs",
+                        "sha256":  "C16B3FC5723A1C14AB089B2AAF98F7AAFB98B90A4FB7B0E44CB552946BA726BC",
+                        "size_bytes":  13142
+                    },
+                    {
+                        "path":  "src/drift.rs",
+                        "sha256":  "605160922597D2C33AF02C712219D4E6613EF0CB02DC09517D1003917D36142E",
+                        "size_bytes":  48270
+                    },
+                    {
+                        "path":  "src/empirical.rs",
+                        "sha256":  "5C49BA544005A55E1E917827B245AC35AA8E63E937B6DF2A99BB0E0ACC0A8124",
+                        "size_bytes":  45538
+                    },
+                    {
+                        "path":  "src/empirical_runner.rs",
+                        "sha256":  "1AA4FD12A7D446BFE3F4687333F17ABEAC91858A9EE9A55DAE1CE023CC519AB5",
+                        "size_bytes":  37537
+                    },
+                    {
+                        "path":  "src/flywheel.rs",
+                        "sha256":  "233E43F7CC636CF4D91E20DCEFF4A72251CFC1582D973D8B0B984FE5B03EFB0C",
+                        "size_bytes":  54562
+                    },
+                    {
+                        "path":  "src/gc.rs",
+                        "sha256":  "D41CB3345BEE2CB3111BA0DB50BB8E2B222CBBFA28FCA72F805FA4A30CA91499",
+                        "size_bytes":  8243
+                    },
+                    {
+                        "path":  "src/git.rs",
+                        "sha256":  "BB5EEE3721DB9EB944999E2E4C3A21FA2D7E01CECAE326CCEB376303BA430CCB",
+                        "size_bytes":  18803
+                    },
+                    {
+                        "path":  "src/git_history.rs",
+                        "sha256":  "0714B6B23DD95424182B97CAD36FB63BE62ACEDFE49A272C29193E1BD76F4DB3",
+                        "size_bytes":  8763
+                    },
+                    {
+                        "path":  "src/go_parser.rs",
+                        "sha256":  "EDE3A227C1E7EA2B79AE06FD2781250CE35E0C9CC271A0DA34BDB8E74E452E5B",
+                        "size_bytes":  43374
+                    },
+                    {
+                        "path":  "src/graph.rs",
+                        "sha256":  "DD9EA4D159B899DD9BB8CF0E82DE30766193D34E200552C6DD4418F3E532AF21",
+                        "size_bytes":  7704
+                    },
+                    {
+                        "path":  "src/guard.rs",
+                        "sha256":  "317A97CAECC8EFB16BF578C28AC06A0A4B26658532BA9DF59E53742D780D1C45",
+                        "size_bytes":  19849
+                    },
+                    {
+                        "path":  "src/hook.rs",
+                        "sha256":  "42A0B7E0E7454E75FCB207DA0B7590DC9B7B221F811ABFDA7AC326D8DE01A157",
+                        "size_bytes":  23972
+                    },
+                    {
+                        "path":  "src/impact.rs",
+                        "sha256":  "8EB2CD8197CDBC64199E89D92F531F70A51292946F9BC95D5897E3143EF24665",
+                        "size_bytes":  56382
+                    },
+                    {
+                        "path":  "src/incremental.rs",
+                        "sha256":  "00741FAD7310A93539F6B72F809480F7D756C278E9658822892AE40F419B73B0",
+                        "size_bytes":  28309
+                    },
+                    {
+                        "path":  "src/instructions.rs",
+                        "sha256":  "C1B489C1358B69D6FC508BF0BE42A138270C4960A4C8627FFC3F3B69178CAFAB",
+                        "size_bytes":  23323
+                    },
+                    {
+                        "path":  "src/java_parser.rs",
+                        "sha256":  "A4B0F20D91FAD86F830657BB8082EBD1456CEFBADCE162C3F6191638CFF62C9F",
+                        "size_bytes":  30870
+                    },
+                    {
+                        "path":  "src/lib.rs",
+                        "sha256":  "9534AF8D84310D78DA7E546DDE19216DEB09F81FC44896791150EF29CDBF2C3C",
+                        "size_bytes":  1471
+                    },
+                    {
+                        "path":  "src/main.rs",
+                        "sha256":  "471428377CCE9EC3828100805572DAD75633AFC5E967CF585AC113544F7E2179",
+                        "size_bytes":  79104
+                    },
+                    {
+                        "path":  "src/manifest.rs",
+                        "sha256":  "F1BFE8173194544219B736E69B5411F303184E7DFDEB2A0C84323A2E89B3B447",
+                        "size_bytes":  10193
+                    },
+                    {
+                        "path":  "src/mcp.rs",
+                        "sha256":  "4C59F6579F0D56FE653C15233ED060A3146130298CEF07E81C4F93CE23EF61CD",
+                        "size_bytes":  97738
+                    },
+                    {
+                        "path":  "src/memory.rs",
+                        "sha256":  "23A67659940E83E1FFFB041DA13C56CA3E7B2E231BA230A402BAC19930318525",
+                        "size_bytes":  51477
+                    },
+                    {
+                        "path":  "src/memory_graph.rs",
+                        "sha256":  "61F8C3D188A09EB8F1207AE7528501CC93664B368D4D102E4E16B6EE53DA61A4",
+                        "size_bytes":  12707
+                    },
+                    {
+                        "path":  "src/model.rs",
+                        "sha256":  "337F644F9F946C508EF4BD44FE2C6E5C0F25CF3D323AF79B530EBE6CB1C52B16",
+                        "size_bytes":  9944
+                    },
+                    {
+                        "path":  "src/printer.rs",
+                        "sha256":  "7BABCD8271A58C914618AE00F1F188BE7389D1181F98062ECD947448026FE189",
+                        "size_bytes":  9990
+                    },
+                    {
+                        "path":  "src/prompt.rs",
+                        "sha256":  "205A994FD9B46278B16BC4DC513DFA91A521E660F78987265D8619C6FC3DBD4A",
+                        "size_bytes":  40730
+                    },
+                    {
+                        "path":  "src/recovery.rs",
+                        "sha256":  "9ABB367096AAFC9971958C6EBAD108D0B3E0C4C31003D8906C072EBA9831F971",
+                        "size_bytes":  32149
+                    },
+                    {
+                        "path":  "src/setup.rs",
+                        "sha256":  "86D6EBD7F9B2164324D3187825AE6ECC34AE9AD8C64EA58740079AA82CFCEF5E",
+                        "size_bytes":  39175
+                    },
+                    {
+                        "path":  "src/storage.rs",
+                        "sha256":  "C583B0D6C7D86914107AE340B1F797CEC88FC616F77A6148063BE864116FE311",
+                        "size_bytes":  25428
+                    },
+                    {
+                        "path":  "src/telemetry.rs",
+                        "sha256":  "0B947C1B63C8A1B33EE8D22A55278ADDC1684172A8E5E8AA2318E66DC52B900A",
+                        "size_bytes":  13444
+                    },
+                    {
+                        "path":  "tests/ast_extraction_test.rs",
+                        "sha256":  "FA111521C2AE91D20770EB4D71A5154BCBC94257428D5EF028A0624780F7375A",
+                        "size_bytes":  35645
+                    },
+                    {
+                        "path":  "tests/benchmarks.rs",
+                        "sha256":  "B2F0C55EA24D27A0630A3D5B4DE4098ACCE85E16429C95EE916E368D19F1DFBB",
+                        "size_bytes":  1247
+                    },
+                    {
+                        "path":  "tests/bench_test.rs",
+                        "sha256":  "324BF49B43141EB8072E85369BB54CA486EC13CAD0F7A0DF4F4306EA0FDEE3AA",
+                        "size_bytes":  10260
+                    },
+                    {
+                        "path":  "tests/build_provenance_test.rs",
+                        "sha256":  "266CF4A114AE71733B2B940C27634F6B17612FD6D013898D87999231CD6AC8D8",
+                        "size_bytes":  2971
+                    },
+                    {
+                        "path":  "tests/cache_invalidation_test.rs",
+                        "sha256":  "2DC1A4C5BE047E085D01E7FD08EC6362260D02A35A48CAD3B368C7E4399D3B05",
+                        "size_bytes":  11107
+                    },
+                    {
+                        "path":  "tests/change_guard_test.rs",
+                        "sha256":  "00424D4C5E802DCEA7AA51489D7F7ACA03EEBDF0150EE724128B58049D43CD6B",
+                        "size_bytes":  25297
+                    },
+                    {
+                        "path":  "tests/ci_guard_test.rs",
+                        "sha256":  "23A107E5CF574C4F14B83628C4C1D23F8403F6D9BD11E3DAB849A6569C2520B0",
+                        "size_bytes":  19453
+                    },
+                    {
+                        "path":  "tests/context_budget_test.rs",
+                        "sha256":  "0CA5E8D437345C36852CF56F8792F1D67E79B60B28F9CDC99CEE597455129E68",
+                        "size_bytes":  21809
+                    },
+                    {
+                        "path":  "tests/context_efficiency_and_blast_radius_test.rs",
+                        "sha256":  "D3E973F7489E4D3BDA88747A6660E08E51D449691DE385E8739EA3BDC73FD7E7",
+                        "size_bytes":  37166
+                    },
+                    {
+                        "path":  "tests/contract_guard_test.rs",
+                        "sha256":  "0E1C903EFF8907D3EE8B98CFA89A8BA429D3CAE14DFB9CB4C9A6374880E2A492",
+                        "size_bytes":  16776
+                    },
+                    {
+                        "path":  "tests/decision_intelligence_test.rs",
+                        "sha256":  "4F5879F13985B168EF8E1D80EDAE9AA1D0BE25223050C1A2D05C67B66387885F",
+                        "size_bytes":  11428
+                    },
+                    {
+                        "path":  "tests/drift_intelligence_test.rs",
+                        "sha256":  "75C383AA8EB29B40A18AD99EB67D285B32B1BFC047543972147A8AF6EA22FCCD",
+                        "size_bytes":  49338
+                    },
+                    {
+                        "path":  "tests/drift_test.rs",
+                        "sha256":  "A54EEC9B416297CFD2153FD1BC2C103FEE8B08935031441AC831184B8DE230B7",
+                        "size_bytes":  27938
+                    },
+                    {
+                        "path":  "tests/empirical_cost_adversarial_test.rs",
+                        "sha256":  "F7D11B725CFAF2EB6ADABCCD78838DB03D9CC805B1BF914C553D3C79D67D76C9",
+                        "size_bytes":  20247
+                    },
+                    {
+                        "path":  "tests/empirical_live_test.rs",
+                        "sha256":  "075FA4250309706501C4FFF548090AA9E63CA7D90C0231E794F71DA0DF03C2E9",
+                        "size_bytes":  302025
+                    },
+                    {
+                        "path":  "tests/empirical_metrics_test.rs",
+                        "sha256":  "C7CA6E947FD3C42A2DA07362B795A294D9FF53B2A0780FD2466222D862089AB0",
+                        "size_bytes":  37593
+                    },
+                    {
+                        "path":  "tests/empirical_runner_test.rs",
+                        "sha256":  "DC93D5C5076B7819356B753686A7160EC43FCFB56CE3C16C9B72F5CAF1A79E51",
+                        "size_bytes":  14660
+                    },
+                    {
+                        "path":  "tests/flywheel_e2e_test.rs",
+                        "sha256":  "07B30933C24D061276EF83B4FD166B5E286BCDBE762D6EF6F5DF4ED1C3B11FB9",
+                        "size_bytes":  13172
+                    },
+                    {
+                        "path":  "tests/frictionless_integration_test.rs",
+                        "sha256":  "F2F67436FC1DFFCA19D56738F899E35BC66B17A2889A7AEC2826142624BE1789",
+                        "size_bytes":  16231
+                    },
+                    {
+                        "path":  "tests/git_hardening_test.rs",
+                        "sha256":  "7355897FAF898C885FC965D98CAA16E7A9183A73A8D6F28F0A724895902B32E4",
+                        "size_bytes":  14908
+                    },
+                    {
+                        "path":  "tests/go_dependency_test.rs",
+                        "sha256":  "F50AFBC6125EDEA67027D78DB77F873150BADD1E687B6869FD9FD24186565803",
+                        "size_bytes":  19497
+                    },
+                    {
+                        "path":  "tests/go_extraction_test.rs",
+                        "sha256":  "F5B978A4CB90FEE48786179C132F609B8DC72E8DB6A513A6DA3491A9BE885BFB",
+                        "size_bytes":  13786
+                    },
+                    {
+                        "path":  "tests/grounded_workflow_test.rs",
+                        "sha256":  "8A7234680FA0A5296DBB74DEF95134CEC7FCE454B18F2C564550D2A73B310500",
+                        "size_bytes":  12389
+                    },
+                    {
+                        "path":  "tests/hook_precommit_test.rs",
+                        "sha256":  "4EA7E9117915506E78AA2A9D33D4376F2A457DC9F9CF050AE6C209C7FCA92348",
+                        "size_bytes":  18275
+                    },
+                    {
+                        "path":  "tests/hook_pre_commit_test.rs",
+                        "sha256":  "C5693EB3EEF77F2AEDC336624D9FD3C5CD3A6A97BD00ED4DE4B36322848084BB",
+                        "size_bytes":  23913
+                    },
+                    {
+                        "path":  "tests/impact_test.rs",
+                        "sha256":  "CF849B94D19D72F1F82470A2DEFFBF7F231D06FD37C76381B4E3CAAC341ADAA8",
+                        "size_bytes":  52170
+                    },
+                    {
+                        "path":  "tests/incremental_test.rs",
+                        "sha256":  "02F53FCBE57E55FD95D8515F90D9CC570C30475A5D254C8F8E0FEB756C7EDB2F",
+                        "size_bytes":  28631
+                    },
+                    {
+                        "path":  "tests/inspect_symbol_budget_test.rs",
+                        "sha256":  "AA75E19F0574B9AA8EEB5C3D24B4ECD5ECCEBA7DD1AA100852540295C763A491",
+                        "size_bytes":  21137
+                    },
+                    {
+                        "path":  "tests/integration_test.rs",
+                        "sha256":  "20E4ECFB988B6813D70D8931E23434305D1A7C9C4C1E23FA71F26496C315A5F3",
+                        "size_bytes":  4217
+                    },
+                    {
+                        "path":  "tests/mcp_baseline_test.rs",
+                        "sha256":  "42EC1BB5B1C183FA43994476FC5BE9613C50B875CAA4388232ACC991BD3DDF15",
+                        "size_bytes":  36142
+                    },
+                    {
+                        "path":  "tests/mcp_boundary_test.rs",
+                        "sha256":  "77D3180235520DC8A2E9FE871902D8EC7A84EAC410B084A781D89F712FB1E7B4",
+                        "size_bytes":  19711
+                    },
+                    {
+                        "path":  "tests/mcp_consolidation_test.rs",
+                        "sha256":  "7CB27EB23606A23741527BA676E1CCA997C2E737902D6A4B41FCA221C76A294B",
+                        "size_bytes":  22868
+                    },
+                    {
+                        "path":  "tests/mcp_test.rs",
+                        "sha256":  "52AF349D54DF7828D5609C296C4F4F132ACF2C79849E84260C15F029F80080E6",
+                        "size_bytes":  5032
+                    },
+                    {
+                        "path":  "tests/memory_inspect_test.rs",
+                        "sha256":  "2E1BF45E1EF9A5462634FAAC777EB9A671BD304A41859D3ECE3C4FA68E44EDD8",
+                        "size_bytes":  5212
+                    },
+                    {
+                        "path":  "tests/memory_spec_test.rs",
+                        "sha256":  "59E6B5601C3CF4469FEE507AD071E0C5E388136DFC09142DFCF0712E26334ACF",
+                        "size_bytes":  9531
+                    },
+                    {
+                        "path":  "tests/north_star_1_1_test.rs",
+                        "sha256":  "47B2AE23E589E0B51A3566AB4B7E88E3C72F5E197317CDC2CF8FB94BB987BDB2",
+                        "size_bytes":  16868
+                    },
+                    {
+                        "path":  "tests/phase1_fixtures_bench_test.rs",
+                        "sha256":  "EDD2F29D13953D5A88337FBC875396EAB193463BCBABD0A616C0AE9F8A686F0F",
+                        "size_bytes":  7451
+                    },
+                    {
+                        "path":  "tests/phase2_hardening_test.rs",
+                        "sha256":  "AEAA7A11AAD316D02953C004AFEF475634568B557835C79C29B37B9E2A53F30A",
+                        "size_bytes":  16961
+                    },
+                    {
+                        "path":  "tests/phase2_test.rs",
+                        "sha256":  "9C6C58F7EB6A3D660B3AB0597C50E7FC8A85EEF3CAC572E4E2D6121D3AAB788E",
+                        "size_bytes":  7972
+                    },
+                    {
+                        "path":  "tests/phase3_test.rs",
+                        "sha256":  "F5750BA32369CA91BD70AE27A0D2715F3240DB8B9972F5F9BDEB748548219CE2",
+                        "size_bytes":  14780
+                    },
+                    {
+                        "path":  "tests/query_router_test.rs",
+                        "sha256":  "1224A5E7BB1B27B8916B75B55FF2E6C49D404923BFFE2D97DD017694B29A5AA6",
+                        "size_bytes":  21203
+                    },
+                    {
+                        "path":  "tests/recovery_test.rs",
+                        "sha256":  "1319B2BCDAF28CA8FA9D160885369F0532D25BC04247EB3E62BB2B57836AFFBA",
+                        "size_bytes":  41228
+                    },
+                    {
+                        "path":  "tests/scoped_query_routing_test.rs",
+                        "sha256":  "E9BF1F2EC1F484926CC186B15B2807E30CA32BCA58FC79167D83D48466BCB2A3",
+                        "size_bytes":  14248
+                    },
+                    {
+                        "path":  "tests/scratch_debug_test.rs",
+                        "sha256":  "8D08E1E2CA4E645D9810F54C70D5CDCEC8DAAC87A0A8DC08AA698D5FA1E2DC9A",
+                        "size_bytes":  1002
+                    },
+                    {
+                        "path":  "tests/setup_integration_test.rs",
+                        "sha256":  "BCBB1CED46767F8D14B2FC151BEDED002D804FCFCD13F82EB86E973BDACAB991",
+                        "size_bytes":  23643
+                    },
+                    {
+                        "path":  "tests/storage_migration_test.rs",
+                        "sha256":  "CFD34C2850BC5268D112ABA104B5311AFBF600A5C81F30C77D3FA9688AD535DB",
+                        "size_bytes":  26817
+                    },
+                    {
+                        "path":  "tests/telemetry_test.rs",
+                        "sha256":  "89060B1C43B5A81C2A998C6B59681BD3C79804C7332B49FADFF32E03BA85035D",
+                        "size_bytes":  14580
+                    },
+                    {
+                        "path":  "tests/token_efficiency_test.rs",
+                        "sha256":  "15DDF5C43CF06F626608A5C65D5959BE49A57AB396BBC274A163C211BD232743",
+                        "size_bytes":  7469
+                    },
+                    {
+                        "path":  "tests/turn0_injection_test.rs",
+                        "sha256":  "A5D641B1D5E805ADED5835BF378BB6780A481ED2A112F222E8D3B8C3B8268C67",
+                        "size_bytes":  11216
+                    },
+                    {
+                        "path":  "tests/turn0_phase1_test.rs",
+                        "sha256":  "C826B43E1F6EB683A359FB246F8A55B53EF0E3AE5CC2AC454803651B99ADD190",
+                        "size_bytes":  14332
+                    },
+                    {
+                        "path":  "tests/utf8_safety_test.rs",
+                        "sha256":  "120D76656EE8362946D0E816719AB15CBFDC99A61D9DD5CF27AFE5BD0F541A47",
+                        "size_bytes":  9433
+                    }
+                ],
+    "git_head_commit":  "7106a2f369fe79faf5f95449378a900ab8e8eddf"
+}

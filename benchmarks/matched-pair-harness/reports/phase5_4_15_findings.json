@@ -1,0 +1,195 @@
+{
+  "schema_version": "2.0.0",
+  "phase": "5.4.15",
+  "capability": "diagnostic_continuation_architecture",
+  "audit_timestamp": "2026-11-19T22:48:00Z",
+  "findings": [
+    {
+      "id": "FINDING-01",
+      "category": "execution_policy_default",
+      "classification": "verified",
+      "summary": "Strict fail-closed stop-on-failure behavior is strictly preserved as the system default. The harness executes under execution_policy='strict' unless explicitly opted into 'diagnostic_continue'.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_236_280",
+      "metrics": {
+        "default_execution_policy": "strict",
+        "cli_flag": "--execution-policy",
+        "allowed_choices": ["strict", "diagnostic_continue"],
+        "regression_scenario_verified": "Scenario 1 (test_01_strict_mode_stop_on_failure)"
+      }
+    },
+    {
+      "id": "FINDING-02",
+      "category": "diagnostic_continuation_flow",
+      "classification": "verified",
+      "summary": "Under execution_policy='diagnostic_continue', an arm-level non-safety failure preserves the arm's exact failure status and allows subsequent arms to execute in counterbalanced order without premature block termination.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2045_2110",
+      "metrics": {
+        "scenario_verified": "Scenario 2 (test_02_diagnostic_continuation_flow)",
+        "order": ["arm_b_cand3_always_on", "arm_d_cand4_adaptive", "arm_a_native", "arm_c_cand4_always_on"],
+        "arm_b_preserved_status": "PRE_DISPATCH_HEADROOM_EXHAUSTED",
+        "subsequent_arms_executed": 3,
+        "resolved_block_status": "DIAGNOSTIC_INCOMPLETE"
+      }
+    },
+    {
+      "id": "FINDING-03",
+      "category": "per_arm_budget_isolation",
+      "classification": "verified",
+      "summary": "Per-arm token limits (max_tokens_ceiling and pre-dispatch headroom reserve) operate independently on each arm. Arm budget exhaustion does not corrupt subsequent arm environments or runner ceilings.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_1354_1375",
+      "metrics": {
+        "scenario_verified": "Scenario 3 (test_03_diagnostic_arm_budget_exhaustion)",
+        "arm_b_status": "TOKEN_CEILING_BREACHED",
+        "arm_c_status": "SUCCESS",
+        "arm_c_acceptance": true
+      }
+    },
+    {
+      "id": "FINDING-04",
+      "category": "global_budget_enforcement",
+      "classification": "verified",
+      "summary": "Global block token ceiling (global_tokens_ceiling) tracks cumulative spend across all arms. When cumulative tokens exceed the global budget, subsequent arm dispatches are immediately aborted with SKIPPED_GLOBAL_BUDGET.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2020_2042",
+      "metrics": {
+        "scenario_verified": "Scenario 4 (test_04_global_budget_exhaustion)",
+        "global_tokens_ceiling": 200000,
+        "cumulative_tokens_at_breach": 240000,
+        "arms_dispatched": 2,
+        "arms_skipped": 2,
+        "block_status": "ABORTED_GLOBAL_BUDGET"
+      }
+    },
+    {
+      "id": "FINDING-05",
+      "category": "global_headroom_guard",
+      "classification": "verified",
+      "summary": "The global pre-dispatch headroom reserve guard prevents arm launch if global_remaining < headroom_reserve, protecting against runaway spending on trailing arms.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2022_2032",
+      "metrics": {
+        "scenario_verified": "Scenario 5 (test_05_global_headroom_reserve_guard)",
+        "global_tokens_ceiling": 100000,
+        "headroom_reserve": 45000,
+        "arm_1_spent": 60000,
+        "remaining_budget": 40000,
+        "dispatch_blocked": true,
+        "block_status": "ABORTED_GLOBAL_BUDGET"
+      }
+    },
+    {
+      "id": "FINDING-06",
+      "category": "safety_override_candidate_integrity",
+      "classification": "verified",
+      "summary": "Candidate binary hash mismatch or missing binary is classified as an absolute safety violation that overrides diagnostic continuation, halting the block immediately with ABORTED_SAFETY_FAILURE and marking remaining arms SKIPPED_SAFETY_FAILURE.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2060_2075",
+      "metrics": {
+        "scenario_verified": "Scenario 6 (test_06_candidate_identity_safety_violation)",
+        "trigger": "SafetyViolationError (binary hash mismatch)",
+        "diagnostic_continuation_suppressed": true,
+        "block_status": "ABORTED_SAFETY_FAILURE"
+      }
+    },
+    {
+      "id": "FINDING-07",
+      "category": "safety_override_sandbox_integrity",
+      "classification": "verified",
+      "summary": "Golden repository corruption or sandbox preflight failure immediately halts block execution as an absolute safety override, preventing dirty environment execution.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2060_2075",
+      "metrics": {
+        "scenario_verified": "Scenario 7 (test_07_sandbox_integrity_safety_violation)",
+        "trigger": "SafetyViolationError (manifest mismatch)",
+        "block_status": "ABORTED_SAFETY_FAILURE"
+      }
+    },
+    {
+      "id": "FINDING-08",
+      "category": "timeout_and_process_cleanup",
+      "classification": "verified",
+      "summary": "Arm timeout safely terminates the child process tree, executes sandbox teardown, verifies golden dependency fingerprint, and cleanly transitions to subsequent arms in diagnostic mode without orphaned processes.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/runner.py:lines_1043_1055, src/orchestrator.py:lines_1636_1642",
+      "metrics": {
+        "scenario_verified": "Scenario 8 (test_08_timeout_and_cleanup)",
+        "arm_status": "TIMEOUT",
+        "subsequent_arm_status": "SUCCESS",
+        "block_status": "DIAGNOSTIC_INCOMPLETE"
+      }
+    },
+    {
+      "id": "FINDING-09",
+      "category": "historical_telemetry_compatibility",
+      "classification": "verified",
+      "summary": "Orchestrator candidate audit functions and schema validators maintain 100% backward compatibility with Phase 5.4.7 (Live 01) and Phase 5.4.13 (Live 02) historical telemetry files.",
+      "evidence_reference": "benchmarks/matched-pair-harness/tests/test_diagnostic_continuation.py:test_09_historical_telemetry_compatibility",
+      "metrics": {
+        "scenario_verified": "Scenario 9 (test_09_historical_telemetry_compatibility)",
+        "live_01_telemetry_files_verified": 4,
+        "live_02_telemetry_files_verified": 4,
+        "schema_violations": 0
+      }
+    },
+    {
+      "id": "FINDING-10",
+      "category": "comparative_claim_protection",
+      "classification": "verified",
+      "summary": "In diagnostic mode where some arms succeed and some fail, all comparative efficiency savings claims are unconditionally invalidated. No efficiency percentage or quality-adjusted cost claims may be cited.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_822_855",
+      "metrics": {
+        "scenario_verified": "Scenario 10 (test_10_comparative_acceptance_protection)",
+        "savings_claim_eligible": false,
+        "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+        "verdict": "MUTUAL_ACCEPTANCE_FAILURE"
+      }
+    },
+    {
+      "id": "FINDING-11",
+      "category": "diagnostic_complete_behavior",
+      "classification": "verified",
+      "summary": "When all four arms achieve full functional acceptance (C = 1.0) under diagnostic continuation, block status resolves to DIAGNOSTIC_COMPLETE and comparative efficiency metrics are scientifically valid.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2120_2145",
+      "metrics": {
+        "scenario_verified": "Scenario 11 (test_11_all_arms_succeed_in_diagnostic_mode)",
+        "all_arms_accepted": true,
+        "block_status": "DIAGNOSTIC_COMPLETE",
+        "savings_claim_eligible": true,
+        "verdict": "EFFICIENCY_GAIN"
+      }
+    },
+    {
+      "id": "FINDING-12",
+      "category": "user_cancellation_safety",
+      "classification": "verified",
+      "summary": "KeyboardInterrupt or user cancellation during execution cleanly aborts the block with ABORTED_USER_CANCEL, records cancellation on the current arm, marks remaining arms SKIPPED_USER_CANCEL, and tears down sandboxes safely.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_2076_2086",
+      "metrics": {
+        "scenario_verified": "Scenario 12 (test_12_cancellation_safe_cleanup)",
+        "block_status": "ABORTED_USER_CANCEL",
+        "arm_status": "ABORTED_USER_CANCEL",
+        "trailing_arms_status": "SKIPPED_USER_CANCEL"
+      }
+    },
+    {
+      "id": "FINDING-13",
+      "category": "live_model_dispatch_status",
+      "classification": "not_tested",
+      "summary": "Live cloud model dispatch (OpenAI/Codex/GPT-5.6) was strictly prohibited and not executed during Phase 5.4.15. All architecture, implementation, and integration verifications were conducted entirely offline.",
+      "evidence_reference": "Phase 5.4.15 operational constraints",
+      "metrics": {
+        "live_dispatches": 0,
+        "tokens_billed": 0,
+        "offline_tests_passing": 12
+      }
+    },
+    {
+      "id": "FINDING-14",
+      "category": "candidate_4_2_task_b_live_projection",
+      "classification": "probable",
+      "summary": "Based on verified Candidate 4.2 response bounding (12.2 KB vs Candidate 3's 804 KB) and simulated turn trajectories, Candidate 4.2 in Arm C (Always-On) and Arm D (Adaptive) is projected to complete Task B within ~120,000 to ~220,000 tokens, well below the 550,000 ceiling. Diagnostic continuation ensures that even if Candidate 3 exhausts budget again in Arm B, Arms C and D will execute and provide empirical proof.",
+      "evidence_reference": "PHASE_5_4_14_TASK_B_FAILURE_FORENSICS_REPORT.md:Section_5",
+      "metrics": {
+        "projected_cand4_2_consumption": 180000,
+        "configured_ceiling": 550000,
+        "headroom_reserve": 45000,
+        "diagnostic_continuation_enabled": true
+      }
+    }
+  ]
+}

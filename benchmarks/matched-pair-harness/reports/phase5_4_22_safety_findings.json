@@ -1,0 +1,803 @@
+{
+  "schema_version": "2.0.0",
+  "phase_identifier": "5.4.22",
+  "baseline_branch": "feature/phase2-stage5-remediation",
+  "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "execution_mode": "STRICTLY_OFFLINE_READ_ONLY_FORENSIC_AUDIT",
+  "timestamp_utc": "2026-11-20T04:22:00Z",
+  "authorization_status": "NOT_AUTHORIZED",
+  "verdict": "MANIFEST_BLOCKED",
+  "verdict_rationale": "Malformed tetrad arm_order inputs reach the dispatch boundary and execute live arms before failing or marking omitted arms as DEFERRED. The benchmark manifest cannot be executed until upfront fail-closed validation is implemented.",
+  "global_reserve_semantics": {
+    "policy_1_pre_dispatch_threshold": "IMPLEMENTED",
+    "policy_2_continuously_protected_reserve": "NOT_IMPLEMENTED",
+    "policy_3_absolute_global_ceiling": "IMPLEMENTED",
+    "pre_dispatch_threshold_tokens": 45000,
+    "headroom_reserve_tokens": 45000,
+    "effective_arm_ceiling_formula": "min(max_tokens_ceiling, global_remaining)",
+    "deducts_reserve_from_effective_ceiling": false,
+    "runner_aware_of_global_budget": false,
+    "reserve_status_summary": "The 45,000-token headroom reserve functions as a pre-dispatch eligibility threshold and per-turn headroom check, but is not continuously protected against exhaustion."
+  },
+  "per_arm_budget_semantics": {
+    "per_arm_max_tokens_ceiling": 550000,
+    "clamped_to_global_remaining": true,
+    "turn_headroom_formula": "remaining >= max(last_turn_request_tokens, 45000)"
+  },
+  "final_arm_behavior": {
+    "can_consume_last_45000_tokens": true,
+    "dispatch_gate_threshold": 45000,
+    "special_handling": "NONE",
+    "post_execution_minimum_remaining_budget": 0,
+    "explanation": "If Arm 4 starts with global_remaining=45,000, effective_arm_ceiling is 45,000. Turn 1 headroom check passes (45,000 >= 45,000) and if the turn finishes the task successfully, all 45,000 tokens may be consumed, reducing global remaining budget to 0."
+  },
+  "maximum_aggregate_exposure": {
+    "absolute_global_ceiling": 2200000,
+    "maximum_permitted_aggregate_spend": 2200000,
+    "minimum_guaranteed_remaining_tokens": 0,
+    "maximum_spend_preserving_45k_reserve": 2155000,
+    "maximum_cumulative_spend_before_final_arm": 2155000,
+    "maximum_possible_spend_by_final_arm": 550000,
+    "concurrency_overshoot_exposure": "Residual in-flight streaming chunk (<1,000 tokens) before process tree kill on aborted turn."
+  },
+  "adversarial_simulation_results": [
+    {
+      "scenario_id": 1,
+      "description": "Global remaining is 550,000",
+      "initial_global_remaining": 550000,
+      "per_arm_remaining": 550000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 550000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 500000,
+      "final_global_remaining": 50000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": true
+    },
+    {
+      "scenario_id": 2,
+      "description": "Global remaining is 100,000",
+      "initial_global_remaining": 100000,
+      "per_arm_remaining": 100000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 100000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 100000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 3,
+      "description": "Global remaining is exactly 45,000",
+      "initial_global_remaining": 45000,
+      "per_arm_remaining": 45000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 45000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 45000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 4,
+      "description": "Global remaining is 44,999",
+      "initial_global_remaining": 44999,
+      "per_arm_remaining": 0,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 0,
+      "dispatch_decision": "ABORTED_GLOBAL_BUDGET",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 44999,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 5,
+      "description": "Per-arm ceiling is lower than global remaining",
+      "initial_global_remaining": 1000000,
+      "per_arm_remaining": 300000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 300000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 300000,
+      "final_global_remaining": 700000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": true
+    },
+    {
+      "scenario_id": 6,
+      "description": "Global remaining is lower than per-arm ceiling",
+      "initial_global_remaining": 200000,
+      "per_arm_remaining": 200000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 200000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 200000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 7,
+      "description": "Final arm begins with exactly 45,000 remaining",
+      "initial_global_remaining": 45000,
+      "per_arm_remaining": 45000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 45000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 45000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 8,
+      "description": "A turn is estimated to consume 44,999 tokens",
+      "initial_global_remaining": 45000,
+      "per_arm_remaining": 45000,
+      "estimated_next_turn": 44999,
+      "effective_arm_ceiling": 45000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 44999,
+      "final_global_remaining": 1,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 9,
+      "description": "A turn is estimated to consume exactly 45,000 tokens",
+      "initial_global_remaining": 45000,
+      "per_arm_remaining": 45000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 45000,
+      "dispatch_decision": "DISPATCH_ALLOWED",
+      "actual_simulated_consumption": 45000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 10,
+      "description": "A turn is estimated to consume 45,001 tokens",
+      "initial_global_remaining": 45000,
+      "per_arm_remaining": 45000,
+      "estimated_next_turn": 45001,
+      "effective_arm_ceiling": 45000,
+      "dispatch_decision": "PREVENTIVE_HALT",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 45000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": true
+    },
+    {
+      "scenario_id": 11,
+      "description": "Actual token consumption differs from estimated next-turn consumption",
+      "initial_global_remaining": 100000,
+      "per_arm_remaining": 100000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 100000,
+      "dispatch_decision": "DISPATCH_ALLOWED_THEN_PREVENTIVE_HALT",
+      "actual_simulated_consumption": 60000,
+      "final_global_remaining": 40000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 12,
+      "description": "Telemetry becomes invalid after an arm completes",
+      "initial_global_remaining": 1000000,
+      "per_arm_remaining": 550000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 550000,
+      "dispatch_decision": "ABORTED_UNCERTAIN_BUDGET",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 1000000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": true
+    },
+    {
+      "scenario_id": 13,
+      "description": "A runner reports SUCCESS above the effective arm ceiling",
+      "initial_global_remaining": 100000,
+      "per_arm_remaining": 100000,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 100000,
+      "dispatch_decision": "SAFETY_VIOLATION_HALT",
+      "actual_simulated_consumption": 120000,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 14,
+      "description": "Cumulative spend reaches the global ceiling exactly",
+      "initial_global_remaining": 0,
+      "per_arm_remaining": 0,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 0,
+      "dispatch_decision": "ABORTED_GLOBAL_BUDGET",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 0,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 15,
+      "description": "Cumulative spend attempts to exceed the global ceiling",
+      "initial_global_remaining": 20000,
+      "per_arm_remaining": 0,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 0,
+      "dispatch_decision": "ABORTED_GLOBAL_BUDGET",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 20000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    },
+    {
+      "scenario_id": 16,
+      "description": "Diagnostic continuation is enabled while global budget is nearly exhausted",
+      "initial_global_remaining": 40000,
+      "per_arm_remaining": 0,
+      "estimated_next_turn": 45000,
+      "effective_arm_ceiling": 0,
+      "dispatch_decision": "ABORTED_GLOBAL_BUDGET",
+      "actual_simulated_consumption": 0,
+      "final_global_remaining": 40000,
+      "safety_status": "PASS",
+      "reserve_remains_protected": false
+    }
+  ],
+  "tetrad_order_validation_findings": {
+    "invariant_enforced_pre_dispatch": false,
+    "missing_arms_behavior": "EXECUTES_PARTIAL_TETRAD_THEN_DEFERRED",
+    "duplicate_arms_behavior": "EXECUTES_DUPLICATE_THEN_DEFERRED",
+    "unknown_arms_behavior": "EXECUTES_PRIOR_VALID_ARMS_THEN_SAFETY_ERROR",
+    "side_effect_verification": "MALFORMED_INPUT_CAUSES_PROCESS_LAUNCH_AND_SANDBOX_CREATION"
+  },
+  "malformed_input_side_effect_results": [
+    {
+      "test_id": "T01",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_b_cand3_always_on",
+      "description": "Accept exact valid order (A,D,C,B)",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on"
+      ],
+      "meets_required_invariant": true,
+      "current_implementation_verdict": "ACCEPTED_VALID",
+      "current_behavior": "Accepted: Valid 4-arm permutation executed in order: ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on', 'arm_b_cand3_always_on']",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T02",
+      "raw_input": "arm_b_cand3_always_on,arm_d_cand4_adaptive,arm_a_native,arm_c_cand4_always_on",
+      "description": "Accept exact valid order (B,D,A,C)",
+      "parsed_values": [
+        "arm_b_cand3_always_on",
+        "arm_d_cand4_adaptive",
+        "arm_a_native",
+        "arm_c_cand4_always_on"
+      ],
+      "meets_required_invariant": true,
+      "current_implementation_verdict": "ACCEPTED_VALID",
+      "current_behavior": "Accepted: Valid 4-arm permutation executed in order: ['arm_b_cand3_always_on', 'arm_d_cand4_adaptive', 'arm_a_native', 'arm_c_cand4_always_on']",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_b_cand3_always_on",
+        "arm_d_cand4_adaptive",
+        "arm_a_native",
+        "arm_c_cand4_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T03",
+      "raw_input": "arm_a_native,arm_a_native,arm_c_cand4_always_on,arm_d_cand4_adaptive",
+      "description": "Reject duplicate (A,A,C,D)",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_a_native",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "UNSAFE_PARTIAL_EXECUTION",
+      "current_behavior": "DEFECT: Dispatched partial/malformed arms ['arm_a_native', 'arm_a_native', 'arm_c_cand4_always_on', 'arm_d_cand4_adaptive']; marked omitted arms ['arm_b_cand3_always_on'] as DEFERRED post-execution!",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_a_native",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T04",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on",
+      "description": "Reject missing arm (A,D,C)",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "UNSAFE_PARTIAL_EXECUTION",
+      "current_behavior": "DEFECT: Dispatched partial/malformed arms ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on']; marked omitted arms ['arm_b_cand3_always_on'] as DEFERRED post-execution!",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T05",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_b_cand3_always_on,arm_x_unknown",
+      "description": "Reject unknown arm (A,D,C,B,X)",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on",
+        "arm_x_unknown"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 5 ('arm_x_unknown') with SafetyViolationError. BUT arms ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on', 'arm_b_cand3_always_on'] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'arm_x_unknown' encountered in orchestrator.",
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 4,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T06",
+      "raw_input": "",
+      "description": "Empty order",
+      "parsed_values": null,
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ACCEPTED_DEFAULT",
+      "current_behavior": "Accepted: Used deterministic/shuffled default registered arms.",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T07",
+      "raw_input": "arm_a_native arm_d_cand4_adaptive arm_c_cand4_always_on arm_b_cand3_always_on",
+      "description": "Space-separated composite",
+      "parsed_values": [
+        "arm_a_native arm_d_cand4_adaptive arm_c_cand4_always_on arm_b_cand3_always_on"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 1 ('arm_a_native arm_d_cand4_adaptive arm_c_cand4_always_on arm_b_cand3_always_on') with SafetyViolationError. BUT arms [] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'arm_a_native arm_d_cand4_adaptive arm_c_cand4_always_on arm_b_cand3_always_on' encountered in orchestrator.",
+      "dispatched_arms_before_check": [],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": false,
+      "filesystem_side_effect_in_live_run": false,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T08",
+      "raw_input": " arm_a_native , arm_d_cand4_adaptive , arm_c_cand4_always_on , arm_b_cand3_always_on ",
+      "description": "Whitespace around comma-separated names",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on"
+      ],
+      "meets_required_invariant": true,
+      "current_implementation_verdict": "ACCEPTED_VALID",
+      "current_behavior": "Accepted: Valid 4-arm permutation executed in order: ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on', 'arm_b_cand3_always_on']",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_b_cand3_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T09",
+      "raw_input": "A,D,C,B",
+      "description": "Short aliases A,D,C,B",
+      "parsed_values": [
+        "A",
+        "D",
+        "C",
+        "B"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 1 ('A') with SafetyViolationError. BUT arms [] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'A' encountered in orchestrator.",
+      "dispatched_arms_before_check": [],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": false,
+      "filesystem_side_effect_in_live_run": false,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T10",
+      "raw_input": "arm_a_native,arm_b_cand3_always_on,arm_c_cand4_always_on,arm_d_cand4_adaptive",
+      "description": "All four valid arms exactly once",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+      ],
+      "meets_required_invariant": true,
+      "current_implementation_verdict": "ACCEPTED_VALID",
+      "current_behavior": "Accepted: Valid 4-arm permutation executed in order: ['arm_a_native', 'arm_b_cand3_always_on', 'arm_c_cand4_always_on', 'arm_d_cand4_adaptive']",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": true
+    },
+    {
+      "test_id": "T11",
+      "raw_input": "arm_a_native,arm_b_cand3_always_on,arm_c_cand4_always_on,arm_a_native",
+      "description": "Same arm repeated with a different position",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_a_native"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "UNSAFE_PARTIAL_EXECUTION",
+      "current_behavior": "DEFECT: Dispatched partial/malformed arms ['arm_a_native', 'arm_b_cand3_always_on', 'arm_c_cand4_always_on', 'arm_a_native']; marked omitted arms ['arm_d_cand4_adaptive'] as DEFERRED post-execution!",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_a_native"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T12",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,unknown_arm",
+      "description": "Unknown arm after three valid arms",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "unknown_arm"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 4 ('unknown_arm') with SafetyViolationError. BUT arms ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on'] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'unknown_arm' encountered in orchestrator.",
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 3,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T13",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,invalid!suffix",
+      "description": "Valid prefix followed by malformed suffix",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "invalid!suffix"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 4 ('invalid!suffix') with SafetyViolationError. BUT arms ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on'] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'invalid!suffix' encountered in orchestrator.",
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on"
+      ],
+      "prior_arms_executed_before_rejection": 3,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T14",
+      "raw_input": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_a_native",
+      "description": "Duplicate in final position",
+      "parsed_values": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_a_native"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "UNSAFE_PARTIAL_EXECUTION",
+      "current_behavior": "DEFECT: Dispatched partial/malformed arms ['arm_a_native', 'arm_d_cand4_adaptive', 'arm_c_cand4_always_on', 'arm_a_native']; marked omitted arms ['arm_b_cand3_always_on'] as DEFERRED post-execution!",
+      "exception_raised": null,
+      "dispatched_arms_before_check": [
+        "arm_a_native",
+        "arm_d_cand4_adaptive",
+        "arm_c_cand4_always_on",
+        "arm_a_native"
+      ],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": true,
+      "filesystem_side_effect_in_live_run": true,
+      "fail_closed_before_dispatch": false
+    },
+    {
+      "test_id": "T15",
+      "raw_input": "ARM_A_NATIVE,ARM_D_CAND4_ADAPTIVE,ARM_C_CAND4_ALWAYS_ON,ARM_B_CAND3_ALWAYS_ON",
+      "description": "Order with case variation",
+      "parsed_values": [
+        "ARM_A_NATIVE",
+        "ARM_D_CAND4_ADAPTIVE",
+        "ARM_C_CAND4_ALWAYS_ON",
+        "ARM_B_CAND3_ALWAYS_ON"
+      ],
+      "meets_required_invariant": false,
+      "current_implementation_verdict": "ERROR_DURING_EXECUTION",
+      "current_behavior": "Halted at arm 1 ('ARM_A_NATIVE') with SafetyViolationError. BUT arms [] already dispatched!",
+      "exception_raised": "SafetyViolationError: FATAL: Unregistered arm 'ARM_A_NATIVE' encountered in orchestrator.",
+      "dispatched_arms_before_check": [],
+      "prior_arms_executed_before_rejection": 0,
+      "process_launched_in_live_run": false,
+      "filesystem_side_effect_in_live_run": false,
+      "fail_closed_before_dispatch": true
+    }
+  ],
+  "valid_order_identity_verification": {
+    "order": [
+      "arm_a_native",
+      "arm_d_cand4_adaptive",
+      "arm_c_cand4_always_on",
+      "arm_b_cand3_always_on"
+    ],
+    "identities_preserved": true,
+    "configurations_preserved": true,
+    "relative_order_justification": "Arm B (Cand 3) placed in final position to prevent token exhaustion from aborting downstream arms."
+  },
+  "historical_regression_classification": {
+    "status": "HISTORICALLY_VERIFIED",
+    "evidence_file": "task-58182.log",
+    "suites_passed": 7,
+    "tests_passed": 63,
+    "exit_codes_zero": true,
+    "duration_seconds": 396.27
+  },
+  "current_rerun_classification": {
+    "status": "CURRENT_OFFLINE_RERUN_VERIFIED",
+    "suites_passed": 7,
+    "tests_passed": 63,
+    "tests_failed": 0,
+    "all_exit_codes_zero": true,
+    "total_duration_seconds": 1367.05,
+    "suite_results": [
+      {
+        "suite": "test_candidate_selection.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_candidate_selection.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_candidate_selection.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T03:58:29.199143+00:00",
+        "end_time": "2026-11-20T03:58:32.475790+00:00",
+        "duration_seconds": 3.28,
+        "exit_code": 0,
+        "passed": 8,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_candidate_selection.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_telemetry_semantics.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_telemetry_semantics.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_telemetry_semantics.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T03:58:32.477731+00:00",
+        "end_time": "2026-11-20T03:58:35.923439+00:00",
+        "duration_seconds": 3.45,
+        "exit_code": 0,
+        "passed": 4,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_telemetry_semantics.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_candidate_4_2_offline_certification.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_candidate_4_2_offline_certification.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_candidate_4_2_offline_certification.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T03:58:35.925037+00:00",
+        "end_time": "2026-11-20T03:58:57.109128+00:00",
+        "duration_seconds": 21.18,
+        "exit_code": 0,
+        "passed": 10,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_candidate_4_2_offline_certification.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_task_b_budget_simulation.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_task_b_budget_simulation.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_task_b_budget_simulation.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T03:58:57.117649+00:00",
+        "end_time": "2026-11-20T03:58:59.456090+00:00",
+        "duration_seconds": 2.34,
+        "exit_code": 0,
+        "passed": 3,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_task_b_budget_simulation.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_diagnostic_continuation.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_diagnostic_continuation.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_diagnostic_continuation.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T03:58:59.457514+00:00",
+        "end_time": "2026-11-20T04:05:17.007996+00:00",
+        "duration_seconds": 377.55,
+        "exit_code": 0,
+        "passed": 27,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_diagnostic_continuation.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_tetrad_harness.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_tetrad_harness.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_tetrad_harness.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T04:05:17.011457+00:00",
+        "end_time": "2026-11-20T04:08:56.123350+00:00",
+        "duration_seconds": 219.11,
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_tetrad_harness.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      },
+      {
+        "suite": "test_per_arm_candidate_identity.py",
+        "suite_path": "benchmarks/matched-pair-harness/tests/test_per_arm_candidate_identity.py",
+        "command": "pytest benchmarks/matched-pair-harness/tests/test_per_arm_candidate_identity.py -v",
+        "cwd": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+        "start_time": "2026-11-20T04:08:56.126015+00:00",
+        "end_time": "2026-11-20T04:21:16.270581+00:00",
+        "duration_seconds": 740.14,
+        "exit_code": 0,
+        "passed": 10,
+        "failed": 0,
+        "log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\scratch\\regression_rerun\\test_per_arm_candidate_identity.py.log",
+        "external_services_contacted": false,
+        "protected_files_modified": false
+      }
+    ]
+  },
+  "recommended_global_budget_policy": {
+    "recommended_option": "OPTION_A_PRE_DISPATCH_THRESHOLD_ONLY",
+    "justification": "Option A preserves full budget utilization up to the 2,200,000 global ceiling and ensures final arms are not arbitrarily starved, while strictly preventing cumulative spend from exceeding the ceiling. Option B creates 45,000 tokens of dead allocation that can never be spent by any arm."
+  },
+  "artifact_integrity_results": {
+    "branch_unchanged": true,
+    "head_unchanged": true,
+    "cand3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+    "cand4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+    "golden_repo_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "p18_findings_sha256": "E8B861AF6095E9CD307A44A3F2334AA5FD7E855FF0AB596F7AA057C808E489D0",
+    "p19_manifest_sha256": "F9B8353B606C86D6179BAF133CE4DE0F280932479BF57A3979E88FB0DB8463D3",
+    "p20_audit_sha256": "606D628D4CF2C8FA888C1AC37F033330B343F60A88EC00AB2642DFFF454003AC",
+    "p21_audit_sha256": "E7842FA91CC908FC15119729249938380321A7D8CFD2C1B78A43E8449B804590",
+    "working_tree_clean_preservation": true
+  },
+  "findings": [
+    {
+      "finding_id": "ENGRAM-5422-01",
+      "severity": "CRITICAL",
+      "status": "FAIL",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "function_reference": "run_tetrad (L2065-2071) and main (L2558-2575)",
+      "explanation": "Malformed tetrad order input is not validated before the execution loop begins. Omitted arms result in partial execution with missing arms marked DEFERRED at the end. Duplicate arms execute sequentially. Unknown arms execute prior arms before raising SafetyViolationError.",
+      "required_action": "Implement upfront fail-closed validation enforcing exact 4-arm permutation in run_tetrad() and main() prior to live execution."
+    },
+    {
+      "finding_id": "ENGRAM-5422-02",
+      "severity": "HIGH",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "function_reference": "run_tetrad (L2098, L2115)",
+      "explanation": "The 45,000-token headroom reserve is a pre-dispatch eligibility threshold (Policy 1) rather than a continuously protected global floor (Policy 2). Effective arm ceiling does not deduct 45,000. Final arm can consume remaining budget down to 0.",
+      "required_action": "Formally document Option A semantics in project specifications to prevent misinterpreting the pre-dispatch threshold as an unspendable reserve."
+    },
+    {
+      "finding_id": "ENGRAM-5422-03",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "function_reference": "run_tetrad (L2096-2115, L2136-2142)",
+      "explanation": "Absolute global ceiling of 2,200,000 tokens is strictly bounded. Clamped effective ceilings and over-ceiling safety tripwires guarantee aggregate spend cannot exceed 2,200,000 tokens under normal operation.",
+      "required_action": "Maintain existing global token clamping and over-ceiling tripwire logic."
+    },
+    {
+      "finding_id": "ENGRAM-5422-04",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "scratch/regression_rerun/summary.json",
+      "function_reference": "pytest test runner",
+      "explanation": "Independent evidence established for both historical execution (task-58182.log, 63 tests, 396.27s) and current offline rerun (summary.json, 63 tests, 1367.05s). Both runs passed with zero exit codes.",
+      "required_action": "Retain individual suite logs in audit artifacts."
+    }
+  ],
+  "outstanding_blockers": [
+    "Tetrad order validation is missing upfront in orchestrator.py: malformed orders can dispatch partial tetrads before failing or marking DEFERRED."
+  ]
+}

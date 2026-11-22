@@ -1,0 +1,15 @@
+test_id,failure_condition,interception_point,protection_mechanism,expected_outcome,test_reference,audit_status
+FAIL-01,Candidate 5 binary file missing from path,Pre-dispatch,ArmCandidateIdentity.verify_binary_integrity(),Raises SafetyViolationError and halts,test_05_missing_candidate5_rejection,VERIFIED
+FAIL-02,Candidate 5 binary hash mismatch (1-bit corrupt),Pre-dispatch,SHA-256 bit-for-bit check vs ledger,Raises SafetyViolationError and halts,test_11_candidate_binary_hash_mismatch_rejection,VERIFIED
+FAIL-03,Arm missing from 5-arm pentad order,Preflight,validate_pentad_arm_order(),Raises SafetyViolationError before dispatch,test_06_missing_other_arms_rejection,VERIFIED
+FAIL-04,Duplicate arm present in pentad order,Preflight,validate_pentad_arm_order(),Raises SafetyViolationError before dispatch,test_07_duplicate_arm_rejection,VERIFIED
+FAIL-05,Unknown / unregistered candidate version,Preflight,CANDIDATE_LEDGER lookup,Raises SafetyViolationError,test_08_unknown_candidate_rejection,VERIFIED
+FAIL-06,Invalid arm identity string,Preflight,ALL_PENTAD_ARMS membership check,Raises SafetyViolationError,test_09_wrong_arm_identity_rejection,VERIFIED
+FAIL-07,Corrupted task fixture config,Preflight,evaluator.validate_preflight(),Raises FixturePreflightError,test_10_fixture_hash_mismatch_rejection,VERIFIED
+FAIL-08,Run telemetry record missing or invalid,Acceptance,validate_instance(record self.telemetry_schema),Raises SchemaValidationError and marks run invalid,test_12_missing_telemetry_rejection,VERIFIED
+FAIL-09,Duplicate run ID or telemetry record,Acceptance,Telemetry integrity validator,Invalidates run acceptance,test_13_duplicate_telemetry_rejection,VERIFIED
+FAIL-10,Arm execution incomplete or errored,Acceptance,compute_comparative_analysis(),Sets verdict to MUTUAL_ACCEPTANCE_FAILURE and blocks claims,test_14_incomplete_arm_rejection,VERIFIED
+FAIL-11,Per-arm model tokens exceed ceiling,Execution,Token ceiling observer,Overrides execution_status to TOKEN_CEILING_BREACHED,test_15_per_arm_budget_overflow,VERIFIED
+FAIL-12,Cumulative tokens exceed global ceiling,Execution,Global budget headroom check,Halts subsequent arms and marks block HALTED,test_16_global_budget_overflow,VERIFIED
+FAIL-13,First arm fails under strict policy,Execution,Stop-on-failure policy handler,Skips all downstream arms and logs skip reason,test_17_stop_on_failure_behavior,VERIFIED
+FAIL-14,Attempting savings claim with unaccepted arm,Acceptance,comparative_analysis generator,Sets savings_claim_eligible=false and status INVALIDATED,test_20_prevention_of_comparisons_when_incomplete,VERIFIED

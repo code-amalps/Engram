@@ -1,0 +1,8 @@
+scenario_id,scenario_name,task_a_actual_usage,task_b_dynamic_ceiling,task_b_slot1_usage,task_b_slot2_usage,task_b_cumulative_before_slot3,aggregate_cumulative_before_slot3,gross_remaining_before_slot3,protected_reserve,usable_headroom,cand5_assigned_ceiling,dispatch_decision,rationale
+SC-01,Nominal Saturation Baseline,1000000,1500000,500000,500000,1000000,2000000,500000,45000,455000,455000,GUARANTEED,Standard nominal saturation across both tasks with exact 500k arm spending
+SC-02,Task B Slot 2 Empirical Overshoot,1000000,1500000,500000,520000,1020000,2020000,480000,45000,435000,435000,GUARANTEED,Slot 2 overshoots by empirical 20k tokens; absorbed by cumulative counter
+SC-03,Task B Slots 1 & 2 Both Empirical Overshoot,1000000,1500000,520000,520000,1040000,2040000,460000,45000,415000,415000,GUARANTEED,Both prior arms consume 520k tokens; gross remaining well above reserve
+SC-04A,Task B Theoretical Max (Task A Nominal),1000000,1500000,531384,531384,1062768,2062768,437232,45000,392232,392232,GUARANTEED,Both prior arms hit theoretical max burst; Task A nominal at 1.0M
+SC-04B,Dual Task Theoretical Max Overshoot,1031384,1468616,531384,531384,1062768,2094152,405848,45000,360848,360848,GUARANTEED,Worst-case multi-task overshoot; Task B ceiling throttled to 1468616; gross remaining 405848 > 45000
+SC-05,Early Arm Starvation / Low Prior Usage,800000,1500000,200000,200000,400000,1200000,1100000,45000,500000,500000,GUARANTEED,Low prior usage; Candidate 5 ceiling clamped to standard 500k per-arm max
+SC-06,Telemetry Incomplete or Corrupted,UNCERTAIN,HALTED,UNCERTAIN,UNCERTAIN,UNCERTAIN,UNCERTAIN,UNCERTAIN,45000,0,0,REFUSE_DISPATCH,Fail-closed abort triggered by is_budget_uncertain flag

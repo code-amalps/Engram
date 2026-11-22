@@ -1,0 +1,1019 @@
+{
+  "schema_version": "2.1.0",
+  "block_id": "pentad_pair_01",
+  "task_id": "task_a_typo",
+  "seed": 9044,
+  "order": [
+    "arm_b_cand3",
+    "arm_a_native",
+    "arm_c_cand42_always_on",
+    "arm_d_cand42_adaptive",
+    "arm_e_cand5_optimized"
+  ],
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "medium",
+  "golden_dependency_fingerprint_verified": true,
+  "execution_policy": "diagnostic_continue",
+  "block_status": "DIAGNOSTIC_INCOMPLETE",
+  "global_tokens_ceiling": null,
+  "cumulative_global_tokens": 52840,
+  "acceptance": {
+    "arm_a_native_accepted": false,
+    "arm_b_cand3_accepted": false,
+    "arm_c_cand42_always_on_accepted": false,
+    "arm_d_cand42_adaptive_accepted": false,
+    "arm_e_cand5_optimized_accepted": false,
+    "all_arms_accepted": false
+  },
+  "comparative_analysis": {
+    "cand5_optimized_vs_native": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_a_native": 28720,
+          "arm_e_cand5_optimized": 2910,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28720,
+          "treatment": 2910
+        },
+        "prompt_tokens_total": {
+          "arm_a_native": 28400,
+          "arm_e_cand5_optimized": 2850,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28400,
+          "treatment": 2850
+        },
+        "completion_tokens": {
+          "arm_a_native": 320,
+          "arm_e_cand5_optimized": 60,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 320,
+          "treatment": 60
+        },
+        "peak_single_request_context": {
+          "arm_a_native": null,
+          "arm_e_cand5_optimized": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_a_native": 2872000.0,
+          "arm_e_cand5_optimized": 291000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 2872000.0,
+          "treatment": 291000.0
+        }
+      }
+    },
+    "cand5_optimized_vs_cand42_adaptive": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_d_cand42_adaptive": 4280,
+          "arm_e_cand5_optimized": 2910,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 4280,
+          "treatment": 2910
+        },
+        "prompt_tokens_total": {
+          "arm_d_cand42_adaptive": 4200,
+          "arm_e_cand5_optimized": 2850,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 4200,
+          "treatment": 2850
+        },
+        "completion_tokens": {
+          "arm_d_cand42_adaptive": 80,
+          "arm_e_cand5_optimized": 60,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 80,
+          "treatment": 60
+        },
+        "peak_single_request_context": {
+          "arm_d_cand42_adaptive": null,
+          "arm_e_cand5_optimized": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_d_cand42_adaptive": 428000.0,
+          "arm_e_cand5_optimized": 291000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 428000.0,
+          "treatment": 291000.0
+        }
+      }
+    },
+    "cand5_optimized_vs_cand42_always_on": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_c_cand42_always_on": 4280,
+          "arm_e_cand5_optimized": 2910,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 4280,
+          "treatment": 2910
+        },
+        "prompt_tokens_total": {
+          "arm_c_cand42_always_on": 4200,
+          "arm_e_cand5_optimized": 2850,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 4200,
+          "treatment": 2850
+        },
+        "completion_tokens": {
+          "arm_c_cand42_always_on": 80,
+          "arm_e_cand5_optimized": 60,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 80,
+          "treatment": 60
+        },
+        "peak_single_request_context": {
+          "arm_c_cand42_always_on": null,
+          "arm_e_cand5_optimized": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_c_cand42_always_on": 428000.0,
+          "arm_e_cand5_optimized": 291000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 428000.0,
+          "treatment": 291000.0
+        }
+      }
+    },
+    "cand5_optimized_vs_cand3": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_b_cand3": 12650,
+          "arm_e_cand5_optimized": 2910,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 12650,
+          "treatment": 2910
+        },
+        "prompt_tokens_total": {
+          "arm_b_cand3": 12500,
+          "arm_e_cand5_optimized": 2850,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 12500,
+          "treatment": 2850
+        },
+        "completion_tokens": {
+          "arm_b_cand3": 150,
+          "arm_e_cand5_optimized": 60,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 150,
+          "treatment": 60
+        },
+        "peak_single_request_context": {
+          "arm_b_cand3": null,
+          "arm_e_cand5_optimized": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_b_cand3": 1265000.0,
+          "arm_e_cand5_optimized": 291000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 1265000.0,
+          "treatment": 291000.0
+        }
+      }
+    },
+    "cand42_adaptive_vs_native": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_a_native": 28720,
+          "arm_d_cand42_adaptive": 4280,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28720,
+          "treatment": 4280
+        },
+        "prompt_tokens_total": {
+          "arm_a_native": 28400,
+          "arm_d_cand42_adaptive": 4200,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28400,
+          "treatment": 4200
+        },
+        "completion_tokens": {
+          "arm_a_native": 320,
+          "arm_d_cand42_adaptive": 80,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 320,
+          "treatment": 80
+        },
+        "peak_single_request_context": {
+          "arm_a_native": null,
+          "arm_d_cand42_adaptive": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_a_native": 2872000.0,
+          "arm_d_cand42_adaptive": 428000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 2872000.0,
+          "treatment": 428000.0
+        }
+      }
+    },
+    "cand42_always_on_vs_native": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_a_native": 28720,
+          "arm_c_cand42_always_on": 4280,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28720,
+          "treatment": 4280
+        },
+        "prompt_tokens_total": {
+          "arm_a_native": 28400,
+          "arm_c_cand42_always_on": 4200,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28400,
+          "treatment": 4200
+        },
+        "completion_tokens": {
+          "arm_a_native": 320,
+          "arm_c_cand42_always_on": 80,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 320,
+          "treatment": 80
+        },
+        "peak_single_request_context": {
+          "arm_a_native": null,
+          "arm_c_cand42_always_on": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_a_native": 2872000.0,
+          "arm_c_cand42_always_on": 428000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 2872000.0,
+          "treatment": 428000.0
+        }
+      }
+    },
+    "cand3_vs_native": {
+      "savings_claim_eligible": false,
+      "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+      "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+      "explanation": "Block execution incomplete, halted, or failed mutual acceptance across all arms; comparative token savings and efficiency claims are STRICTLY INVALIDATED.",
+      "metrics": {
+        "total_model_tokens": {
+          "arm_a_native": 28720,
+          "arm_b_cand3": 12650,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28720,
+          "treatment": 12650
+        },
+        "prompt_tokens_total": {
+          "arm_a_native": 28400,
+          "arm_b_cand3": 12500,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 28400,
+          "treatment": 12500
+        },
+        "completion_tokens": {
+          "arm_a_native": 320,
+          "arm_b_cand3": 150,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 320,
+          "treatment": 150
+        },
+        "peak_single_request_context": {
+          "arm_a_native": null,
+          "arm_b_cand3": null,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": null,
+          "treatment": null
+        },
+        "quality_adjusted_cost": {
+          "arm_a_native": 2872000.0,
+          "arm_b_cand3": 1265000.0,
+          "delta": null,
+          "savings_pct": null,
+          "status": "INVALIDATED_UNACCEPTED",
+          "baseline": 2872000.0,
+          "treatment": 1265000.0
+        }
+      }
+    }
+  },
+  "runs": {
+    "arm_b_cand3": {
+      "schema_version": "2.0.0",
+      "run_id": "task_a_typo_pair_01_arm_b_cand3",
+      "pair_id": "pair_01",
+      "task_id": "task_a_typo",
+      "arm": "arm_b_cand3",
+      "execution_order_in_pair": 1,
+      "execution_status": "SUCCESS",
+      "error_message": null,
+      "telemetry_valid": true,
+      "timestamps": {
+        "started_at": "2026-11-22T05:52:24.300848+00:00",
+        "completed_at": "2026-11-22T05:52:24.413580+00:00",
+        "elapsed_seconds": 0.11
+      },
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.6-luna",
+        "mode": "agent",
+        "reasoning_effort": "medium",
+        "harness_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+        "harness_version": "codex-cli 0.167.0-alpha.4.1"
+      },
+      "isolation": {
+        "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+        "sandbox_path": "C:\\Users\\Amal P S\\AppData\\Local\\Temp\\engram_pilot\\runs\\task_a_typo_pair_01_arm_b_cand3_20261122_112222",
+        "cold_start_verified": true,
+        "engram_enabled": true,
+        "engram_binary_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "engram_binary_expected_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "engram_binary_actual_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "engram_binary_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\bin\\candidate-phase3\\engram.exe",
+        "benchmark_candidate_version": "cand4",
+        "requested_candidate_version": "cand3",
+        "resolved_candidate_version": "cand3",
+        "candidate_verification_status": "VERIFIED",
+        "mcp_registration_verified": true,
+        "mcp_server_status": "ACTIVE",
+        "dependency_fingerprint_verified": true,
+        "path_sanitized": true,
+        "sandbox_policy": "workspace-write"
+      },
+      "telemetry": {
+        "provenance": "SYNTHETIC_TEST",
+        "prompt_tokens_total": 12500,
+        "prompt_tokens_cached": 10000,
+        "prompt_tokens_cached_inferred": false,
+        "prompt_tokens_uncached": 2500,
+        "prompt_tokens_uncached_inferred": true,
+        "completion_tokens": 150,
+        "reasoning_tokens": 20,
+        "total_model_tokens": 12650,
+        "peak_single_request_context": null,
+        "peak_turn_context": 12500,
+        "final_turn_context": 12500,
+        "model_requests_count": 1,
+        "turns_count": 1,
+        "mcp_tool_calls_count": 1,
+        "auxiliary_tool_payload_bytes": 100,
+        "inner_response_content_bytes": 25,
+        "serialized_jsonrpc_response_bytes": 68,
+        "max_individual_response_bytes": 68,
+        "aggregate_auxiliary_payload_bytes": 100,
+        "account_usage_reading_start_pct": null,
+        "account_usage_reading_end_pct": null,
+        "telemetry_valid": true,
+        "error_message": null,
+        "replacement_accounting": {
+          "files_retrieved_via_engram": [],
+          "files_read_via_shell": [],
+          "files_repeated_read": [],
+          "engram_excerpts_count": 0,
+          "engram_excerpts_reread_count": 0,
+          "serialized_invocations_bytes": 32,
+          "serialized_responses_bytes": 68,
+          "estimated_payload_tokens": 25,
+          "replacement_status": "MEASURED",
+          "tokens_per_successful_task": null,
+          "inner_response_content_bytes": 25,
+          "serialized_jsonrpc_response_bytes": 68,
+          "max_individual_response_bytes": 68,
+          "aggregate_auxiliary_payload_bytes": 100
+        }
+      },
+      "git_impact": {
+        "files_changed_count": 0,
+        "files_changed": [],
+        "insertions": 0,
+        "deletions": 0,
+        "unrelated_files_count": 0,
+        "diff_patch_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\runs\\phase_5_8_1_pentad_dryrun\\run_20261122_112209\\arm_b_cand3\\changes.patch",
+        "dependency_mutated": false
+      },
+      "correctness": {
+        "score": 0.0,
+        "quality_adjusted_cost": 1265000.0,
+        "passed_all_requirements": false,
+        "gates": {
+          "L0_typecheck": "PASS",
+          "L1_lint_prettier": "SKIPPED",
+          "L2_unit_tests": "SKIPPED",
+          "L3_production_build": "PASS"
+        },
+        "requirements": {
+          "REQ-1": "FAIL",
+          "REQ-2": "FAIL"
+        }
+      },
+      "headroom_guard": {
+        "headroom_reserve": 45000,
+        "pre_dispatch_guard_triggered": false,
+        "stop_reason": null,
+        "cumulative_tokens_at_stop": null,
+        "estimated_next_turn_cost": null,
+        "configured_ceiling": 250000,
+        "remaining_budget": null,
+        "last_turn_usage": null,
+        "guard_decision": "DISPATCH_ALLOWED",
+        "timestamp": "2026-11-22T05:52:24.413580+00:00",
+        "relevant_event_id": null,
+        "telemetry_valid": true
+      }
+    },
+    "arm_a_native": {
+      "schema_version": "2.0.0",
+      "run_id": "task_a_typo_pair_01_arm_a_native",
+      "pair_id": "pair_01",
+      "task_id": "task_a_typo",
+      "arm": "arm_a_native",
+      "execution_order_in_pair": 2,
+      "execution_status": "SUCCESS",
+      "error_message": null,
+      "telemetry_valid": true,
+      "timestamps": {
+        "started_at": "2026-11-22T05:52:38.419771+00:00",
+        "completed_at": "2026-11-22T05:52:38.528067+00:00",
+        "elapsed_seconds": 0.11
+      },
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.6-luna",
+        "mode": "agent",
+        "reasoning_effort": "medium",
+        "harness_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+        "harness_version": "codex-cli 0.167.0-alpha.4.1"
+      },
+      "isolation": {
+        "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+        "sandbox_path": "C:\\Users\\Amal P S\\AppData\\Local\\Temp\\engram_pilot\\runs\\task_a_typo_pair_01_arm_a_native_20261122_112236",
+        "cold_start_verified": true,
+        "engram_enabled": false,
+        "engram_binary_sha256": "NONE",
+        "engram_binary_expected_sha256": null,
+        "engram_binary_actual_sha256": null,
+        "engram_binary_path": null,
+        "benchmark_candidate_version": "cand4",
+        "requested_candidate_version": "native",
+        "resolved_candidate_version": "native",
+        "candidate_verification_status": "NOT_APPLICABLE",
+        "mcp_registration_verified": false,
+        "mcp_server_status": "DISABLED",
+        "dependency_fingerprint_verified": true,
+        "path_sanitized": true,
+        "sandbox_policy": "workspace-write"
+      },
+      "telemetry": {
+        "provenance": "SYNTHETIC_TEST",
+        "prompt_tokens_total": 28400,
+        "prompt_tokens_cached": 21000,
+        "prompt_tokens_cached_inferred": false,
+        "prompt_tokens_uncached": 7400,
+        "prompt_tokens_uncached_inferred": true,
+        "completion_tokens": 320,
+        "reasoning_tokens": 45,
+        "total_model_tokens": 28720,
+        "peak_single_request_context": null,
+        "peak_turn_context": 28400,
+        "final_turn_context": 28400,
+        "model_requests_count": 1,
+        "turns_count": 1,
+        "mcp_tool_calls_count": 0,
+        "auxiliary_tool_payload_bytes": 0,
+        "inner_response_content_bytes": 0,
+        "serialized_jsonrpc_response_bytes": 0,
+        "max_individual_response_bytes": 0,
+        "aggregate_auxiliary_payload_bytes": 0,
+        "account_usage_reading_start_pct": null,
+        "account_usage_reading_end_pct": null,
+        "telemetry_valid": true,
+        "error_message": null,
+        "replacement_accounting": {
+          "files_retrieved_via_engram": [],
+          "files_read_via_shell": [],
+          "files_repeated_read": [],
+          "engram_excerpts_count": 0,
+          "engram_excerpts_reread_count": 0,
+          "serialized_invocations_bytes": 0,
+          "serialized_responses_bytes": 0,
+          "estimated_payload_tokens": 0,
+          "replacement_status": "NOT_OBSERVABLE",
+          "tokens_per_successful_task": null,
+          "inner_response_content_bytes": 0,
+          "serialized_jsonrpc_response_bytes": 0,
+          "max_individual_response_bytes": 0,
+          "aggregate_auxiliary_payload_bytes": 0
+        }
+      },
+      "git_impact": {
+        "files_changed_count": 0,
+        "files_changed": [],
+        "insertions": 0,
+        "deletions": 0,
+        "unrelated_files_count": 0,
+        "diff_patch_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\runs\\phase_5_8_1_pentad_dryrun\\run_20261122_112209\\arm_a_native\\changes.patch",
+        "dependency_mutated": false
+      },
+      "correctness": {
+        "score": 0.0,
+        "quality_adjusted_cost": 2872000.0,
+        "passed_all_requirements": false,
+        "gates": {
+          "L0_typecheck": "PASS",
+          "L1_lint_prettier": "SKIPPED",
+          "L2_unit_tests": "SKIPPED",
+          "L3_production_build": "PASS"
+        },
+        "requirements": {
+          "REQ-1": "FAIL",
+          "REQ-2": "FAIL"
+        }
+      },
+      "headroom_guard": {
+        "headroom_reserve": 45000,
+        "pre_dispatch_guard_triggered": false,
+        "stop_reason": null,
+        "cumulative_tokens_at_stop": null,
+        "estimated_next_turn_cost": null,
+        "configured_ceiling": 250000,
+        "remaining_budget": null,
+        "last_turn_usage": null,
+        "guard_decision": "DISPATCH_ALLOWED",
+        "timestamp": "2026-11-22T05:52:38.528067+00:00",
+        "relevant_event_id": null,
+        "telemetry_valid": true
+      }
+    },
+    "arm_c_cand42_always_on": {
+      "schema_version": "2.0.0",
+      "run_id": "task_a_typo_pair_01_arm_c_cand42_always_on",
+      "pair_id": "pair_01",
+      "task_id": "task_a_typo",
+      "arm": "arm_c_cand42_always_on",
+      "execution_order_in_pair": 3,
+      "execution_status": "SUCCESS",
+      "error_message": null,
+      "telemetry_valid": true,
+      "timestamps": {
+        "started_at": "2026-11-22T05:52:51.289858+00:00",
+        "completed_at": "2026-11-22T05:52:51.410087+00:00",
+        "elapsed_seconds": 0.12
+      },
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.6-luna",
+        "mode": "agent",
+        "reasoning_effort": "medium",
+        "harness_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+        "harness_version": "codex-cli 0.167.0-alpha.4.1"
+      },
+      "isolation": {
+        "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+        "sandbox_path": "C:\\Users\\Amal P S\\AppData\\Local\\Temp\\engram_pilot\\runs\\task_a_typo_pair_01_arm_c_cand42_always_on_20261122_112249",
+        "cold_start_verified": true,
+        "engram_enabled": true,
+        "engram_binary_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_actual_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\bin\\candidate-phase4.2\\engram.exe",
+        "benchmark_candidate_version": "cand4",
+        "requested_candidate_version": "cand4_2",
+        "resolved_candidate_version": "cand4_2",
+        "candidate_verification_status": "VERIFIED",
+        "mcp_registration_verified": true,
+        "mcp_server_status": "ACTIVE",
+        "dependency_fingerprint_verified": true,
+        "path_sanitized": true,
+        "sandbox_policy": "workspace-write"
+      },
+      "telemetry": {
+        "provenance": "SYNTHETIC_TEST",
+        "prompt_tokens_total": 4200,
+        "prompt_tokens_cached": 3500,
+        "prompt_tokens_cached_inferred": false,
+        "prompt_tokens_uncached": 700,
+        "prompt_tokens_uncached_inferred": true,
+        "completion_tokens": 80,
+        "reasoning_tokens": 10,
+        "total_model_tokens": 4280,
+        "peak_single_request_context": null,
+        "peak_turn_context": 4200,
+        "final_turn_context": 4200,
+        "model_requests_count": 1,
+        "turns_count": 1,
+        "mcp_tool_calls_count": 1,
+        "auxiliary_tool_payload_bytes": 150,
+        "inner_response_content_bytes": 60,
+        "serialized_jsonrpc_response_bytes": 103,
+        "max_individual_response_bytes": 103,
+        "aggregate_auxiliary_payload_bytes": 150,
+        "account_usage_reading_start_pct": null,
+        "account_usage_reading_end_pct": null,
+        "telemetry_valid": true,
+        "error_message": null,
+        "replacement_accounting": {
+          "files_retrieved_via_engram": [],
+          "files_read_via_shell": [],
+          "files_repeated_read": [],
+          "engram_excerpts_count": 0,
+          "engram_excerpts_reread_count": 0,
+          "serialized_invocations_bytes": 47,
+          "serialized_responses_bytes": 103,
+          "estimated_payload_tokens": 37,
+          "replacement_status": "MEASURED",
+          "tokens_per_successful_task": null,
+          "inner_response_content_bytes": 60,
+          "serialized_jsonrpc_response_bytes": 103,
+          "max_individual_response_bytes": 103,
+          "aggregate_auxiliary_payload_bytes": 150
+        }
+      },
+      "git_impact": {
+        "files_changed_count": 0,
+        "files_changed": [],
+        "insertions": 0,
+        "deletions": 0,
+        "unrelated_files_count": 0,
+        "diff_patch_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\runs\\phase_5_8_1_pentad_dryrun\\run_20261122_112209\\arm_c_cand42_always_on\\changes.patch",
+        "dependency_mutated": false
+      },
+      "correctness": {
+        "score": 0.0,
+        "quality_adjusted_cost": 428000.0,
+        "passed_all_requirements": false,
+        "gates": {
+          "L0_typecheck": "PASS",
+          "L1_lint_prettier": "SKIPPED",
+          "L2_unit_tests": "SKIPPED",
+          "L3_production_build": "PASS"
+        },
+        "requirements": {
+          "REQ-1": "FAIL",
+          "REQ-2": "FAIL"
+        }
+      },
+      "headroom_guard": {
+        "headroom_reserve": 45000,
+        "pre_dispatch_guard_triggered": false,
+        "stop_reason": null,
+        "cumulative_tokens_at_stop": null,
+        "estimated_next_turn_cost": null,
+        "configured_ceiling": 250000,
+        "remaining_budget": null,
+        "last_turn_usage": null,
+        "guard_decision": "DISPATCH_ALLOWED",
+        "timestamp": "2026-11-22T05:52:51.410087+00:00",
+        "relevant_event_id": null,
+        "telemetry_valid": true
+      }
+    },
+    "arm_d_cand42_adaptive": {
+      "schema_version": "2.0.0",
+      "run_id": "task_a_typo_pair_01_arm_d_cand42_adaptive",
+      "pair_id": "pair_01",
+      "task_id": "task_a_typo",
+      "arm": "arm_d_cand42_adaptive",
+      "execution_order_in_pair": 4,
+      "execution_status": "SUCCESS",
+      "error_message": null,
+      "telemetry_valid": true,
+      "timestamps": {
+        "started_at": "2026-11-22T05:53:04.159573+00:00",
+        "completed_at": "2026-11-22T05:53:04.269024+00:00",
+        "elapsed_seconds": 0.11
+      },
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.6-luna",
+        "mode": "agent",
+        "reasoning_effort": "medium",
+        "harness_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+        "harness_version": "codex-cli 0.167.0-alpha.4.1"
+      },
+      "isolation": {
+        "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+        "sandbox_path": "C:\\Users\\Amal P S\\AppData\\Local\\Temp\\engram_pilot\\runs\\task_a_typo_pair_01_arm_d_cand42_adaptive_20261122_112302",
+        "cold_start_verified": true,
+        "engram_enabled": true,
+        "engram_binary_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_actual_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "engram_binary_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\bin\\candidate-phase4.2\\engram.exe",
+        "benchmark_candidate_version": "cand4",
+        "requested_candidate_version": "cand4_2",
+        "resolved_candidate_version": "cand4_2",
+        "candidate_verification_status": "VERIFIED",
+        "mcp_registration_verified": true,
+        "mcp_server_status": "ACTIVE",
+        "dependency_fingerprint_verified": true,
+        "path_sanitized": true,
+        "sandbox_policy": "workspace-write"
+      },
+      "telemetry": {
+        "provenance": "SYNTHETIC_TEST",
+        "prompt_tokens_total": 4200,
+        "prompt_tokens_cached": 3500,
+        "prompt_tokens_cached_inferred": false,
+        "prompt_tokens_uncached": 700,
+        "prompt_tokens_uncached_inferred": true,
+        "completion_tokens": 80,
+        "reasoning_tokens": 10,
+        "total_model_tokens": 4280,
+        "peak_single_request_context": null,
+        "peak_turn_context": 4200,
+        "final_turn_context": 4200,
+        "model_requests_count": 1,
+        "turns_count": 1,
+        "mcp_tool_calls_count": 1,
+        "auxiliary_tool_payload_bytes": 150,
+        "inner_response_content_bytes": 60,
+        "serialized_jsonrpc_response_bytes": 103,
+        "max_individual_response_bytes": 103,
+        "aggregate_auxiliary_payload_bytes": 150,
+        "account_usage_reading_start_pct": null,
+        "account_usage_reading_end_pct": null,
+        "telemetry_valid": true,
+        "error_message": null,
+        "replacement_accounting": {
+          "files_retrieved_via_engram": [],
+          "files_read_via_shell": [],
+          "files_repeated_read": [],
+          "engram_excerpts_count": 0,
+          "engram_excerpts_reread_count": 0,
+          "serialized_invocations_bytes": 47,
+          "serialized_responses_bytes": 103,
+          "estimated_payload_tokens": 37,
+          "replacement_status": "MEASURED",
+          "tokens_per_successful_task": null,
+          "inner_response_content_bytes": 60,
+          "serialized_jsonrpc_response_bytes": 103,
+          "max_individual_response_bytes": 103,
+          "aggregate_auxiliary_payload_bytes": 150
+        }
+      },
+      "git_impact": {
+        "files_changed_count": 0,
+        "files_changed": [],
+        "insertions": 0,
+        "deletions": 0,
+        "unrelated_files_count": 0,
+        "diff_patch_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\runs\\phase_5_8_1_pentad_dryrun\\run_20261122_112209\\arm_d_cand42_adaptive\\changes.patch",
+        "dependency_mutated": false
+      },
+      "correctness": {
+        "score": 0.0,
+        "quality_adjusted_cost": 428000.0,
+        "passed_all_requirements": false,
+        "gates": {
+          "L0_typecheck": "PASS",
+          "L1_lint_prettier": "SKIPPED",
+          "L2_unit_tests": "SKIPPED",
+          "L3_production_build": "PASS"
+        },
+        "requirements": {
+          "REQ-1": "FAIL",
+          "REQ-2": "FAIL"
+        }
+      },
+      "headroom_guard": {
+        "headroom_reserve": 45000,
+        "pre_dispatch_guard_triggered": false,
+        "stop_reason": null,
+        "cumulative_tokens_at_stop": null,
+        "estimated_next_turn_cost": null,
+        "configured_ceiling": 250000,
+        "remaining_budget": null,
+        "last_turn_usage": null,
+        "guard_decision": "DISPATCH_ALLOWED",
+        "timestamp": "2026-11-22T05:53:04.269024+00:00",
+        "relevant_event_id": null,
+        "telemetry_valid": true
+      }
+    },
+    "arm_e_cand5_optimized": {
+      "schema_version": "2.0.0",
+      "run_id": "task_a_typo_pair_01_arm_e_cand5_optimized",
+      "pair_id": "pair_01",
+      "task_id": "task_a_typo",
+      "arm": "arm_e_cand5_optimized",
+      "execution_order_in_pair": 5,
+      "execution_status": "SUCCESS",
+      "error_message": null,
+      "telemetry_valid": true,
+      "timestamps": {
+        "started_at": "2026-11-22T05:53:17.296592+00:00",
+        "completed_at": "2026-11-22T05:53:17.410695+00:00",
+        "elapsed_seconds": 0.11
+      },
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.6-luna",
+        "mode": "agent",
+        "reasoning_effort": "medium",
+        "harness_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+        "harness_version": "codex-cli 0.167.0-alpha.4.1"
+      },
+      "isolation": {
+        "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+        "sandbox_path": "C:\\Users\\Amal P S\\AppData\\Local\\Temp\\engram_pilot\\runs\\task_a_typo_pair_01_arm_e_cand5_optimized_20261122_112315",
+        "cold_start_verified": true,
+        "engram_enabled": true,
+        "engram_binary_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+        "engram_binary_expected_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+        "engram_binary_actual_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+        "engram_binary_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\bin\\candidate-phase5\\engram.exe",
+        "benchmark_candidate_version": "cand4",
+        "requested_candidate_version": "cand5",
+        "resolved_candidate_version": "cand5",
+        "candidate_verification_status": "VERIFIED",
+        "mcp_registration_verified": true,
+        "mcp_server_status": "ACTIVE",
+        "dependency_fingerprint_verified": true,
+        "path_sanitized": true,
+        "sandbox_policy": "workspace-write"
+      },
+      "telemetry": {
+        "provenance": "SYNTHETIC_TEST",
+        "prompt_tokens_total": 2850,
+        "prompt_tokens_cached": 2200,
+        "prompt_tokens_cached_inferred": false,
+        "prompt_tokens_uncached": 650,
+        "prompt_tokens_uncached_inferred": true,
+        "completion_tokens": 60,
+        "reasoning_tokens": 8,
+        "total_model_tokens": 2910,
+        "peak_single_request_context": null,
+        "peak_turn_context": 2850,
+        "final_turn_context": 2850,
+        "model_requests_count": 1,
+        "turns_count": 1,
+        "mcp_tool_calls_count": 1,
+        "auxiliary_tool_payload_bytes": 150,
+        "inner_response_content_bytes": 65,
+        "serialized_jsonrpc_response_bytes": 108,
+        "max_individual_response_bytes": 108,
+        "aggregate_auxiliary_payload_bytes": 150,
+        "account_usage_reading_start_pct": null,
+        "account_usage_reading_end_pct": null,
+        "telemetry_valid": true,
+        "error_message": null,
+        "replacement_accounting": {
+          "files_retrieved_via_engram": [],
+          "files_read_via_shell": [],
+          "files_repeated_read": [],
+          "engram_excerpts_count": 0,
+          "engram_excerpts_reread_count": 0,
+          "serialized_invocations_bytes": 42,
+          "serialized_responses_bytes": 108,
+          "estimated_payload_tokens": 37,
+          "replacement_status": "MEASURED",
+          "tokens_per_successful_task": null,
+          "inner_response_content_bytes": 65,
+          "serialized_jsonrpc_response_bytes": 108,
+          "max_individual_response_bytes": 108,
+          "aggregate_auxiliary_payload_bytes": 150
+        }
+      },
+      "git_impact": {
+        "files_changed_count": 0,
+        "files_changed": [],
+        "insertions": 0,
+        "deletions": 0,
+        "unrelated_files_count": 0,
+        "diff_patch_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\benchmarks\\matched-pair-harness\\runs\\phase_5_8_1_pentad_dryrun\\run_20261122_112209\\arm_e_cand5_optimized\\changes.patch",
+        "dependency_mutated": false
+      },
+      "correctness": {
+        "score": 0.0,
+        "quality_adjusted_cost": 291000.0,
+        "passed_all_requirements": false,
+        "gates": {
+          "L0_typecheck": "PASS",
+          "L1_lint_prettier": "SKIPPED",
+          "L2_unit_tests": "SKIPPED",
+          "L3_production_build": "PASS"
+        },
+        "requirements": {
+          "REQ-1": "FAIL",
+          "REQ-2": "FAIL"
+        }
+      },
+      "headroom_guard": {
+        "headroom_reserve": 45000,
+        "pre_dispatch_guard_triggered": false,
+        "stop_reason": null,
+        "cumulative_tokens_at_stop": null,
+        "estimated_next_turn_cost": null,
+        "configured_ceiling": 250000,
+        "remaining_budget": null,
+        "last_turn_usage": null,
+        "guard_decision": "DISPATCH_ALLOWED",
+        "timestamp": "2026-11-22T05:53:17.410695+00:00",
+        "relevant_event_id": null,
+        "telemetry_valid": true
+      }
+    }
+  },
+  "global_budget_uncertain": false
+}

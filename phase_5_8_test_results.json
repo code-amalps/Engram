@@ -1,0 +1,47 @@
+{
+  "phase": "5.8",
+  "audit_type": "TEST_EVIDENCE_RECONCILIATION",
+  "timestamp": "2026-11-22T04:58:00Z",
+  "repository": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+  "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "targeted_phase5_5_suites": {
+    "command": "cargo test --manifest-path C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\Cargo.toml --lib --bin engram --test ast_test --test benchmark_harness_test --test token_efficiency_test --offline",
+    "total_tests": 87,
+    "passed": 87,
+    "failed": 0,
+    "ignored": 0,
+    "duration_seconds": 154.2,
+    "breakdown": {
+      "lib_unit": { "passed": 24, "failed": 0 },
+      "bin_unit": { "passed": 35, "failed": 0 },
+      "ast_test": { "passed": 13, "failed": 0 },
+      "benchmark_harness_test": { "passed": 10, "failed": 0 },
+      "token_efficiency_test": { "passed": 5, "failed": 0 }
+    },
+    "verdict": "ALL_TARGETED_TESTS_PASSED"
+  },
+  "full_repository_suites": {
+    "command": "cargo test --manifest-path C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram\\Cargo.toml --offline",
+    "total_suites_evaluated": 50,
+    "suites_passed": 49,
+    "suites_failed": 1,
+    "failed_test_detail": {
+      "suite": "tests/query_router_test.rs",
+      "test_name": "test_15_missing_or_invalidated_entities",
+      "panic_message": "assertion failed: !res2.files.iter().any(|f| f.path.contains(\"temp_service.rs\"))",
+      "location": "tests\\query_router_test.rs:555:5",
+      "defect_id": "DEFECT-5.8-01",
+      "root_cause": "Optimization G (src/compiler.rs LRU context cache) lacks database mtime/invalidation check in cache key"
+    },
+    "verdict": "REGRESSION_DETECTED"
+  },
+  "python_tetrad_harness": {
+    "command": "python -m pytest benchmarks/matched-pair-harness/tests/test_tetrad_harness.py",
+    "total_tests": 1,
+    "passed": 1,
+    "failed": 0,
+    "duration_seconds": 257.44,
+    "verdict": "PASSED"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "phase": "5.9.1",
+  "program": "Engram Controlled Provider Runtime Architecture & Benchmark Transport Migration",
+  "git_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "audit_mode": "OFFLINE_ARCHITECTURE_IMPLEMENTATION_AND_ADVERSARIAL_TESTING",
+  "certified_verdict": "READY_FOR_EXPLICIT_LIVE_BENCHMARK_AUTHORIZATION",
+  "total_deliverables": 17,
+  "artifacts": [
+    {
+      "relative_path": "docs/phase_5_9_1_provider_runtime_architecture.md",
+      "category": "architecture_report",
+      "byte_size": 18020,
+      "sha256": "21FFFB614BFDD482DC6D13AE754F8CC688B8D3AF729F6A9234173EF3B553147D",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/provider_transport.py",
+      "category": "source_code",
+      "byte_size": 31264,
+      "sha256": "CC65AF55EA5F4FD496F8F47BD67CBF3F71C703FFE9A41A51F61ACB1245C29254",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/agent_runtime.py",
+      "category": "source_code",
+      "byte_size": 38168,
+      "sha256": "9E201F363FD1A2B27B09795B5C23F328BC82ACB2F4A7B14F460BE05FF13C46DB",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_controlled_transport.py",
+      "category": "test_suite",
+      "byte_size": 28327,
+      "sha256": "CE2810D651CCA97292970141C23B045320A09BC9EFA5C2D363937C47CDF8FC43",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/runner.py",
+      "category": "source_code",
+      "byte_size": 92496,
+      "sha256": "2D1191E962D2FE040390FB175B0C180DD4221B5DDA838960FE49BE9D1694CA44",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "category": "source_code",
+      "byte_size": 172299,
+      "sha256": "AFC8DD135BD9116C8335066E7EACB3EF06114154B2BE385EE8DD78F4C4830885",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_request_boundary_enforcement.py",
+      "category": "test_suite",
+      "byte_size": 14744,
+      "sha256": "030B85E8A18816D6BE5EE702CE75BBAE736827072AC7CDE09439EE8DF106C12F",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_request_size_gate.py",
+      "category": "test_suite",
+      "byte_size": 11167,
+      "sha256": "FC15BD9C0CD554B6C07E01410F61570417A7CF111EA9D6BE71A7C048F13BFCE6",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_round_trip_telemetry.py",
+      "category": "test_suite",
+      "byte_size": 14340,
+      "sha256": "E6770405EA3EEEE3BDCAFCBF066D367EB55CB6F69FB5F765350323F3805DF7D4",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_budget_coordinator.py",
+      "category": "test_suite",
+      "byte_size": 9648,
+      "sha256": "82657123C51B5D93E703DB733821757486B03D5E44F137EF21D10634A78C1338",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_telemetry_semantics.py",
+      "category": "test_suite",
+      "byte_size": 8555,
+      "sha256": "DD737915FC90DA82DD7301AA796DE8F7901E2E995C27A87247FC47D32BBAD9DA",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_harness_safety_audit.py",
+      "category": "test_suite",
+      "byte_size": 28221,
+      "sha256": "39577F5F5FB0DE6D10C7F949C79EF5B9D00B3190D1A29475C33938AF184C87DF",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_pentad_harness.py",
+      "category": "test_suite",
+      "byte_size": 12302,
+      "sha256": "881DDEB83F37796731C0A6E0CDDA19FB6D9C23C803100757B279E0DFCF222370",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/telemetry.py",
+      "category": "source_code",
+      "byte_size": 50584,
+      "sha256": "FB4508F9C76869E9D28A08BEFCAF61D370B82F44A003A60EB1592DDA2AA819E1",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/scripts/run_two_task_pentad.ps1",
+      "category": "script",
+      "byte_size": 18723,
+      "sha256": "2545A79904478C6C84245918B5887BE09F88EBB16F8D807A4AC9C4D8130F8BB4",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/schemas/run_telemetry.schema.json",
+      "category": "schema",
+      "byte_size": 11854,
+      "sha256": "2B42E16E06654A1C2AE4B46D47F1E97D3D3F9BEEC9875C71AB858389021A2BEA",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "engram_phase_5_9_1_evidence_manifest.json",
+      "category": "manifest",
+      "byte_size": 4200,
+      "sha256": "MANIFEST_SELF_REFERENCE",
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

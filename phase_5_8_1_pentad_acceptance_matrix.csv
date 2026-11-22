@@ -1,0 +1,6 @@
+Arm_ID,Logical_Arm_Name,Candidate_Version,Binary_Path,Pre_Registered_SHA256,Ledger_Registered,Binary_Present,Hash_Verified,Harness_Ready,Acceptance_Status
+Arm A,arm_a_native,native,N/A,NONE,TRUE,TRUE,TRUE,TRUE,ACCEPTED
+Arm B,arm_b_cand3,cand3,benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe,97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777,TRUE,TRUE,TRUE,TRUE,ACCEPTED
+Arm C,arm_c_cand42_always_on,cand4_2,benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe,78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2,TRUE,TRUE,TRUE,TRUE,ACCEPTED
+Arm D,arm_d_cand42_adaptive,cand4_2,benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe,78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2,TRUE,TRUE,TRUE,TRUE,ACCEPTED
+Arm E,arm_e_cand5_optimized,cand5,benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe,PENDING_FREEZE_BUILD,TRUE,PENDING_STAGE,PENDING_VERIFY,TRUE,ACCEPTED_FOR_INTEGRATION

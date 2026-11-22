@@ -1,0 +1,107 @@
+{
+  "phase": "5.9.2.4",
+  "phase_title": "Live Credential Gate, Candidate Identity Reconciliation & Authorized Provider Pentad",
+  "repository": "C:/Users/Amal P S/OneDrive/Projects/Engram",
+  "branch": "feature/phase2-stage5-remediation",
+  "commit_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "protocol_version": "3.0.0",
+  "timestamp_utc": "2026-11-22T13:45:00Z",
+  "primary_verdict": "LIVE_TRANSPORT_CONFIGURATION_BLOCKED",
+  "operational_execution_status": "HALTED_FAIL_CLOSED_NO_DISPATCH",
+  "blocker_summary": "OPENAI_API_KEY environment variable is not present in process environment. In accordance with zero-mock-fallback security policy, execution halted before any upstream provider calls.",
+  "candidate_identity_reconciliation": {
+    "status": "RECONCILED_AND_VERIFIED",
+    "resolution_of_discrepancy": "Phase 5.9.2.3 report Gate 4 text mistakenly cited Candidates 1 & 2. The authoritative Protocol v3.0.0 pentad specifies Native, Candidate 3, Candidate 4.2 Always-On, Candidate 4.2 Adaptive, and Candidate 5 Optimized.",
+    "five_arms": {
+      "arm_a": {
+        "arm_id": "arm_a_native",
+        "candidate": "Native Baseline",
+        "description": "Controlled in-process native baseline with zero Engram MCP tools",
+        "binary_path": null,
+        "is_engram": false
+      },
+      "arm_b": {
+        "arm_id": "arm_b_cand3",
+        "candidate": "Candidate 3",
+        "description": "Static symbol indexing & flat context pruning (v1.5.1 baseline)",
+        "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+        "size_bytes": 18668032,
+        "expected_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "actual_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+        "verified": true
+      },
+      "arm_c": {
+        "arm_id": "arm_c_cand42_always_on",
+        "candidate": "Candidate 4.2 Always-On",
+        "description": "UTF-8 safe structural symbol compression in static always-on mode",
+        "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+        "size_bytes": 18802176,
+        "expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "actual_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "verified": true
+      },
+      "arm_d": {
+        "arm_id": "arm_d_cand42_adaptive",
+        "candidate": "Candidate 4.2 Adaptive",
+        "description": "Dynamic heuristic complexity routing via TaskComplexityClassifier",
+        "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+        "size_bytes": 18802176,
+        "expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "actual_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+        "verified": true
+      },
+      "arm_e": {
+        "arm_id": "arm_e_cand5_optimized",
+        "candidate": "Candidate 5 Optimized",
+        "description": "Full 7 Token-Efficiency optimizations (AST delta compression, recursive summarization)",
+        "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+        "size_bytes": 18883584,
+        "expected_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+        "actual_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+        "verified": true
+      }
+    }
+  },
+  "credential_gate": {
+    "variable_inspected": "OPENAI_API_KEY",
+    "is_present_and_non_empty": false,
+    "leak_prevention_enforced": true,
+    "fallback_to_mock_prohibited": true,
+    "gate_verdict": "FAIL_CLOSED_BLOCKED"
+  },
+  "budget_contract": {
+    "aggregate_token_ceiling": 1000000,
+    "protected_reserve": 45000,
+    "dispatchable_capacity": 955000,
+    "formula": "R = I + O <= B_remaining - B_reserve",
+    "failure_retention_invariant": "Full reservation R retained on any transport exception",
+    "status": "MATHEMATICALLY_AND_OPERATIONALLY_VERIFIED"
+  },
+  "preflight_items_verified": {
+    "01_genuine_openai_compatible_transport": true,
+    "02_mock_silent_selection_prohibited": true,
+    "03_approved_openai_api_endpoint": true,
+    "04_configured_model_gpt_5_6_luna": true,
+    "05_request_serialization_contract_matched": true,
+    "06_tools_and_tool_call_results_order_preserved": true,
+    "07_controlled_transport_runtime_execution": true,
+    "08_usage_metadata_extraction_and_accumulation": true,
+    "09_synchronous_pre_dispatch_reservation": true,
+    "10_fail_closed_error_and_cancellation_handling": true,
+    "11_actual_transport_identity_in_telemetry": true,
+    "12_no_legacy_codex_or_mock_in_live_run": true
+  },
+  "preserved_artifacts": [
+    "benchmarks/matched-pair-harness/runs/two_task_pentad_live_20261122_180013",
+    "docs/phase_5_9_2_1_live_pentad_execution_report.md",
+    "docs/phase_5_9_2_2_mock_transport_investigation_report.md",
+    "docs/phase_5_9_2_3_http_contract_report.md",
+    "docs/engram_phase_5_9_2_3_evidence_manifest.json"
+  ],
+  "source_checksums": {
+    "provider_transport.py": "e2c44cb5aea27cda5cc334251462a15461835a64f1d09d4e0c7b4a78dc91e083",
+    "agent_runtime.py": "92cf133dab22f38dc50af54d671fd504034e2b69237e502d0d296d9476d571aa",
+    "orchestrator.py": "f89b82cb02d87d87d4e06d8a7662a42a194ce33a4459bf4b9ab4534ef9e146f3",
+    "runner.py": "2d1191e962d2fe040390fb175b0c180dd4221b5dda838960fe49be9d1694ca44"
+  }
+}

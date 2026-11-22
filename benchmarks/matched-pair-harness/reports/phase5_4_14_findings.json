@@ -1,0 +1,156 @@
+{
+  "schema_version": "2.0.0",
+  "phase": "5.4.14",
+  "experiment_block": "tetrad_live_02",
+  "audit_timestamp": "2026-11-19T22:16:00Z",
+  "findings": [
+    {
+      "id": "FINDING-01",
+      "category": "headroom_guard",
+      "classification": "verified",
+      "summary": "Pre-dispatch token headroom guard triggered deterministically at turn 11 when remaining budget (37,551) was less than required headroom (56,611).",
+      "evidence_reference": "reports/runs/task_b_remember_me_tetrad_live_02/arm_b_cand3_always_on/run_telemetry.json:headroom_guard",
+      "metrics": {
+        "configured_ceiling": 550000,
+        "cumulative_tokens": 512449,
+        "remaining_budget": 37551,
+        "estimated_next_turn": 56611,
+        "headroom_reserve": 45000,
+        "required_headroom": 56611
+      }
+    },
+    {
+      "id": "FINDING-02",
+      "category": "token_arithmetic",
+      "classification": "verified",
+      "summary": "Token arithmetic reconciles perfectly: prompt (508,632) + completion (3,817) = total (512,449); cached (461,312) + uncached (47,320) = prompt (508,632). Reasoning tokens (965) are nested within completion tokens and not double-counted.",
+      "evidence_reference": "C:/Users/Amal P S/.codex/sessions/2026/11/19/rollout-2026-11-19T21-53-00-01a1f49e-5598-7932-be0f-3318d3af0075.jsonl:line_88",
+      "metrics": {
+        "prompt_tokens_total": 508632,
+        "prompt_tokens_cached": 461312,
+        "prompt_tokens_uncached": 47320,
+        "completion_tokens": 3817,
+        "reasoning_tokens": 965,
+        "total_model_tokens": 512449
+      }
+    },
+    {
+      "id": "FINDING-03",
+      "category": "mcp_payload_reconciliation",
+      "classification": "verified",
+      "summary": "Discrepancy between raw stdio event sizes (286 KB, 812 KB) and telemetry max individual response bytes (65,542 B) is caused by Codex CLI's 64 KB session rollout truncation buffer ('…N chars truncated…'). Telemetry accurately reflects the post-Codex rollout envelope (123,073 inner bytes, 132,692 serialized JSON-RPC bytes, 65,542 max individual bytes, 133,529 aggregate auxiliary bytes).",
+      "evidence_reference": "reports/runs/task_b_remember_me_tetrad_live_02/arm_b_cand3_always_on/events.jsonl vs rollout-2026-11-19T21-53-00-01a1f49e-5598-7932-be0f-3318d3af0075.jsonl:lines_31_32",
+      "metrics": {
+        "event_10_raw_stdio_bytes": 286179,
+        "event_12_raw_stdio_bytes": 812690,
+        "event_10_rollout_bytes": 65542,
+        "event_12_rollout_bytes": 65538,
+        "event_10_truncated_chars": 221662,
+        "event_12_truncated_chars": 741113
+      }
+    },
+    {
+      "id": "FINDING-04",
+      "category": "candidate_3_defect",
+      "classification": "verified",
+      "summary": "Candidate 3 completely lacks response compaction and 16,384-byte ceiling enforcement, dumping 282,252 B on auth.effects.ts and 804,587 B on app.component.ts during depth-2 inspect_symbol. This bloated turn context to 56,611 tokens, burning 512,449 tokens in 11 turns.",
+      "evidence_reference": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe offline subprocess evaluation",
+      "metrics": {
+        "cand3_auth_effects_bytes": 282252,
+        "cand3_app_component_bytes": 804587,
+        "cand4_2_auth_effects_bytes": 12287,
+        "cand4_2_app_component_bytes": 11661
+      }
+    },
+    {
+      "id": "FINDING-05",
+      "category": "candidate_4_2_bounding",
+      "classification": "verified",
+      "summary": "Candidate 4.2 successfully compacts depth-2 symbol graph responses to 12,287 B on auth.effects.ts and 11,661 B on app.component.ts, strictly complying with the 16,384-byte ceiling and remaining well within Codex CLI's 64 KB truncation limit.",
+      "evidence_reference": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe offline subprocess evaluation",
+      "metrics": {
+        "cand4_2_ceiling_limit": 16384,
+        "cand4_2_auth_effects_bytes": 12287,
+        "cand4_2_app_component_bytes": 11661
+      }
+    },
+    {
+      "id": "FINDING-06",
+      "category": "orchestrator_stop_on_failure",
+      "classification": "verified",
+      "summary": "The orchestrator halted the tetrad block immediately after Arm B failed with PRE_DISPATCH_HEADROOM_EXHAUSTED under fail-closed stop_on_failure policy, skipping Arms D, A, and C to preserve token budget.",
+      "evidence_reference": "benchmarks/matched-pair-harness/src/orchestrator.py:lines_1948_1960",
+      "metrics": {
+        "order": ["arm_b_cand3_always_on", "arm_d_cand4_adaptive", "arm_a_native", "arm_c_cand4_always_on"],
+        "arm_b_status": "PRE_DISPATCH_HEADROOM_EXHAUSTED",
+        "arms_skipped_count": 3
+      }
+    },
+    {
+      "id": "FINDING-07",
+      "category": "candidate_identity_model",
+      "classification": "verified",
+      "summary": "Phase 5.4.11 per-arm candidate identity fix operated perfectly: Arm B recorded requested='cand3', resolved='cand3', binary hash='97C5EC47...', while global CLI flag was recorded separately as benchmark_candidate_version='cand4_2'.",
+      "evidence_reference": "reports/runs/task_b_remember_me_tetrad_live_02/arm_b_cand3_always_on/run_telemetry.json:isolation",
+      "metrics": {
+        "benchmark_candidate_version": "cand4_2",
+        "requested_candidate_version": "cand3",
+        "resolved_candidate_version": "cand3",
+        "engram_binary_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777"
+      }
+    },
+    {
+      "id": "FINDING-08",
+      "category": "experimental_validity",
+      "classification": "verified",
+      "summary": "All 5 comparative pairings were correctly invalidated as MUTUAL_ACCEPTANCE_FAILURE due to Arm B's headroom halt and subsequent arm skips. Zero invalid token savings claims were generated.",
+      "evidence_reference": "reports/runs/task_b_remember_me_tetrad_live_02/tetrad_summary.json:comparative_analysis",
+      "metrics": {
+        "all_arms_accepted": false,
+        "savings_claim_eligible": false
+      }
+    },
+    {
+      "id": "FINDING-09",
+      "category": "orchestration_starvation_risk",
+      "classification": "verified",
+      "summary": "Randomized execution ordering with stop_on_failure=True introduces starvation risk: if an expensive arm that reliably halts (like Candidate 3) is scheduled before Candidate 4.2 or Native, the subsequent arms will never run, preventing empirical observation of remediation impact.",
+      "evidence_reference": "Live 01 execution order (Arm A then Arm B halt) vs Live 02 execution order (Arm B halt then Arms D, A, C skipped)",
+      "metrics": {
+        "live01_unexecuted_arms": ["arm_c_cand4_always_on", "arm_d_cand4_adaptive"],
+        "live02_unexecuted_arms": ["arm_d_cand4_adaptive", "arm_a_native", "arm_c_cand4_always_on"]
+      }
+    },
+    {
+      "id": "FINDING-10",
+      "category": "candidate_4_2_task_b_completion",
+      "classification": "unknown",
+      "summary": "Whether Candidate 4.2 (Arm C or Arm D) can fully complete Task B within the 550,000-token ceiling and pass all evaluation gates remains unknown because Candidate 4.2 has not yet been executed in a completed live Task B run.",
+      "evidence_reference": "Both Live 01 and Live 02 halted before Arms C or D could execute",
+      "metrics": {
+        "cand4_2_live_runs_completed": 0
+      }
+    },
+    {
+      "id": "FINDING-11",
+      "category": "candidate_4_2_context_compression_ratio",
+      "classification": "probable",
+      "summary": "Offline MCP testing demonstrates a ~96% payload byte reduction by Candidate 4.2 over Candidate 3 on identical Task B files (12 KB vs 282 KB; 11 KB vs 804 KB). It is probable this would prevent context explosion and headroom exhaustion on Arm C and Arm D.",
+      "evidence_reference": "Offline subprocess evaluation of engram_inspect_symbol depth=2 on auth.effects.ts and app.component.ts",
+      "metrics": {
+        "auth_effects_reduction_pct": 95.6,
+        "app_component_reduction_pct": 98.5
+      }
+    },
+    {
+      "id": "FINDING-12",
+      "category": "diagnostic_continuation_mode",
+      "classification": "not_tested",
+      "summary": "Running with --no-stop-on-failure or a formal diagnostic continuation mode to collect observations for Arms C, D, and A has not been executed live under authorized protocol.",
+      "evidence_reference": "Orchestrator flag --no-stop-on-failure exists but was not authorized for Live 02",
+      "metrics": {
+        "diagnostic_continuation_live_executions": 0
+      }
+    }
+  ]
+}

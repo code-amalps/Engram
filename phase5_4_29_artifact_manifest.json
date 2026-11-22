@@ -1,0 +1,89 @@
+{
+  "phase": "5.4.29",
+  "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "timestamp": "2026-11-20T13:59:00Z",
+  "protected_artifacts": [
+    {
+      "name": "Candidate 3 Executable",
+      "path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+      "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "size_bytes": 18668032,
+      "status": "UNMODIFIED"
+    },
+    {
+      "name": "Candidate 4.2 Executable",
+      "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "size_bytes": 18802176,
+      "status": "UNMODIFIED"
+    },
+    {
+      "name": "Existing Release Executable",
+      "path": "target/release/engram.exe",
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "size_bytes": 18802176,
+      "status": "UNMODIFIED"
+    },
+    {
+      "name": "Cargo Lockfile",
+      "path": "Cargo.lock",
+      "sha256": "85FF18D67207BEF644D8C84582124D5EA0988983AC64C51CBA8EB6975FE11D39",
+      "size_bytes": 47882,
+      "status": "UNMODIFIED"
+    },
+    {
+      "name": "Task B Benchmark Fixture",
+      "path": "benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json",
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "size_bytes": 4654,
+      "status": "UNMODIFIED"
+    }
+  ],
+  "isolated_build_artifacts": [
+    {
+      "build_id": "isolated_build_1",
+      "source_dir": "engram_isolated_build_1",
+      "target_dir": "engram_isolated_target_1",
+      "executable_path": "release/engram.exe",
+      "sha256": "AC88FEEF5E28641DE3F74E071031D318734EDD7FAB78B0A0A705D00DA0303110",
+      "size_bytes": 18803200,
+      "version_output": "engram 1.5.4\ncommit: unknown\ndirty: unknown\nrustc: rustc 1.99.0 (b940084d7 2026-09-28)\nprofile: release",
+      "build_duration_seconds": 313.19,
+      "exit_code": 0
+    },
+    {
+      "build_id": "isolated_build_2",
+      "source_dir": "engram_isolated_build_2",
+      "target_dir": "engram_isolated_target_2",
+      "executable_path": "release/engram.exe",
+      "sha256": "039C62C6BFB26A0A747DB77537D82FFFC8CCAA4F8293B5B263A9552DC2BCED85",
+      "size_bytes": 18803200,
+      "version_output": "engram 1.5.4\ncommit: unknown\ndirty: unknown\nrustc: rustc 1.99.0 (b940084d7 2026-09-28)\nprofile: release",
+      "build_duration_seconds": 292.93,
+      "exit_code": 0
+    }
+  ],
+  "reproducibility_comparison": {
+    "size_identical": true,
+    "sha256_identical": false,
+    "differing_byte_count_approx": 24,
+    "differing_regions": [
+      {
+        "offset_range": "0x00000108 - 0x00000109",
+        "pe_field": "COFF File Header TimeDateStamp"
+      },
+      {
+        "offset_range": "0x010C2DD4 - 0x010C2E0D",
+        "pe_field": "Debug Directory TimeDateStamp"
+      },
+      {
+        "offset_range": "0x010C2F74 - 0x010C2F83",
+        "pe_field": "CodeView RSDS PDB 7.0 GUID"
+      }
+    ],
+    "code_sections_identical": true,
+    "data_sections_identical": true,
+    "classification": "FUNCTIONALLY_EQUIVALENT_NOT_BIT_REPRODUCIBLE"
+  }
+}

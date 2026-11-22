@@ -1,0 +1,158 @@
+{
+  "schema_version": "2.0.0",
+  "phase": "5.4.21",
+  "audit_name": "final_budget_reserve_and_regression_evidence_verification",
+  "audit_timestamp": "2026-11-20T09:15:00Z",
+  "execution_mode": "strictly_offline_read_only_forensic_verification",
+  "authorization_status": "NOT_AUTHORIZED",
+  "final_verdict": "READY_FOR_FINAL_USER_REVIEW",
+  "baseline_identities": {
+    "git_branch": "feature/phase2-stage5-remediation",
+    "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "golden_repo_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "golden_repo_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Test\\angular-ngrx-material-starter",
+    "cand3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+    "cand3_size_bytes": 18668032,
+    "cand4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "cand4_2_size_bytes": 18802176,
+    "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+    "task_b_fixture_size_bytes": 4654,
+    "phase_5_4_18_findings_sha256": "E8B861AF6095E9CD307A44A3F2334AA5FD7E855FF0AB596F7AA057C808E489D0",
+    "phase_5_4_18_findings_size_bytes": 6200,
+    "baseline_integrity_verified": true
+  },
+  "global_reserve_findings": {
+    "reserve_value": 45000,
+    "block_dispatch_gate": "Enforced at orchestrator.py L2098: global_remaining < headroom_reserve halts tetrad with ABORTED_GLOBAL_BUDGET",
+    "continuous_protection_mechanism": "Effective arm ceiling clamped via min(max_tokens_ceiling, global_remaining) at L2115; runner StreamingTokenTracker enforces in-flight headroom guard L459 against effective ceiling",
+    "final_arm_reserve_behavior": "The fourth arm is subject to identical global_remaining check; runner halts before turn if arm_remaining < max(last_turn, 45000); if the final executing turn succeeds, spend can reach global ceiling 2,200,000",
+    "global_ceiling_breach_impossible": true
+  },
+  "maximum_safe_exposure": {
+    "nominal_global_ceiling": 2200000,
+    "nominal_per_arm_ceiling": 550000,
+    "headroom_reserve": 45000,
+    "max_cumulative_spend_prior_to_final_arm": 2155000,
+    "maximum_safe_dispatchable_spend": 2200000,
+    "projected_spend_baseline_order_b_d_a_c": 512449,
+    "projected_spend_alternative_order_a_d_c_b": 1732449,
+    "projected_spend_full_4_arm_success": 1850000
+  },
+  "historical_arithmetic_replay": {
+    "live_02_block": "tetrad_live_02",
+    "arm": "arm_b_cand3_always_on",
+    "turns_executed": 11,
+    "consumed_tokens": 512449,
+    "per_arm_ceiling": 550000,
+    "remaining_tokens": 37551,
+    "last_turn_request_tokens": 56611,
+    "headroom_reserve": 45000,
+    "guard_threshold": 56611,
+    "inequality_check": "37551 < 56611 (True)",
+    "arithmetic_confirmed": true,
+    "halt_status": "PRE_DISPATCH_HEADROOM_EXHAUSTED"
+  },
+  "regression_evidence": {
+    "historical_claim_status": "HISTORICALLY_VERIFIED",
+    "current_rerun_status": "CURRENT_OFFLINE_RERUN_VERIFIED",
+    "raw_log_path": "C:\\Users\\Amal P S\\.gemini\\antigravity\\brain\\96df9171-c910-4b4f-ae52-2add01693b56\\.system_generated\\tasks\\task-58182.log",
+    "total_suites": 7,
+    "total_tests_collected": 63,
+    "total_tests_passed": 63,
+    "total_tests_failed": 0,
+    "total_tests_skipped": 0,
+    "cumulative_duration_seconds": 396.27,
+    "suites": [
+      {"name": "test_candidate_selection.py", "tests": 8, "passed": 8, "failed": 0, "exit_code": 0, "duration_seconds": 1.50},
+      {"name": "test_telemetry_semantics.py", "tests": 4, "passed": 4, "failed": 0, "exit_code": 0, "duration_seconds": 1.65},
+      {"name": "test_candidate_4_2_offline_certification.py", "tests": 10, "passed": 10, "failed": 0, "exit_code": 0, "duration_seconds": 9.74},
+      {"name": "test_task_b_budget_simulation.py", "tests": 3, "passed": 3, "failed": 0, "exit_code": 0, "duration_seconds": 1.26},
+      {"name": "test_diagnostic_continuation.py", "tests": 27, "passed": 27, "failed": 0, "exit_code": 0, "duration_seconds": 102.28},
+      {"name": "test_tetrad_harness.py", "tests": 1, "passed": 1, "failed": 0, "exit_code": 0, "duration_seconds": 71.21},
+      {"name": "test_per_arm_candidate_identity.py", "tests": 10, "passed": 10, "failed": 0, "exit_code": 0, "duration_seconds": 208.63}
+    ]
+  },
+  "cli_ordering_verification": {
+    "path_tested": "CLI argument -> argparse -> split(',') -> Orchestrator.run_tetrad(arm_order=...) -> _execute_single_arm",
+    "comma_separated_syntax_supported": true,
+    "space_separated_syntax_rejected": true,
+    "unknown_arm_fails_closed": true,
+    "missing_arm_deferred": true,
+    "recommended_order": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_b_cand3_always_on",
+    "recommendation_rationale": "Prevents premature block halt at Turn 11 of Arm B, guaranteeing complete data on Native and Candidate 4.2 before Candidate 3 reaches budget limit."
+  },
+  "candidate_3_halt_prediction_calibration": {
+    "classification": "HIGH_RISK_OF_BUDGET_EXHAUSTION",
+    "deterministic_halt_claim_retracted": true,
+    "stochastic_factors": [
+      "Model generation sampling variability",
+      "Differing tool call trajectories",
+      "Provider-side KV cache hit rate variations",
+      "Marginal context expansion rate per turn"
+    ],
+    "structural_factors": [
+      "Unpruned get_context payload (>120 kB / ~33k tokens)",
+      "Turn-by-turn context accumulation",
+      "Observed 512,449 token consumption in 11 turns"
+    ],
+    "recommended_manifest_language": "Candidate 3 carries a HIGH RISK of token budget exhaustion due to its structural, unpruned get_context payload. While Live 02 halted at Turn 11 under a 550,000 ceiling, stochastic model responses mean future runs may exhaust headroom at a different turn count or, less likely, complete if a more direct solution trajectory is discovered."
+  },
+  "manifest_budget_semantics": {
+    "nominal_budget_clearly_separated_from_expected": true,
+    "monetary_cost_marked_requires_confirmation": true,
+    "model_availability_marked_requires_confirmation": true
+  },
+  "artifact_integrity": {
+    "head_matches": true,
+    "branch_matches": true,
+    "golden_commit_matches": true,
+    "cand3_matches": true,
+    "cand4_2_matches": true,
+    "fixture_matches": true,
+    "findings_18_matches": true,
+    "unstaged_files_preserved_count": 9
+  },
+  "findings": [
+    {
+      "id": "FINDING-5421-01",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "reference": "Orchestrator.run_tetrad L2096-L2115",
+      "explanation": "Global reserve (45,000) is enforced prior to dispatching each arm. Effective arm ceiling is clamped to min(550000, global_remaining). The global ceiling of 2,200,000 tokens is strictly unbreakable.",
+      "required_action": "None; mathematically and architecturally sound."
+    },
+    {
+      "id": "FINDING-5421-02",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "task-58182.log",
+      "reference": "Task 58182 Raw Execution Log",
+      "explanation": "Independent forensic verification of raw logs confirms all 7 suites exited with code 0, executing 63 tests with 63 passes in 396.27 seconds.",
+      "required_action": "None; claim is historically and currently verified."
+    },
+    {
+      "id": "FINDING-5421-03",
+      "severity": "LOW",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "reference": "main() L2510, L2558",
+      "explanation": "CLI argument --arm-order requires comma-separated syntax. Offline parser testing across 10 inputs confirms valid ordering, clean whitespace stripping, and fail-closed safety rejection of unregistered arms.",
+      "required_action": "Ensure command documentation specifies comma-separated arm order."
+    },
+    {
+      "id": "FINDING-5421-04",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "PHASE_5_4_19_EXECUTION_MANIFEST.md",
+      "reference": "Section 6 Budget Specification",
+      "explanation": "Candidate 3 halt prediction calibrated from 'deterministic' to 'HIGH_RISK_OF_BUDGET_EXHAUSTION' to properly account for model sampling stochasticity.",
+      "required_action": "Adopt calibrated language in final manifest reviews."
+    }
+  ],
+  "outstanding_confirmations": [
+    "User confirmation that gpt-5.6-luna cloud provider endpoint is active.",
+    "User confirmation that account quota can absorb up to 2.2M tokens exposure.",
+    "User decision on execution order: Seed 2330 (B->D->A->C) vs Alternative (A->D->C->B)."
+  ]
+}

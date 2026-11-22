@@ -1,0 +1,36 @@
+{
+  "phase": "5.8.2",
+  "audit_target": "Candidate 5 Frozen Staged Binary",
+  "timestamp": "2026-11-22T06:36:00Z",
+  "binary_identification": {
+    "staged_path": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+    "reference_path": "target/release/engram.exe",
+    "staged_size_bytes": 18883584,
+    "reference_size_bytes": 18883584,
+    "staged_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+    "reference_sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+    "byte_for_byte_identity": true
+  },
+  "runtime_smoke_tests": {
+    "version_command": "PASSED",
+    "reported_version": "1.5.4",
+    "reported_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "reported_dirty": true,
+    "doctor_command": "PASSED",
+    "doctor_event_chain": "EVENT_CHAIN_VALID",
+    "mcp_initialize": "PASSED",
+    "mcp_tools_list": "PASSED"
+  },
+  "hash_divergence_forensic_explanation": {
+    "phase_5_8_binary_hash": "6FA7FD2B84D34C9CEFEF40ACBA4EBBDA18659E8709C0657DE0D75691F61369AC",
+    "phase_5_8_1_binary_hash": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+    "cause_of_divergence": "Phase 5.8.1 modified src/compiler.rs, src/analyzer.rs, and src/storage.rs to implement the 3-tier cache invalidation fix (DEFECT-5.8-01). The resulting compilation naturally produced a distinct, reproducible binary SHA-256.",
+    "legitimacy": "VERIFIED_LEGITIMATE_AND_PROVENANCED"
+  },
+  "harness_integration_ledger": {
+    "isolation_py_registered_hash": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+    "orchestrator_py_candidate_ledger_hash": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+    "pre_dispatch_check_enforced": true
+  },
+  "verdict": "CANDIDATE5_BINARY_INTEGRITY_VERIFIED"
+}

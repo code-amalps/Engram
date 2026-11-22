@@ -1,0 +1,7 @@
+scenario_id,scenario_name,task_a_global_ceiling,task_a_arm_ceiling,task_a_usable_budget,task_a_reserve,task_b_global_ceiling,task_b_arm_ceiling,task_b_usable_budget,task_b_reserve,total_aggregate_ceiling,total_usable_budget,total_protected_reserve,max_overshoot_bound,risk_level,recommendation_status
+SCEN-01,Conservative (High Headroom),1200000,300000,1140000,60000,2600000,600000,2540000,60000,3800000,3680000,120000,32768,LOW,Viable but high provider cost
+SCEN-02,Balanced (Recommended),1000000,250000,955000,45000,1500000,500000,1455000,45000,2500000,2410000,90000,32768,MODERATE,RECOMMENDED (Optimal efficiency and safety)
+SCEN-03,Minimal Pilot (Constrained),600000,150000,570000,30000,900000,250000,870000,30000,1500000,1440000,60000,32768,HIGH,Not recommended (High premature halt probability on Task B)
+SCEN-04,Worst-Case Arm Saturation (Balanced Limits),1000000,250000,955000,45000,1500000,500000,1455000,45000,2500000,2410000,90000,32768,MODERATE,Safely caps at global ceilings (Arms 4-5 skipped)
+SCEN-05,Nominal Expected Execution,480000,120000,435000,45000,1120000,300000,1075000,45000,1600000,1510000,90000,16384,MINIMAL,Expected operational outcome with Candidate 5 savings
+SCEN-06,Candidate 5 Isolation Priority,1000000,250000,955000,45000,1500000,500000,1455000,45000,2500000,2410000,90000,32768,MODERATE,Guarantees Slot 3 Candidate 5 dispatch if Arms 1-2 <= 1.0M

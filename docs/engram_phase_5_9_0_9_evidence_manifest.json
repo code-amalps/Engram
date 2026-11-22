@@ -1,0 +1,144 @@
+{
+  "phase": "5.9.0.9",
+  "program": "Engram Per-Request Dispatch Enforcement, Hard Budget Boundary Remediation & Final Benchmark Preparation",
+  "git_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "audit_mode": "OFFLINE_ENGINEERING_AND_ADVERSARIAL_TESTING",
+  "certified_verdict": "BLOCKED_PROVIDER_DISPATCH_INTERCEPTION",
+  "total_deliverables": 19,
+  "artifacts": [
+    {
+      "relative_path": "docs/phase_5_9_0_9_request_dispatch_enforcement_report.md",
+      "category": "remediation_report",
+      "byte_size": 18899,
+      "sha256": "4B7CC086423790BDAF5E98D4356446100115E002B4474E16879F5EEFBE82BA1A",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/runner.py",
+      "category": "source_code",
+      "byte_size": 91336,
+      "sha256": "F0A527F792327BE5E5F9A173CAEB620B26DC9897B4A906D309A98997540CA603",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_request_boundary_enforcement.py",
+      "category": "test_suite",
+      "byte_size": 14744,
+      "sha256": "030B85E8A18816D6BE5EE702CE75BBAE736827072AC7CDE09439EE8DF106C12F",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/telemetry.py",
+      "category": "source_code",
+      "byte_size": 50584,
+      "sha256": "FB4508F9C76869E9D28A08BEFCAF61D370B82F44A003A60EB1592DDA2AA819E1",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "category": "source_code",
+      "byte_size": 172081,
+      "sha256": "876BE8967B88EB6019B85D5AF8472D5FED0BEE0338DCAFF5E9B5BA080E48E6A5",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/schemas/run_telemetry.schema.json",
+      "category": "schema",
+      "byte_size": 11854,
+      "sha256": "2B42E16E06654A1C2AE4B46D47F1E97D3D3F9BEEC9875C71AB858389021A2BEA",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/scripts/run_two_task_pentad.ps1",
+      "category": "coordinator_script",
+      "byte_size": 18723,
+      "sha256": "2545A79904478C6C84245918B5887BE09F88EBB16F8D807A4AC9C4D8130F8BB4",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_request_size_gate.py",
+      "category": "test_suite",
+      "byte_size": 11167,
+      "sha256": "FC15BD9C0CD554B6C07E01410F61570417A7CF111EA9D6BE71A7C048F13BFCE6",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_round_trip_telemetry.py",
+      "category": "test_suite",
+      "byte_size": 14340,
+      "sha256": "E6770405EA3EEEE3BDCAFCBF066D367EB55CB6F69FB5F765350323F3805DF7D4",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_budget_coordinator.py",
+      "category": "test_suite",
+      "byte_size": 9648,
+      "sha256": "82657123C51B5D93E703DB733821757486B03D5E44F137EF21D10634A78C1338",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_telemetry_semantics.py",
+      "category": "test_suite",
+      "byte_size": 8555,
+      "sha256": "DD737915FC90DA82DD7301AA796DE8F7901E2E995C27A87247FC47D32BBAD9DA",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_harness_safety_audit.py",
+      "category": "test_suite",
+      "byte_size": 28221,
+      "sha256": "39577F5F5FB0DE6D10C7F949C79EF5B9D00B3190D1A29475C33938AF184C87DF",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/tests/test_pentad_harness.py",
+      "category": "test_suite",
+      "byte_size": 12302,
+      "sha256": "881DDEB83F37796731C0A6E0CDDA19FB6D9C23C803100757B279E0DFCF222370",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/runs/two_task_pentad/two_task_pentad_summary.json",
+      "category": "dry_run_summary",
+      "byte_size": 913,
+      "sha256": "F2CC1999260135F7E9B080AA51AB88C3741E58F2AE9B519C18B30C0A83B7259B",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+      "category": "candidate_binary",
+      "byte_size": 18668032,
+      "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "category": "candidate_binary",
+      "byte_size": 18802176,
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+      "category": "candidate_binary",
+      "byte_size": 18883584,
+      "sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/config/tasks/task_a_typo.json",
+      "category": "task_fixture",
+      "byte_size": 2284,
+      "sha256": "357D9B4B5777A41A8C5691475DCA8DDAC00134C480C6324E26B60FEA39F95F02",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "relative_path": "benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json",
+      "category": "task_fixture",
+      "byte_size": 4654,
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

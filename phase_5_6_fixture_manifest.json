@@ -1,0 +1,72 @@
+{
+  "phase": "5.6",
+  "program": "Matched Benchmark Fixture Manifest",
+  "generated_at": "2026-11-20T09:40:00Z",
+  "fixtures": [
+    {
+      "task_id": "historical_task_b",
+      "path": "benchmarks\\matched-pair-harness\\config\\tasks\\task_b_remember_me.json",
+      "size_bytes": 4654,
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "category": "Historical Baseline Reference",
+      "status": "PROTECTED_IMMUTABLE"
+    },
+    {
+      "task_id": "task_01",
+      "name": "Targeted Tax Calculation",
+      "category": "Small Targeted Code Change",
+      "target_file": "src/billing.rs",
+      "expected_symbols": ["calculate_tax"],
+      "token_budget": 1200
+    },
+    {
+      "task_id": "task_02",
+      "name": "Multi-File Payment Service",
+      "category": "Multi-File Implementation",
+      "target_file": "src/payment.rs",
+      "expected_symbols": ["PaymentService", "UserRepository", "StripeAdapter"],
+      "token_budget": 2000
+    },
+    {
+      "task_id": "task_03",
+      "name": "Modify User Account",
+      "category": "Existing Code Modification",
+      "target_file": "src/user.rs",
+      "expected_symbols": ["UserAccount", "update_email"],
+      "token_budget": 1200
+    },
+    {
+      "task_id": "task_04",
+      "name": "Debug Null Pointer Exception",
+      "category": "Debugging / Defect Remediation",
+      "target_file": "src/handler.rs",
+      "expected_symbols": ["handle_request"],
+      "token_budget": 1500
+    },
+    {
+      "task_id": "task_05",
+      "name": "Refactor Storage Adapter",
+      "category": "Architectural Refactoring",
+      "target_file": "src/storage.rs",
+      "expected_symbols": ["StorageAdapter", "DatabaseConnection"],
+      "token_budget": 2500
+    },
+    {
+      "task_id": "task_06",
+      "name": "Explore Architecture Graph",
+      "category": "Context-Heavy Exploration",
+      "target_file": "src/main.rs",
+      "expected_symbols": ["SubsystemRouter", "GraphTraversal"],
+      "token_budget": 3000
+    },
+    {
+      "task_id": "task_07",
+      "name": "Trivial Documentation Typo",
+      "category": "Trivial Leaf Fix",
+      "target_file": "README.md",
+      "expected_symbols": [],
+      "token_budget": 1000
+    }
+  ],
+  "fixture_integrity": "STRICT_IMMUTABLE_HASH_ENFORCED"
+}

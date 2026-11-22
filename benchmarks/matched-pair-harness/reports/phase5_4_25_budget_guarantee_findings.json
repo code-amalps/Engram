@@ -1,0 +1,255 @@
+{
+  "schema_version": "2.0.0",
+  "phase_identifier": "5.4.25",
+  "baseline_branch": "feature/phase2-stage5-remediation",
+  "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "execution_mode": "STRICTLY_OFFLINE_READ_ONLY_FORENSIC_AUDIT",
+  "timestamp_utc": "2026-11-20T05:47:00Z",
+  "authorization_status": "NOT_AUTHORIZED",
+  "verdict": "AUDIT_CONDITIONAL_BOUND",
+  "final_guarantee_classification": "CONDITIONAL_UPPER_BOUND",
+  "verdict_rationale": "Forensic source code audit reveals that prompt limit (P_max = 60,000) and completion limit (C_max = 16,384) are observed historical quantities, NOT enforced software constraints. The 31,384-token theoretical overshoot bound (Omega_max = P_max + C_max - R_min = 60,000 + 16,384 - 45,000) is certified strictly as a CONDITIONAL_UPPER_BOUND under the explicit preconditions that prompt context does not exceed 60,000 tokens and single-turn completion does not exceed 16,384 tokens. If prompt context or reasoning bursts expand to model architectural limits, single-arm overshoot expands proportionally. However, non-compounding across tetrad benchmark arms is a PROVEN_HARD_GUARANTEE: any ceiling breach immediately raises SafetyViolationError, halting the execution loop and marking all downstream arms SKIPPED_SAFETY_FAILURE with zero additional token consumption.",
+  "prompt_limit_audit": {
+    "stated_value": 60000,
+    "enforced_in_code": false,
+    "enforced_in_cli_flags": false,
+    "classification": "OBSERVED_VALUE_ONLY",
+    "pre_dispatch_detection": false,
+    "truncation_mechanism": "NONE",
+    "findings": "Zero code in runner.py, orchestrator.py, or Codex CLI enforces P_max = 60,000. Large file inspection in Task B can expand prompt tokens beyond 60,000 up to the provider's architectural context limit."
+  },
+  "completion_limit_audit": {
+    "stated_value": 16384,
+    "enforced_in_code": false,
+    "enforced_in_cli_flags": false,
+    "classification": "OBSERVED_VALUE_ONLY",
+    "model_architecture_limit": "16,384 to 65,536 tokens",
+    "findings": "Zero CLI flags (--max-output-tokens) or turn-level completion gates exist. Extended reasoning models (o1/gpt-5.6-luna) can generate completion/reasoning bursts exceeding 16,384 tokens in a single turn."
+  },
+  "overshoot_bound_certification": {
+    "nominal_formula": "Omega_max = P_max + C_max - R_min",
+    "nominal_bound_tokens": 31384,
+    "bound_classification": "CONDITIONAL_UPPER_BOUND",
+    "unqualified_claim_retracted": true,
+    "preconditions": [
+      "Prompt context per turn does not exceed P <= 60,000 tokens",
+      "Completion generation per turn does not exceed C <= 16,384 tokens",
+      "Pre-dispatch headroom reserve R_min >= 45,000 is enforced by StreamingTokenTracker and Orchestrator",
+      "SafetyViolationError terminates tetrad execution upon ceiling breach"
+    ],
+    "worst_case_scenarios": {
+      "S01_nominal_baseline": {
+        "prompt": 60000,
+        "completion": 16384,
+        "reserve": 45000,
+        "overshoot": 31384,
+        "status": "CONDITIONAL_BOUND"
+      },
+      "S02_deep_context": {
+        "prompt": 100000,
+        "completion": 16384,
+        "reserve": 45000,
+        "overshoot": 71384,
+        "status": "EMPIRICAL_RISK"
+      },
+      "S03_extended_cot": {
+        "prompt": 60000,
+        "completion": 32768,
+        "reserve": 45000,
+        "overshoot": 47768,
+        "status": "EMPIRICAL_RISK"
+      },
+      "S04_combined_worst_case": {
+        "prompt": 100000,
+        "completion": 32768,
+        "reserve": 45000,
+        "overshoot": 87768,
+        "status": "EMPIRICAL_RISK"
+      },
+      "S05_stress_task_b": {
+        "prompt": 120000,
+        "completion": 32768,
+        "reserve": 45000,
+        "overshoot": 107768,
+        "status": "STRESS_BOUNDARY"
+      },
+      "S06_architectural_maximum": {
+        "prompt": 200000,
+        "completion": 65536,
+        "reserve": 45000,
+        "overshoot": 220536,
+        "status": "ARCHITECTURAL_MAX"
+      }
+    }
+  },
+  "non_compounding_guarantee": {
+    "status": "PROVEN_HARD_GUARANTEE",
+    "mechanism": "orchestrator.py:run_tetrad raises SafetyViolationError on TOKEN_CEILING_BREACHED; tetrad halts unconditionally with ABORTED_SAFETY_FAILURE",
+    "cascading_overshoot_possible": false,
+    "downstream_arms_dispatched_post_breach": 0,
+    "downstream_arms_status": "SKIPPED_SAFETY_FAILURE",
+    "tetrad_total_overshoot": "Strictly identical to single breached arm overshoot",
+    "bypass_via_no_stop_on_failure_possible": false
+  },
+  "process_cancellation_latency_distribution": {
+    "trials": 10,
+    "mechanism": "taskkill /F /T /PID <pid>",
+    "min_ms": 498.11,
+    "max_ms": 808.22,
+    "mean_ms": 574.18,
+    "median_ms": 552.88,
+    "std_dev_ms": 89.09,
+    "all_trials_under_1000ms": true,
+    "phase_5_4_24_single_sample_assessment": "The 298.56ms measurement reported in Phase 5.4.24 was an optimistic single-sample outlier. The empirical distribution establishes that cancellation latency reliably falls between 500ms and 800ms on Windows."
+  },
+  "remote_provider_cancellation_semantics": {
+    "local_socket_action": "TCP RST / connection abort",
+    "remote_billing_continuation": "Provider-side inference bills for all tokens generated up to or during in-flight turn; zero cloud billing refund guarantee",
+    "classification": "DETECT_AND_ABORT_ONLY"
+  },
+  "adversarial_test_authenticity_b01_b20": {
+    "total_scenarios": 20,
+    "strong_production_evidence": 8,
+    "moderate_production_evidence": 10,
+    "synthetic_only_evidence": 2,
+    "b02_b03_audit_finding": "B02 and B03 evaluated StreamingTokenTracker state transitions using hand-crafted JSON strings without child processes or real provider streams. Real providers emit token usage exclusively at turn completion."
+  },
+  "adversarial_race_scenarios_r01_r12": {
+    "total_scenarios": 12,
+    "passed": 12,
+    "failed": 0,
+    "scenarios": [
+      {
+        "id": "R01",
+        "name": "Concurrent Arm Execution Race",
+        "result": "PASS",
+        "finding": "Synchronous sequential loop prevents parallel arm execution"
+      },
+      {
+        "id": "R02",
+        "name": "Intra-Arm Concurrent Thread Dispatches",
+        "result": "PASS",
+        "finding": "Threading lock protects StreamingTokenTracker state"
+      },
+      {
+        "id": "R03",
+        "name": "In-Flight Request at Cancellation Time",
+        "result": "PASS",
+        "finding": "Local process kill severs connection; remote spend bounded by single-turn burst"
+      },
+      {
+        "id": "R04",
+        "name": "Buffered Stdout Draining Race",
+        "result": "PASS",
+        "finding": "OS pipe buffers drained post-kill; truncated JSON triggers fail-closed telemetry rejection"
+      },
+      {
+        "id": "R05",
+        "name": "Post-Cancellation Delayed Event Delivery",
+        "result": "PASS",
+        "finding": "Frozen run dictionary prevents post-sealing mutation"
+      },
+      {
+        "id": "R06",
+        "name": "Corrupted/Interleaved JSONL Output",
+        "result": "PASS",
+        "finding": "Malformed lines safely discarded without crashing tracker"
+      },
+      {
+        "id": "R07",
+        "name": "Headroom Check vs Usage Arrival (TOCTOU)",
+        "result": "PASS",
+        "finding": "Headroom checked synchronously immediately prior to turn call"
+      },
+      {
+        "id": "R08",
+        "name": "Diagnostic Continuation Bypass Race",
+        "result": "PASS",
+        "finding": "SafetyViolationError unconditionally halts tetrad regardless of --no-stop-on-failure"
+      },
+      {
+        "id": "R09",
+        "name": "Non-Compounding Multi-Arm Cascade Breach",
+        "result": "PASS",
+        "finding": "Breached arm halts tetrad; downstream arms skipped with 0 tokens"
+      },
+      {
+        "id": "R10",
+        "name": "Subprocess Tree Hierarchy Cancellation",
+        "result": "PASS",
+        "finding": "taskkill /F /T terminates parent, child, and grandchild PID trees"
+      },
+      {
+        "id": "R11",
+        "name": "Remote Provider Billing In-Flight Continuation",
+        "result": "PASS",
+        "finding": "Provider bills in-flight burst; local termination halts downstream dispatch"
+      },
+      {
+        "id": "R12",
+        "name": "Multi-Sample Process Termination Latency Distribution",
+        "result": "PASS",
+        "finding": "Empirical distribution across 10 trials: mean=574.18ms, all < 1.0s"
+      }
+    ]
+  },
+  "offline_regression_results": {
+    "total_suites": 8,
+    "total_tests_passed": 86,
+    "total_tests_failed": 0,
+    "total_tests_skipped": 0,
+    "pass_rate_percent": 100.0,
+    "cumulative_duration_seconds": 988.86,
+    "all_exit_codes_zero": true,
+    "suites": [
+      {
+        "name": "test_candidate_selection.py",
+        "passed": 8,
+        "duration_seconds": 3.78,
+        "exit_code": 0
+      },
+      {
+        "name": "test_telemetry_semantics.py",
+        "passed": 4,
+        "duration_seconds": 5.12,
+        "exit_code": 0
+      },
+      {
+        "name": "test_candidate_4_2_offline_certification.py",
+        "passed": 10,
+        "duration_seconds": 36.06,
+        "exit_code": 0
+      },
+      {
+        "name": "test_task_b_budget_simulation.py",
+        "passed": 3,
+        "duration_seconds": 3.63,
+        "exit_code": 0
+      },
+      {
+        "name": "test_diagnostic_continuation.py",
+        "passed": 27,
+        "duration_seconds": 496.31,
+        "exit_code": 0
+      },
+      {
+        "name": "test_tetrad_harness.py",
+        "passed": 1,
+        "duration_seconds": 116.87,
+        "exit_code": 0
+      },
+      {
+        "name": "test_per_arm_candidate_identity.py",
+        "passed": 10,
+        "duration_seconds": 300.7,
+        "exit_code": 0
+      },
+      {
+        "name": "test_phase_5_4_23_safety_remediation.py",
+        "passed": 23,
+        "duration_seconds": 26.39,
+        "exit_code": 0
+      }
+    ]
+  }
+}

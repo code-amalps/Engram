@@ -1,0 +1,8 @@
+scenario_id,scenario_name,task_a_allocated,task_a_expected_consumption,task_a_overshoot_bound,task_b_allocated,task_b_expected_consumption,task_b_overshoot_bound,aggregate_nominal_ceiling,aggregate_expected_tokens,aggregate_max_exposure,protected_reserve_total,usable_headroom_remaining,risk_classification
+SCEN-01,All Ten Arms Complete (Nominal),1000000,480000,0,1500000,1120000,0,2500000,1600000,1600000,90000,810000,MINIMAL (36% headroom remains)
+SCEN-02,Every Arm Saturated to Ceilings,1000000,1000000,0,1500000,1500000,0,2500000,2500000,2500000,90000,0,MODERATE (Safe halt on global ceiling)
+SCEN-03,Every Arm Saturated + Max Overshoot,1000000,1000000,16384,1500000,1500000,16384,2500000,2500000,2532768,90000,-32768,MODERATE (Max theoretical overshoot bound)
+SCEN-04,Every Arm Hits Ceiling Except Final,1000000,1000000,0,1500000,1500000,0,2500000,2500000,2500000,90000,0,MODERATE (Final arm skipped safely)
+SCEN-05,Task A Normal Task B Exhausts Allocation,1000000,520000,0,1500000,1500000,16384,2500000,2020000,2036384,90000,463616,LOW (Task A savings buffer Task B)
+SCEN-06,Candidate 5 Succeeds Legacy Arms Loop,1000000,460000,0,1500000,1150000,16384,2500000,1610000,1626384,90000,873616,LOW (Slot 3 ensures Candidate 5 evaluates)
+SCEN-07,Provider Retries Consume Arm Quota,1000000,550000,0,1500000,1500000,16384,2500000,2050000,2066384,90000,433616,LOW (Retries count against arm ceiling)

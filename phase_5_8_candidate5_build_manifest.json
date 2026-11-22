@@ -1,0 +1,38 @@
+{
+  "build_manifest_version": "1.0.0",
+  "candidate": "Candidate 5",
+  "product": "engram",
+  "version": "1.5.4",
+  "build_type": "isolated_offline_release",
+  "toolchain": {
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "host_triple": "x86_64-pc-windows-msvc",
+    "profile": "release",
+    "opt_level": 3,
+    "lto": "thin"
+  },
+  "source_inputs": {
+    "aggregate_source_hash": "50BA53C4A597E2FF9C68337CFCA3460FED4DD832FB113F71E1EBA698ED57EFBE",
+    "input_file_count": 41,
+    "cargo_lock_sha256": "85FF18D67207BEF644D8C84582124D5EA0988983AC64C51CBA8EB6975FE11D39"
+  },
+  "output_artifacts": {
+    "primary_binary": {
+      "path": "target/release/engram.exe",
+      "size_bytes": 18865664,
+      "sha256": "ED851AF3791EAC42529690EC41314548365166C4FF9DD93FAEBA15B9D1F69804",
+      "format": "PE32+ executable (x86-64)",
+      "machine": "0x8664",
+      "section_count": 5
+    },
+    "isolated_rebuild_binary": {
+      "path": "AppData/Local/Temp/engram_isolated_5_8/target/release/engram.exe",
+      "size_bytes": 18865664,
+      "sha256": "560348A660CD5336881E02DCE9AA3686AB5FAEE442C03DB3A4F8E10F7B70BF06",
+      "build_duration_seconds": 508.93,
+      "exit_code": 0
+    }
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "phase": "5.9.0.1",
+  "title": "Empirical Deterministic Execution Order Evidence",
+  "prng_algorithm": "Python random.Random (Mersenne Twister MT19937)",
+  "base_arms": [
+    "arm_a_native",
+    "arm_b_cand3",
+    "arm_c_cand42_always_on",
+    "arm_d_cand42_adaptive",
+    "arm_e_cand5_optimized"
+  ],
+  "schedules": {
+    "task_a": {
+      "task_id": "task_a_typo",
+      "seed": 59001,
+      "global_ceiling": 1000000,
+      "per_arm_ceiling": 250000,
+      "headroom_reserve": 45000,
+      "execution_slots": [
+        {
+          "slot": 1,
+          "arm": "arm_a_native",
+          "candidate_metadata": {
+            "type": "native_codex",
+            "path": null,
+            "sha256": null
+          }
+        },
+        {
+          "slot": 2,
+          "arm": "arm_d_cand42_adaptive",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+            "flag": "--adaptive",
+            "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2"
+          }
+        },
+        {
+          "slot": 3,
+          "arm": "arm_b_cand3",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+            "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777"
+          }
+        },
+        {
+          "slot": 4,
+          "arm": "arm_c_cand42_always_on",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+            "flag": "--always-on",
+            "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2"
+          }
+        },
+        {
+          "slot": 5,
+          "arm": "arm_e_cand5_optimized",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+            "sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44"
+          }
+        }
+      ]
+    },
+    "task_b": {
+      "task_id": "task_b_remember_me",
+      "seed": 59002,
+      "global_ceiling": 1500000,
+      "per_arm_ceiling": 500000,
+      "headroom_reserve": 45000,
+      "execution_slots": [
+        {
+          "slot": 1,
+          "arm": "arm_a_native",
+          "candidate_metadata": {
+            "type": "native_codex",
+            "path": null,
+            "sha256": null
+          }
+        },
+        {
+          "slot": 2,
+          "arm": "arm_c_cand42_always_on",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+            "flag": "--always-on",
+            "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2"
+          }
+        },
+        {
+          "slot": 3,
+          "arm": "arm_e_cand5_optimized",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe",
+            "sha256": "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44"
+          }
+        },
+        {
+          "slot": 4,
+          "arm": "arm_b_cand3",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+            "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777"
+          }
+        },
+        {
+          "slot": 5,
+          "arm": "arm_d_cand42_adaptive",
+          "candidate_metadata": {
+            "type": "engram_binary",
+            "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+            "flag": "--adaptive",
+            "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2"
+          }
+        }
+      ]
+    }
+  },
+  "verification_checks": {
+    "seed_59001_stability_100_runs": "PASSED (100/100 matches)",
+    "seed_59002_stability_100_runs": "PASSED (100/100 matches)",
+    "all_arms_present_without_duplicates": true,
+    "exact_set_equivalence": true
+  }
+}

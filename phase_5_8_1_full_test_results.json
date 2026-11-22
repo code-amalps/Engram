@@ -1,0 +1,112 @@
+{
+  "phase": "5.8.1",
+  "execution_mode": "STRICTLY_OFFLINE",
+  "timestamp": "2026-11-22T06:14:21Z",
+  "summary": {
+    "total_rust_tests": 146,
+    "rust_passed": 146,
+    "rust_failed": 0,
+    "rust_ignored": 0,
+    "total_python_tests": 21,
+    "python_passed": 21,
+    "python_failed": 0,
+    "total_tests_executed": 167,
+    "overall_pass_rate_pct": 100.0,
+    "status": "ALL_TESTS_PASSED"
+  },
+  "rust_suites": [
+    {
+      "target": "src/lib.rs",
+      "type": "unit",
+      "passed": 24,
+      "failed": 0,
+      "duration_seconds": 0.77
+    },
+    {
+      "target": "src/main.rs",
+      "type": "unit",
+      "passed": 35,
+      "failed": 0,
+      "duration_seconds": 0.60
+    },
+    {
+      "target": "tests/ast_extraction_test.rs",
+      "type": "integration",
+      "passed": 13,
+      "failed": 0,
+      "duration_seconds": 1.42
+    },
+    {
+      "target": "tests/cache_invalidation_test.rs",
+      "type": "integration",
+      "passed": 13,
+      "failed": 0,
+      "duration_seconds": 18.04
+    },
+    {
+      "target": "tests/query_router_test.rs",
+      "type": "integration",
+      "passed": 15,
+      "failed": 0,
+      "duration_seconds": 13.89
+    },
+    {
+      "target": "tests/storage_migration_test.rs",
+      "type": "integration",
+      "passed": 11,
+      "failed": 0,
+      "duration_seconds": 0.11
+    },
+    {
+      "target": "tests/telemetry_test.rs",
+      "type": "integration",
+      "passed": 8,
+      "failed": 0,
+      "duration_seconds": 16.48
+    },
+    {
+      "target": "tests/token_efficiency_test.rs",
+      "type": "integration",
+      "passed": 5,
+      "failed": 0,
+      "duration_seconds": 2.43
+    },
+    {
+      "target": "tests/turn0_injection_test.rs",
+      "type": "integration",
+      "passed": 5,
+      "failed": 0,
+      "duration_seconds": 6.02
+    },
+    {
+      "target": "tests/turn0_phase1_test.rs",
+      "type": "integration",
+      "passed": 8,
+      "failed": 0,
+      "duration_seconds": 14.47
+    },
+    {
+      "target": "tests/utf8_safety_test.rs",
+      "type": "integration",
+      "passed": 14,
+      "failed": 0,
+      "duration_seconds": 1.85
+    }
+  ],
+  "python_suites": [
+    {
+      "target": "benchmarks/matched-pair-harness/tests/test_tetrad_harness.py",
+      "type": "regression_compatibility",
+      "passed": 1,
+      "failed": 0,
+      "duration_seconds": 67.48
+    },
+    {
+      "target": "benchmarks/matched-pair-harness/tests/test_pentad_harness.py",
+      "type": "pentad_acceptance",
+      "passed": 20,
+      "failed": 0,
+      "duration_seconds": 152.30
+    }
+  ]
+}

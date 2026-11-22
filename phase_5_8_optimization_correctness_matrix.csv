@@ -1,0 +1,8 @@
+Optimization,Module,Core Mechanism,Adversarial Case,Status,Finding
+Opt A (Intra-File Ranking),src/compiler.rs,5-tier query relevance scoring,Late target symbol in 1000-line file,PASS,Eliminates symbol starvation; stable line tie-breaking
+Opt B (Progressive Disclosure),src/budget.rs / compiler.rs,DetailLevel::Compact metadata-only,Exploratory prompt followed by expansion,PASS,77.0% token reduction; line ranges preserved
+Opt C (Context Deduplication),src/compiler.rs,[DEDUPLICATED] cross-file signature cache,Duplicate trait declarations across mock and real,PASS,50.0% reduction on shared types; path preserved
+Opt D (Adaptive MCP Bypass),src/mcp.rs,classify_task_complexity heuristic,Short question requiring architecture context,PASS,100% token savings on typos; complex queries not bypassed
+Opt E (Token Budget Bounding),src/budget.rs,16KB 8-level degradation ladder,Large 95KB Task B payload,PASS,Guaranteed <=16KB hard ceiling; safe UTF-8 slicing
+Opt F (Telemetry),src/compiler.rs / mcp.rs,Local JSON event logging,Credential or secret path leakage,PASS,Zero network transmission; credentials redacted
+Opt G (In-Memory LRU Cache),src/compiler.rs,32-entry COMPILED_CONTEXT_CACHE,File deletion in non-git workspace,FAIL,DEFECT-5.8-01: Cache returns stale deleted file context

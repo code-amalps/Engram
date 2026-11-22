@@ -1,0 +1,77 @@
+{
+  "phase": "5.9.0.3",
+  "program": "Engram Live Five-Arm Pentad Benchmark Protocol Certification",
+  "git_head": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+  "branch": "feature/phase2-stage5-remediation",
+  "audit_mode": "STRICTLY_OFFLINE_READ_ONLY",
+  "certified_verdict": "READY_FOR_EXPLICIT_LIVE_PILOT_AUTHORIZATION",
+  "total_deliverables": 11,
+  "deliverables": [
+    {
+      "filename": "phase_5_9_0_3_starting_state_and_scope.md",
+      "byte_size": 4609,
+      "sha256": "4E20F9E748F36FA39DFA39720DC3D5030002FDFEB96980660CD7814E0FDAA578",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_token_accounting_lifecycle.md",
+      "byte_size": 4296,
+      "sha256": "24A4555A7BF3675F60758F2E66D87AE63286D1D37CB1620F8E6AD4DE0B5DD9E8",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_overshoot_enforcement_audit.md",
+      "byte_size": 5024,
+      "sha256": "80F1DBA0884C344B0372FBFA6AB049EE2ABDE08702FD4A47084D441A1A9911C7",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_candidate5_headroom_scenarios.csv",
+      "byte_size": 927,
+      "sha256": "CAD47604F41620973465DB9BEAE9245306C63C6649F7EE2F36150E6E30440C2C",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_dispatch_eligibility_proof.md",
+      "byte_size": 7370,
+      "sha256": "2D7E3BDA08A9DFB890B375942AD40BA9B7BA3287C96760882F2F8AD375099C9E",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_cross_process_budget_safety.md",
+      "byte_size": 7743,
+      "sha256": "FB9A0CB894C53E7A8118946F832DD9C61970B23F2896AD7EA183CB709171B6F8",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_maximum_exposure_reconciliation.md",
+      "byte_size": 6937,
+      "sha256": "A053A8354775B9E0A6EF90DDDDDB0F804C076C2C4C51127E8BD7120CA4EAB82F",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_financial_quota_claims_audit.md",
+      "byte_size": 5790,
+      "sha256": "73379084CE487B23C546648AB4EE8AAF603685580EDCDC2429CFD16AC4445190",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_risk_register.csv",
+      "byte_size": 1901,
+      "sha256": "2350AD8B1F069701F25CEB977F61315D66273B227198D84667F15C76FE6235C3",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_final_authorization_assessment.md",
+      "byte_size": 4626,
+      "sha256": "C566B8E0938F8A99F3D573261A175E85D8791CD12575BA463B0D7311383F1000",
+      "verification_status": "VERIFIED"
+    },
+    {
+      "filename": "phase_5_9_0_3_final_report.md",
+      "byte_size": 12111,
+      "sha256": "A3534724AC62902056F4EBBBE2EB83D3D4B3B0D7E9075972E9DFC67340631FA2",
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

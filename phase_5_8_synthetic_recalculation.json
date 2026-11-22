@@ -1,0 +1,54 @@
+{
+  "recalculation_name": "Phase 5.8 Synthetic Token Reduction Audit",
+  "audit_timestamp": "2026-11-22T04:49:00Z",
+  "formula": "((sum(baseline_tokens) - sum(optimized_tokens)) / sum(baseline_tokens)) * 100",
+  "baseline_sum": 1809,
+  "optimized_sum": 575,
+  "absolute_reduction": 1234,
+  "recalculated_percentage": 68.214483,
+  "reported_percentage": 68.2,
+  "match": true,
+  "classification": "SYNTHETIC_ESTIMATE_REPRODUCED",
+  "token_model": {
+    "type": "estimated_linear_ratio",
+    "divisor": 3.8,
+    "unit": "utf8_bytes_per_token"
+  },
+  "scenarios": [
+    {
+      "id": "SCEN-01",
+      "name": "Progressive Disclosure Compact",
+      "baseline": 538,
+      "optimized": 124,
+      "reduction_pct": 76.95
+    },
+    {
+      "id": "SCEN-02",
+      "name": "Targeted Symbol Filtering",
+      "baseline": 433,
+      "optimized": 149,
+      "reduction_pct": 65.59
+    },
+    {
+      "id": "SCEN-03",
+      "name": "Context Deduplication",
+      "baseline": 300,
+      "optimized": 150,
+      "reduction_pct": 50.00
+    },
+    {
+      "id": "SCEN-04",
+      "name": "Adaptive Leaf Bypass",
+      "baseline": 538,
+      "optimized": 0,
+      "reduction_pct": 100.00
+    },
+    {
+      "id": "OVERHEAD",
+      "name": "Serialization & Tool Overhead",
+      "baseline": 0,
+      "optimized": 152,
+      "reduction_pct": 0.0
+    }
+  ]
+}

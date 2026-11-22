@@ -1,0 +1,23 @@
+Category,Requirement,Phase,Status,Evidence/Metric,Blocked By
+Provenance,Source Baseline Verification,5.4.31,PASSED,Commit 7106a2f verified with 13 tracked modified files,None
+Dependencies,Package Count Discrepancy Resolved,5.4.31,PASSED,115 packages reconciled (1 root + 114 external instances),None
+Licensing,AGPL-3.0 and Permissive Audit,5.4.31,PASSED,Root is AGPL-3.0; 114 deps are permissive; 0 copyleft conflicts,None
+Documentation,Public Performance Claims Rectified,5.4.31,PASSED,README.md lines 314-315 corrected to objective design goals,None
+Security,Boundary Defenses & Parser Safety,5.4.32,PASSED,16KB ladder and path canonicalization verified,None
+Security,Online Advisory Audit,5.4.32,BLOCKED,Offline static audit passed; live cargo audit gated,Checkpoint A Authorization
+Token Efficiency,Task-Aware Intra-File Symbol Ranking,5.5,PASSED,5-tier ranking verified in tests/token_efficiency_test.rs,None
+Token Efficiency,Progressive Disclosure (Compact Level),5.5,PASSED,77.0% reduction on exploratory turns (538 to 124 tokens),None
+Token Efficiency,Cross-File Context Deduplication,5.5,PASSED,50.0% reduction on shared function signatures,None
+Token Efficiency,Adaptive MCP Activation (Bypass),5.5,PASSED,100% token savings (0 tokens) on self-contained tasks,None
+Token Efficiency,Safe Budget Bounding Ladder,5.5,PASSED,Level 0-7 degradations and safe UTF-8 slicing verified,None
+Token Efficiency,In-Memory LRU Compilation Cache,5.5,PASSED,Compiled context cache keyed with git and memory mtime,None
+Token Efficiency,Synthetic Token Reduction Threshold,5.5,PASSED,68.2% weighted reduction achieved (target >=30%),None
+Regression,Zero Correctness Regressions,5.5,PASSED,87/87 Rust tests passing across all test suites,None
+Benchmark,Multi-Arm Evaluation Framework,5.6,PASSED,5 candidate configurations formalised (Arms A/B/C/D/E),None
+Benchmark,Deterministic Task Archetypes,5.6,PASSED,7 archetypes across 28 tasks specified in manifest,None
+Benchmark,Fail-Closed Tetrad Order Validation,5.6,PASSED,test_tetrad_harness.py passed (69.13s exit code 0),None
+Benchmark,Live LLM API Evaluation,5.6,BLOCKED,Mock tests passed; live API calls gated,Checkpoint B Authorization
+Installation,Non-Elevated Safe PowerShell Installer,5.7,PASSED,install.ps1 verified with in-use guards and atomic rollback,None
+Installation,Non-Elevated Inno Setup Installer,5.7,PASSED,installer/engram.iss verified with PrivilegesRequired=lowest,None
+Binary,Offline Clean Release Build,5.7,PASSED,engram.exe (18865664 bytes SHA256:ED851AF3791...) compiled,None
+Release,Production Release and Tagging,5.7,BLOCKED,Release candidate prepared; distribution gated,Checkpoint C Authorization

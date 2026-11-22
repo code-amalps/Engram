@@ -1,0 +1,36 @@
+{
+  "phase": "5.9.0",
+  "audit_type": "BENCHMARK_TASK_FIXTURE_INTEGRITY",
+  "timestamp": "2026-11-22T07:12:00Z",
+  "golden_repository": {
+    "path": "C:/Users/Amal P S/OneDrive/Projects/Test/angular-ngrx-material-starter",
+    "verified_exists": true,
+    "baseline_git_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2"
+  },
+  "task_fixtures": [
+    {
+      "task_id": "task_a_typo",
+      "relative_path": "benchmarks/matched-pair-harness/config/tasks/task_a_typo.json",
+      "size_bytes": 2284,
+      "sha256": "357D9B4B5777A41A8C5691475DCA8DDAC00134C480C6324E26B60FEA39F95F02",
+      "archetype": "micro_edit_typo",
+      "verification_status": "VERIFIED_BIT_FOR_BIT",
+      "preflight_status": "PASSED"
+    },
+    {
+      "task_id": "task_b_remember_me",
+      "relative_path": "benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json",
+      "size_bytes": 4654,
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "archetype": "multi_file_feature_addition",
+      "verification_status": "VERIFIED_BIT_FOR_BIT",
+      "preflight_status": "PASSED"
+    }
+  ],
+  "fixture_isolation_invariants": {
+    "clean_working_copy_per_run": true,
+    "dependency_strategy": "copy",
+    "ephemeral_sandboxes": true,
+    "cross_arm_contamination_prevented": true
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "schema_version": "2.0.0",
+  "phase": "5.4.20",
+  "audit_name": "budget_semantics_execution_ordering_and_manifest_consistency_audit",
+  "audit_timestamp": "2026-11-20T09:00:00Z",
+  "execution_mode": "strictly_offline_read_only_audit",
+  "authorization_status": "NOT_AUTHORIZED",
+  "final_verdict": "READY_FOR_FINAL_USER_REVIEW",
+  "baseline_identities": {
+    "git_branch": "feature/phase2-stage5-remediation",
+    "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "golden_repo_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "golden_repo_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Test\\angular-ngrx-material-starter",
+    "cand3_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+    "cand3_size_bytes": 18668032,
+    "cand4_2_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+    "cand4_2_size_bytes": 18802176,
+    "task_b_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+    "task_b_fixture_size_bytes": 4654,
+    "phase_5_4_18_findings_sha256": "E8B861AF6095E9CD307A44A3F2334AA5FD7E855FF0AB596F7AA057C808E489D0",
+    "phase_5_4_18_findings_size_bytes": 6200,
+    "baseline_integrity_verified": true
+  },
+  "budget_enforcement": {
+    "per_arm_ceiling_semantics": {
+      "cli_argument": "--max-tokens-ceiling",
+      "default_value": 250000,
+      "proposed_value": 550000,
+      "meaning": "Independently enforced per-arm model token ceiling applied to each individual child-process execution."
+    },
+    "global_ceiling_semantics": {
+      "cli_argument": "--global-tokens-ceiling",
+      "default_value": null,
+      "proposed_value": 2200000,
+      "meaning": "Aggregate model token ceiling across all four arms in the tetrad block, evaluated prior to each arm dispatch."
+    },
+    "co_enforcement_formula": "effective_arm_ceiling = min(self.max_tokens_ceiling, global_remaining)",
+    "headroom_reserve_semantics": {
+      "value": 45000,
+      "global_application": "Halt block prior to arm dispatch if global_remaining < headroom_reserve",
+      "per_turn_application": "Halt child process prior to turn if arm_remaining < max(last_turn_request_tokens, headroom_reserve)"
+    },
+    "maximum_safe_token_exposure": 2200000,
+    "stopping_point_spend_estimates": {
+      "live_02_reproduction_halt_at_arm_b": 512449,
+      "arm_d_success_then_arm_b_halt": 792449,
+      "native_cand4_success_then_arm_b_halt": 1622449,
+      "full_four_arm_success": 1750000,
+      "theoretical_maximum_cap": 2200000
+    }
+  },
+  "historical_arithmetic_replay": {
+    "live_02_block": "tetrad_live_02",
+    "arm": "arm_b_cand3_always_on",
+    "turns_executed": 11,
+    "total_tokens_consumed": 512449,
+    "per_arm_ceiling": 550000,
+    "remaining_budget": 37551,
+    "last_turn_request_tokens": 56611,
+    "headroom_reserve": 45000,
+    "guard_threshold": 56611,
+    "inequality_check": "37551 < 56611 (True)",
+    "arithmetic_confirmed": true,
+    "guard_decision": "PREVENTIVE_HALT",
+    "halt_status": "PRE_DISPATCH_HEADROOM_EXHAUSTED"
+  },
+  "execution_ordering": {
+    "baseline_order": [
+      "arm_b_cand3_always_on",
+      "arm_d_cand4_adaptive",
+      "arm_a_native",
+      "arm_c_cand4_always_on"
+    ],
+    "baseline_seed": 2330,
+    "derivation": "Mersenne Twister PRNG in random.Random(2330).shuffle(...) on all_tetrad_arms",
+    "alternative_order": [
+      "arm_a_native",
+      "arm_d_cand4_adaptive",
+      "arm_c_cand4_always_on",
+      "arm_b_cand3_always_on"
+    ],
+    "alternative_cli_syntax": "--arm-order arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_b_cand3_always_on",
+    "cli_support": "Natively supported via --arm-order with comma-separated values (orchestrator.py L2510, L2558)",
+    "recommended_order": "arm_a_native,arm_d_cand4_adaptive,arm_c_cand4_always_on,arm_b_cand3_always_on",
+    "recommendation_rationale": "Prevents premature block halt at Turn 11 of Arm B, ensuring complete multi-turn data collection on Native and Candidate 4.2 before Candidate 3 reaches budget limit."
+  },
+  "order_bias_assessment": {
+    "provider_prompt_caching": "KV cache hit rates may vary depending on arm sequence, affecting billed token tier latency; model output tokens and logic remain invariant.",
+    "filesystem_isolation": "Total cold-start isolation; temporary directory provisioning cloned from golden commit; zero cross-arm disk bleed.",
+    "process_isolation": "Fresh codex child process per arm; independent stdio pipes; zero memory or session carryover."
+  },
+  "phase_5_4_19_exit_code_reconciliation": [
+    {
+      "command": "powershell -NoProfile -Command ...",
+      "exit_code": 1,
+      "classification": "INCORRECT_COMMAND_OR_INVOCATION",
+      "root_cause": "PowerShell command string interpolation of $variables inside double quotes and unescaped quote terminator.",
+      "superseded_by": "Python sha256_file script using explicit forward-slash paths and raw string literals.",
+      "harmful": false
+    },
+    {
+      "command": "python -c '... c3_path = os.path.join(base, target, release, engram_cand3.exe) ...'",
+      "exit_code": 1,
+      "classification": "CORRECTABLE_PATH_RESOLUTION_ISSUE",
+      "root_cause": "Script probed cargo build target directory instead of sealed benchmark directory at benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe.",
+      "superseded_by": "Subsequent Python verification of canonical candidate path, confirming exact hash 97C5EC... and size 18,668,032 bytes.",
+      "harmful": false
+    },
+    {
+      "command": "python -c '... fix_path = base / benchmarks / fixtures / task_b_remember_me.json ...'",
+      "exit_code": 1,
+      "classification": "CORRECTABLE_PATH_RESOLUTION_ISSUE",
+      "root_cause": "Script probed incorrect relative path benchmarks/fixtures/ instead of canonical benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json.",
+      "superseded_by": "Subsequent Python verification of canonical fixture path, confirming exact hash CD55DB... and size 4,654 bytes.",
+      "harmful": false
+    }
+  ],
+  "findings": [
+    {
+      "id": "FINDING-5420-01",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "reference": "Orchestrator.run_tetrad L2096-L2115",
+      "explanation": "Global token ceiling (--global-tokens-ceiling 2200000) and per-arm ceiling (--max-tokens-ceiling 550000) are co-enforced via min(max_tokens_ceiling, global_remaining). Pre-dispatch gate halts block if global_remaining < headroom_reserve (45000).",
+      "required_action": "None; budget enforcement is verified mathematically sound."
+    },
+    {
+      "id": "FINDING-5420-02",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/runner.py",
+      "reference": "StreamingTokenTracker.check_pre_dispatch_headroom L414-L462",
+      "explanation": "Runner pre-dispatch headroom guard strictly halts streaming process when remaining tokens < max(last_turn_request_tokens, conservative_reserve). Perfectly reproduces Live 02 halt at turn 11 (37,551 < 56,611).",
+      "required_action": "None; runner enforcement is verified mathematically sound."
+    },
+    {
+      "id": "FINDING-5420-03",
+      "severity": "LOW",
+      "status": "PASS",
+      "evidence_path": "PHASE_5_4_19_EXECUTION_MANIFEST.md",
+      "reference": "Section 11 Alternative Command Example",
+      "explanation": "Markdown manifest rendered alternative --arm-order with spaces instead of commas. The CLI parser in orchestrator.py L2558 splits on comma. Comma-separated syntax is verified fully functional.",
+      "required_action": "Use comma-separated syntax in any future execution invocation."
+    },
+    {
+      "id": "FINDING-5420-04",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "reference": "Orchestrator.run_tetrad L2136-L2142",
+      "explanation": "Over-ceiling safety tripwire raises SafetyViolationError and halts tetrad with ABORTED_SAFETY_FAILURE if an arm reports SUCCESS while exceeding its effective ceiling.",
+      "required_action": "None; tripwire logic is verified active."
+    },
+    {
+      "id": "FINDING-5420-05",
+      "severity": "INFO",
+      "status": "PASS",
+      "evidence_path": "benchmarks/matched-pair-harness/src/orchestrator.py",
+      "reference": "Orchestrator.run_tetrad L2145-L2154, L2183-L2196",
+      "explanation": "Uncertain or invalid telemetry sets is_budget_uncertain = True, which halts tetrad immediately with ABORTED_UNCERTAIN_BUDGET even in diagnostic_continue mode.",
+      "required_action": "None; fail-closed accounting verified."
+    }
+  ],
+  "outstanding_confirmations": [
+    "User confirmation that gpt-5.6-luna cloud provider endpoint is active.",
+    "User confirmation that account quota can absorb up to 2.2M tokens exposure.",
+    "User decision on execution order: Seed 2330 (B->D->A->C) vs Alternative (A->D->C->B)."
+  ],
+  "regression_test_results": {
+    "total_suites": 7,
+    "total_tests_collected": 63,
+    "total_tests_passed": 63,
+    "total_tests_failed": 0,
+    "total_tests_skipped": 0,
+    "external_services_contacted": false,
+    "protected_files_modified": false,
+    "suites": [
+      {
+        "suite": "test_candidate_selection.py",
+        "passed": 8,
+        "failed": 0,
+        "duration_seconds": 1.5,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_telemetry_semantics.py",
+        "passed": 4,
+        "failed": 0,
+        "duration_seconds": 1.65,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_candidate_4_2_offline_certification.py",
+        "passed": 10,
+        "failed": 0,
+        "duration_seconds": 9.74,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_task_b_budget_simulation.py",
+        "passed": 3,
+        "failed": 0,
+        "duration_seconds": 1.26,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_diagnostic_continuation.py",
+        "passed": 27,
+        "failed": 0,
+        "duration_seconds": 102.28,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_tetrad_harness.py",
+        "passed": 1,
+        "failed": 0,
+        "duration_seconds": 71.21,
+        "exit_code": 0
+      },
+      {
+        "suite": "test_per_arm_candidate_identity.py",
+        "passed": 10,
+        "failed": 0,
+        "duration_seconds": 208.63,
+        "exit_code": 0
+      }
+    ]
+  }
+}

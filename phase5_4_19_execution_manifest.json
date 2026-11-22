@@ -1,0 +1,241 @@
+{
+  "manifest_version": "1.0.0",
+  "schema_version": "2.0.0",
+  "phase": "5.4.19",
+  "manifest_type": "task_b_live_tetrad_execution_manifest",
+  "created_at": "2026-11-20T08:45:00Z",
+  "authorization_status": "NOT_AUTHORIZED",
+  "manifest_verdict": "CONDITIONALLY_READY",
+  "baseline_identities": {
+    "git_branch": "feature/phase2-stage5-remediation",
+    "git_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "golden_repository_path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Test\\angular-ngrx-material-starter",
+    "golden_repository_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+    "task_fixture_path": "benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json",
+    "task_fixture_sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+    "phase_5_4_18_report_sha256": "1FB9B5D34E987D6A6A0FB2C6386824C9A2B15D999CCEE5A58EA98922E7FC776D",
+    "phase_5_4_18_findings_sha256": "E8B861AF6095E9CD307A44A3F2334AA5FD7E855FF0AB596F7AA057C808E489D0",
+    "baseline_integrity_verified": true
+  },
+  "candidate_identities": {
+    "cand3": {
+      "path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+      "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "size_bytes": 18668032,
+      "status": "VERIFIED_FROZEN"
+    },
+    "cand4_2": {
+      "path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "size_bytes": 18802176,
+      "status": "VERIFIED_FROZEN"
+    }
+  },
+  "arm_definitions": {
+    "arm_a_native": {
+      "arm_key": "arm_a_native",
+      "label": "Native Baseline",
+      "candidate_version": "native",
+      "binary_path": null,
+      "expected_sha256": null,
+      "engram_enabled": false,
+      "routing_mode": "NATIVE",
+      "purpose": "Establish baseline cost and correctness without Engram MCP registration"
+    },
+    "arm_b_cand3_always_on": {
+      "arm_key": "arm_b_cand3_always_on",
+      "label": "Candidate 3 Always-On",
+      "candidate_version": "cand3",
+      "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe",
+      "expected_sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "engram_enabled": true,
+      "routing_mode": "ALWAYS_ON",
+      "purpose": "Measure original Engram behavior and unpruned get_context payload overhead"
+    },
+    "arm_c_cand4_always_on": {
+      "arm_key": "arm_c_cand4_always_on",
+      "label": "Candidate 4.2 Always-On",
+      "candidate_version": "cand4_2",
+      "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "engram_enabled": true,
+      "routing_mode": "ALWAYS_ON",
+      "purpose": "Isolate engine response-boundary remediation and bounded get_context payload"
+    },
+    "arm_d_cand4_adaptive": {
+      "arm_key": "arm_d_cand4_adaptive",
+      "label": "Candidate 4.2 Adaptive",
+      "candidate_version": "cand4_2",
+      "binary_path": "benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe",
+      "expected_sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "engram_enabled": true,
+      "routing_mode": "ADAPTIVE",
+      "purpose": "Isolate complexity-aware adaptive routing value"
+    }
+  },
+  "comparative_evaluation_criteria": {
+    "A_vs_B": {
+      "comparator": "arm_b_cand3_always_on",
+      "baseline": "arm_a_native",
+      "hypothesis": "Candidate 3 incurs massive prompt inflation due to unpruned get_context payload (>120kB)",
+      "validity_condition": "Requires both Arm A and Arm B execution_status == SUCCESS and valid telemetry"
+    },
+    "B_vs_C": {
+      "comparator": "arm_c_cand4_always_on",
+      "baseline": "arm_b_cand3_always_on",
+      "hypothesis": "Candidate 4.2 bounded response boundaries eliminate payload bloat relative to Candidate 3",
+      "validity_condition": "Requires both Arm B and Arm C execution_status == SUCCESS and valid telemetry"
+    },
+    "C_vs_D": {
+      "comparator": "arm_d_cand4_adaptive",
+      "baseline": "arm_c_cand4_always_on",
+      "hypothesis": "Adaptive routing saves prompt tokens on simple turns compared to always-on routing",
+      "validity_condition": "Requires both Arm C and Arm D execution_status == SUCCESS and valid telemetry"
+    },
+    "A_vs_D": {
+      "comparator": "arm_d_cand4_adaptive",
+      "baseline": "arm_a_native",
+      "hypothesis": "Candidate 4.2 adaptive delivers net token efficiency and correctness compared to native baseline",
+      "validity_condition": "Requires both Arm A and Arm D execution_status == SUCCESS and valid telemetry"
+    }
+  },
+  "model_provider_configuration": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "medium",
+    "provider": "cloud",
+    "dependency_strategy": "copy",
+    "cli_executable": "C:\\Users\\Amal P S\\.codex\\plugins\\.plugin-appserver\\codex.exe",
+    "cli_version": "codex-cli 0.167.0-alpha.4.1",
+    "python_version": "3.14.7",
+    "os_platform": "Windows-11-10.0.26300-SP0",
+    "local_support_status": "VERIFIED_SUPPORTED",
+    "remote_api_availability_status": "REQUIRES_CONFIRMATION",
+    "account_quota_status": "REQUIRES_CONFIRMATION"
+  },
+  "budget_specification": {
+    "per_arm_max_tokens_ceiling": 550000,
+    "global_tokens_ceiling_proposed": 2200000,
+    "global_tokens_ceiling_historical_ambiguity": 550000,
+    "headroom_reserve": 45000,
+    "pre_dispatch_threshold": 56611,
+    "maximum_theoretical_token_exposure": 2200000,
+    "stopping_point_estimates": {
+      "halt_at_arm_1_cand3": 512449,
+      "halt_at_arm_2_cand4_adaptive": 862449,
+      "halt_at_arm_3_native": 1312449,
+      "full_4_arm_completion": 1750000
+    },
+    "monetary_cost_estimate": {
+      "status": "REQUIRES_CONFIRMATION",
+      "note": "Provider pricing per million tokens cannot be audited offline without network access; user must verify active account rate card."
+    },
+    "token_taxonomy": {
+      "total_model_tokens": "prompt_tokens_total + completion_tokens",
+      "prompt_tokens_total": "prompt_tokens_cached + prompt_tokens_uncached",
+      "reasoning_tokens": "Informative subset of completion_tokens (never double-counted)",
+      "mcp_payload_bytes": "Auxiliary JSON-RPC bytes transferred over stdio pipe (distinct from model tokens)"
+    }
+  },
+  "execution_ordering": {
+    "baseline_order": [
+      "arm_b_cand3_always_on",
+      "arm_d_cand4_adaptive",
+      "arm_a_native",
+      "arm_c_cand4_always_on"
+    ],
+    "order_seed": 2330,
+    "derivation": "Deterministic pseudo-random permutation from seed 2330 matching Phase 5.4.13",
+    "isolation_guarantee": "Each arm provisions an independent cold-start sandbox cloned from golden commit, isolated temp directory, and independent codex child process.",
+    "known_risk": "Under strict policy and frozen Candidate 3, Arm B running first is projected to halt at turn 11 (512k tokens), stopping the tetrad before Arms D, A, or C execute.",
+    "proposed_alternative_order": [
+      "arm_a_native",
+      "arm_d_cand4_adaptive",
+      "arm_c_cand4_always_on",
+      "arm_b_cand3_always_on"
+    ],
+    "alternative_order_status": "PROPOSED_DEVIATION_REQUIRING_EXPLICIT_APPROVAL"
+  },
+  "failure_and_continuation_policy": {
+    "execution_policy": "strict",
+    "stop_on_failure": true,
+    "diagnostic_continuation_enabled": false,
+    "fail_closed_triggers": [
+      "UNKNOWN_OR_INVALID_TELEMETRY",
+      "GLOBAL_BUDGET_EXHAUSTION",
+      "HEADROOM_RESERVE_EXHAUSTION",
+      "CANDIDATE_HASH_MISMATCH",
+      "GOLDEN_REPO_INTEGRITY_FAILURE",
+      "SANDBOX_IDENTITY_FAILURE",
+      "USER_CANCELLATION",
+      "CHILD_PROCESS_SAFETY_VIOLATION",
+      "RUNNER_OVER_CEILING_RESULT"
+    ],
+    "expected_statuses": {
+      "successful_arm": "SUCCESS",
+      "functional_failure": "FAILURE",
+      "telemetry_failure": "ABORTED_UNCERTAIN_BUDGET",
+      "headroom_exhaustion": "PRE_DISPATCH_HEADROOM_EXHAUSTED",
+      "global_budget_failure": "ABORTED_GLOBAL_BUDGET",
+      "candidate_identity_failure": "ABORTED_SAFETY_FAILURE",
+      "runner_safety_failure": "ABORTED_SAFETY_FAILURE",
+      "user_cancellation": "CANCELLED_BY_USER",
+      "skipped_trailing_arms": "SKIPPED_STOP_ON_FAILURE"
+    }
+  },
+  "acceptance_requirements": {
+    "per_arm_gates": [
+      "execution_status == SUCCESS",
+      "correctness_score == 1.0",
+      "passed_all_requirements is True",
+      "top_level_telemetry_valid is True",
+      "nested_telemetry_valid is True",
+      "total_model_tokens > 0",
+      "prompt_tokens_total + completion_tokens == total_model_tokens",
+      "prompt_tokens_cached + prompt_tokens_uncached == prompt_tokens_total",
+      "run_id and arm match expected isolation metadata",
+      "telemetry provenance is DIRECT_API (SYNTHETIC_TEST rejected)"
+    ],
+    "block_mutual_acceptance_required": true
+  },
+  "measurement_and_analysis_plan": {
+    "functional_metrics": [
+      "execution_status",
+      "correctness_score",
+      "passed_all_requirements",
+      "test_pass_fail_details",
+      "files_changed",
+      "patch_size_bytes",
+      "regression_count"
+    ],
+    "efficiency_metrics": [
+      "total_model_tokens",
+      "prompt_tokens_total",
+      "prompt_tokens_cached",
+      "prompt_tokens_uncached",
+      "completion_tokens",
+      "reasoning_tokens",
+      "turns_count",
+      "mcp_tool_calls_count",
+      "max_individual_response_bytes",
+      "aggregate_auxiliary_payload_bytes",
+      "peak_turn_context",
+      "wall_clock_elapsed_seconds"
+    ],
+    "comparative_metrics": [
+      "absolute_token_difference",
+      "percentage_token_difference",
+      "absolute_elapsed_time_difference",
+      "percentage_elapsed_time_difference",
+      "correctness_difference"
+    ]
+  },
+  "statistical_safeguards": {
+    "preliminary_nature": "A single successful 4-arm tetrad constitutes an initial observational data point and cannot establish formal statistical significance.",
+    "generalization_boundary": "Performance observed on Task B (Angular remember-me auth flow) cannot be extrapolated to unrelated software engineering domains without multi-task evaluations.",
+    "replication_strategy": "A minimum of 5 matched blocks with counterbalanced arm schedules is required for statistical power."
+  },
+  "pre_dispatch_checklist_summary": {
+    "total_checks": 13,
+    "pass_rule": "13/13 required for dispatch; any failure halts dispatch"
+  }
+}

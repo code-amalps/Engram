@@ -1,0 +1,6 @@
+scenario_name,slot_1_consumption,slot_2_consumption,gross_remaining,protected_reserve,usable_headroom,cand5_assigned_ceiling,dispatch_eligible,completion_eligible,governance_action
+Nominal Saturation (Exact Ceilings),500000,500000,500000,45000,455000,500000,YES,ELIGIBLE_IF_UNDER_455K,Dispatch permitted with full arm ceiling
+One Preceding Request Overshoots (Empirical),500000,520000,480000,45000,435000,480000,YES,ELIGIBLE_IF_UNDER_435K,Dispatch permitted with dynamically capped ceiling
+Both Preceding Arms Reach Max Empirical Usage,520000,520000,460000,45000,415000,460000,YES,ELIGIBLE_IF_UNDER_415K,Dispatch permitted with dynamically capped ceiling
+Maximum Theoretical In-Flight Usage,531384,531384,437232,45000,392232,437232,YES,ELIGIBLE_IF_UNDER_392K,Dispatch permitted; ceiling capped to 437232
+Telemetry Incomplete or Corrupted,UNCERTAIN,UNCERTAIN,UNCERTAIN,45000,0,0,NO,NO,REFUSE_DISPATCH (ABORTED_UNCERTAIN_BUDGET)

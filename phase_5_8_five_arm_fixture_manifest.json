@@ -1,0 +1,44 @@
+{
+  "phase": "5.8",
+  "document_type": "FIVE_ARM_FIXTURE_MANIFEST",
+  "generated_at": "2026-11-22T04:57:00Z",
+  "repository": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+  "task_fixtures": {
+    "smoke_test_read_only.json": {
+      "path": "benchmarks/matched-pair-harness/config/tasks/smoke_test_read_only.json",
+      "sha256": "1A130AD680304537C27B8D61D4C635F2F96FD83375AC3D70E0510AD1536B67A3",
+      "purpose": "Read-only non-destructive smoke test for baseline verification",
+      "verification_status": "VERIFIED_INTACT"
+    },
+    "task_a_typo.json": {
+      "path": "benchmarks/matched-pair-harness/config/tasks/task_a_typo.json",
+      "sha256": "357D9B4B5777A41A8C5691475DCA8DDAC00134C480C6324E26B60FEA39F95F02",
+      "purpose": "Task A: Typo fix in Angular component (low complexity)",
+      "verification_status": "VERIFIED_INTACT"
+    },
+    "task_b_remember_me.json": {
+      "path": "benchmarks/matched-pair-harness/config/tasks/task_b_remember_me.json",
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "purpose": "Task B: Remember Me feature implementation across auth stack",
+      "verification_status": "VERIFIED_INTACT"
+    },
+    "task_commit_cache_invalidation.json": {
+      "path": "benchmarks/matched-pair-harness/config/tasks/task_commit_cache_invalidation.json",
+      "sha256": "558A6AB47BF432D79440818D32E6A4BA107685F0E76FFC33ABBFE3E1001B731A",
+      "purpose": "Verification of git commit cache invalidation semantics",
+      "verification_status": "VERIFIED_INTACT"
+    },
+    "task_c_theme_toggle.json": {
+      "path": "benchmarks/matched-pair-harness/config/tasks/task_c_theme_toggle.json",
+      "sha256": "47CF388CCBA08A653AFF556983F5C52AE42EE1C4073F235156B54F229E6CDA8B",
+      "purpose": "Task C: Theme toggle feature in settings UI",
+      "verification_status": "VERIFIED_INTACT"
+    }
+  },
+  "golden_environment": {
+    "repository_target": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Test\\angular-ngrx-material-starter",
+    "git_branch": "master",
+    "cleanliness_precondition": "DIRTY_OR_MODIFIED_SANDBOXES_FORBIDDEN",
+    "dependency_fingerprinting": "CARGO_AND_PACKAGE_JSON_CHECKED"
+  }
+}

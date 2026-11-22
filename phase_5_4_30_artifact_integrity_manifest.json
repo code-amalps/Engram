@@ -1,0 +1,74 @@
+{
+  "phase": "5.4.30",
+  "phase_name": "Final Release Gate, Security Audit & Public Alpha Readiness Certification",
+  "generated_at": "2026-11-20T08:52:00Z",
+  "execution_mode": "STRICTLY_OFFLINE_AUDIT_ONLY",
+  "repository": {
+    "path": "C:\\Users\\Amal P S\\OneDrive\\Projects\\Engram",
+    "branch": "feature/phase2-stage5-remediation",
+    "baseline_commit": "7106a2f369fe79faf5f95449378a900ab8e8eddf",
+    "staged_diff_bytes": 0,
+    "tracked_modified_files": 12,
+    "compilation_status": "CLEAN_EXIT_0"
+  },
+  "protected_artifacts": {
+    "candidate_3_baseline": {
+      "path": "target\\release\\engram_candidate3.exe",
+      "size_bytes": 18668032,
+      "sha256": "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777",
+      "status": "VERIFIED_MATCH"
+    },
+    "candidate_4_2_fixture": {
+      "path": "target\\release\\engram_candidate4_2.exe",
+      "size_bytes": 18802176,
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "status": "VERIFIED_MATCH"
+    },
+    "target_release_executable": {
+      "path": "target\\release\\engram.exe",
+      "size_bytes": 18802176,
+      "sha256": "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2",
+      "status": "VERIFIED_IDENTICAL_TO_CANDIDATE_4_2"
+    },
+    "cargo_lock": {
+      "path": "Cargo.lock",
+      "size_bytes": 26958,
+      "sha256": "85FF18D67207BEF644D8C84582124D5EA0988983AC64C51CBA8EB6975FE11D39",
+      "status": "VERIFIED_MATCH"
+    },
+    "task_b_fixture": {
+      "path": "benchmarks\\matched-pair-harness\\config\\tasks\\task_b_remember_me.json",
+      "size_bytes": 4654,
+      "sha256": "CD55DB0DFDB5758275B262B8B330858E9673533AA6FAA182897EDAE83D69A2B7",
+      "status": "VERIFIED_MATCH"
+    }
+  },
+  "provenance_and_isolated_builds": {
+    "phase_5_4_29_isolated_build_1": {
+      "path": "target\\isolated_build_1\\release\\engram.exe",
+      "size_bytes": 18803200,
+      "sha256": "AC88FEEF5E28641DE3F74E071031D318734EDD7FAB78B0A0A705D00DA0303110",
+      "status": "VERIFIED_MATCH"
+    },
+    "phase_5_4_29_isolated_build_2": {
+      "path": "target\\isolated_build_2\\release\\engram.exe",
+      "size_bytes": 18803200,
+      "sha256": "039C62C6BFB26A0A747DB77537D82FFFC8CCAA4F8293B5B263A9552DC2BCED85",
+      "status": "VERIFIED_MATCH"
+    },
+    "reproducibility_verdict": "BIT_REPRODUCIBLE_BUILD_NOT_ESTABLISHED",
+    "divergence_classification": "DIVERGENCE_BOUNDED_METADATA_ONLY"
+  },
+  "operational_authorizations": {
+    "git_commit": "NOT_AUTHORIZED",
+    "git_push": "NOT_AUTHORIZED",
+    "git_tag": "NOT_AUTHORIZED",
+    "live_model_api": "NOT_AUTHORIZED",
+    "live_benchmark_dispatch": "NOT_AUTHORIZED",
+    "online_dependency_audit": "NOT_AUTHORIZED",
+    "release_publishing": "NOT_AUTHORIZED",
+    "source_code_mutation": "NOT_AUTHORIZED",
+    "binary_overwrite": "NOT_AUTHORIZED"
+  },
+  "final_release_verdict": "PUBLIC_ALPHA_READY_WITH_EXPLICIT_LIMITATIONS"
+}

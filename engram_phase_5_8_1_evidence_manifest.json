@@ -1,0 +1,135 @@
+﻿{
+    "verified_deliverables_count":  22,
+    "timestamp":  "2026-11-22T11:48:28.6511469+05:30",
+    "certified_verdict":  "CANDIDATE5_READY_FOR_LIVE_BENCHMARK_REVIEW",
+    "phase":  "5.8.1",
+    "total_deliverables":  22,
+    "deliverables":  [
+                         {
+                             "deliverable":  "phase_5_8_1_starting_state_and_scope.md",
+                             "size_bytes":  4606,
+                             "sha256":  "D78BE05401A8AFE1CFE3C98C884E3BA770EB58CEA42BB5644B5C29EE68516679",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_cache_defect_reproduction.md",
+                             "size_bytes":  5972,
+                             "sha256":  "78AFBFBEF23B0F67D9F601025D6CDE3AC1DBAB659FB414B997337BDA14DA615F",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_cache_invalidation_design.md",
+                             "size_bytes":  5868,
+                             "sha256":  "BCE25B9E84F48F033BDC1ACF55D2B594BE6E13A0EF80C6DFF8B863B5DC622B95",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_cache_implementation_report.md",
+                             "size_bytes":  3942,
+                             "sha256":  "1333B620ED9ECB1336DA813C8F763CC25BAE561797E2C061BA82765C332314EE",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_cache_regression_test_matrix.csv",
+                             "size_bytes":  2231,
+                             "sha256":  "D92A0759E72CC7A1FB44862E860639CA097034D79B7CA13F166230A976CF27B7",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_cache_before_after_evidence.md",
+                             "size_bytes":  3715,
+                             "sha256":  "6F8B8936B6D7D52083DC029DC87CD5EA79E91CF329A0AFD0D85BBCE7FE25BB34",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_optimization_regression_report.md",
+                             "size_bytes":  3612,
+                             "sha256":  "CCC0708D7A27E3C262CA44A032EA855D43BF9E0CEE8F419CDFB3ADDF1CA4337F",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_pentad_architecture.md",
+                             "size_bytes":  4946,
+                             "sha256":  "E7718A8931BEF93179CDE742290125C473AB94ACDF8F346BFDC2188298BEA7FC",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_pentad_acceptance_matrix.csv",
+                             "size_bytes":  977,
+                             "sha256":  "AC35DCDAE77A015BCF771FD4BAD3AAAACB395AB737CEA7477FC497BC303C3E30",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_pentad_test_results.json",
+                             "size_bytes":  4510,
+                             "sha256":  "08A1632A234655FF256324307335F83F766EBA497513261749546C670FFAECE5",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_tetrad_compatibility_report.md",
+                             "size_bytes":  2585,
+                             "sha256":  "960CB1B63B67ECBE5CEBEC4CF48BFDE2952CE635D6944ABA86347A192B36CF68",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_candidate5_build_manifest.json",
+                             "size_bytes":  1197,
+                             "sha256":  "9ED9EC88E34DED88DE499AF9E1D72C6F052D374EC245EE0F4146648A9C1EA808",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_candidate5_source_hash_manifest.json",
+                             "size_bytes":  22814,
+                             "sha256":  "26D8A54F4F09BCD93EE867258993E72AC21B5E152871D587045DC705F6175283",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_candidate5_binary_verification.md",
+                             "size_bytes":  3980,
+                             "sha256":  "80C545C5B24FEA472CF35B2010DCEC13CF73E7D59B1FA0521B567D7AA4A3B404",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_full_test_results.json",
+                             "size_bytes":  2563,
+                             "sha256":  "20D5A4BAE4ACE843BBAF184EA92C56C49CCE35B08061E72F83E58817710342C5",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_raw_test_log_index.md",
+                             "size_bytes":  3068,
+                             "sha256":  "C9F7B8634ECE2DCCCE15E63A15B3222898CDB71280189EB780758400BBF45811",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_offline_pentad_execution.json",
+                             "size_bytes":  39293,
+                             "sha256":  "99445F4A1E588AC5DC44FF901DB4B39D1EFD244EAC13C8C1EA3F8C7230385235",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_historical_artifact_integrity.md",
+                             "size_bytes":  2411,
+                             "sha256":  "1D07B73EE4955B892C1A2FFF33D1C5ED2F4108D7124BDCAE8A80BD80EAD74A80",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_git_state_and_file_inventory.md",
+                             "size_bytes":  4247,
+                             "sha256":  "74E5953330F697DADF763C7953221074027EE8BA3CE3D1FD69E0F697D6BCA3E7",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_live_benchmark_readiness_report.md",
+                             "size_bytes":  4670,
+                             "sha256":  "58E85952B6A73FDF97FBCFE610BBD76AEAE7647B3F5334C279A86E0F40F0F9D6",
+                             "status":  "VERIFIED"
+                         },
+                         {
+                             "deliverable":  "phase_5_8_1_final_certification_report.md",
+                             "size_bytes":  8516,
+                             "sha256":  "70267D21284C8E937C776624F9A12B0E1183E9FD2BF865C006D7D6992872B5EC",
+                             "status":  "VERIFIED"
+                         }
+                     ]
+}

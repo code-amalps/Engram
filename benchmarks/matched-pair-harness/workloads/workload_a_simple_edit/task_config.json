@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload_a_simple_edit",
+  "title": "Workload A: Simple coding change",
+  "prompt": "Fix the add_tax function in src/calculator.py so it returns total price including tax (price + tax).",
+  "complexity": "SIMPLE",
+  "verification_command": "python -m unittest tests/test_calculator.py",
+  "target_file": "src/calculator.py"
+}

@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload_f_failure_recovery",
+  "title": "Workload F: Failure recovery",
+  "prompt": "Ensure src/loader.py safely loads default_settings.json when settings.json is missing, returning a valid config dict.",
+  "complexity": "MODERATE",
+  "verification_command": "python -m unittest tests/test_loader.py",
+  "target_file": "src/loader.py"
+}

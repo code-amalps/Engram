@@ -16,9 +16,370 @@ import hashlib
 import time
 import json
 import shutil
+import math
 import os
 
-from isolation import terminate_pid_tree
+from isolation import terminate_pid_tree, SafetyViolationError
+
+
+class PreDispatchGateViolationError(SafetyViolationError):
+    """Raised when a candidate run request exceeds the pre-dispatch token or byte ceiling."""
+    pass
+
+
+class RequestSizeGate:
+    """
+    Strict offline pre-dispatch request-size protection gate.
+    Enforces a hard pre-dispatch token boundary (~60,000 tokens) on outbound model requests.
+    Zero-truncation policy: Fails closed immediately if boundary is breached.
+    Measures complete prompt text, injected context, instructions files, and CLI parameters.
+    """
+    def __init__(self, default_limit_tokens: int = 60_000):
+        self.default_limit_tokens = default_limit_tokens
+        self._encoder = None
+        self._encoding_name = None
+        self._init_encoder()
+
+    def _init_encoder(self):
+        try:
+            import tiktoken
+            try:
+                self._encoder = tiktoken.get_encoding("o200k_base")
+                self._encoding_name = "tiktoken_o200k_base"
+            except Exception:
+                self._encoder = tiktoken.get_encoding("cl100k_base")
+                self._encoding_name = "tiktoken_cl100k_base"
+        except Exception:
+            self._encoder = None
+            self._encoding_name = "heuristic_bytes_upper_bound"
+
+    def count_tokens(self, text: str) -> Tuple[int, int, str]:
+        """
+        Counts tokens and bytes in text using offline tiktoken encoder,
+        falling back to a mathematically proven conservative upper-bound heuristic if unavailable.
+        Returns: (token_count, byte_count, method_name)
+        """
+        if not text:
+            return (0, 0, self._encoding_name or "empty")
+
+        byte_count = len(text.encode("utf-8", errors="replace"))
+
+        if self._encoder is not None:
+            try:
+                tokens = len(self._encoder.encode(text))
+                return (tokens, byte_count, self._encoding_name)
+            except Exception:
+                pass
+
+        # Mathematically proven conservative upper-bound heuristic fallback:
+        # In BPE tokenizers, every token represents at least 1 UTF-8 byte.
+        # Therefore, token_count <= byte_count holds unconditionally for all UTF-8 inputs.
+        # Dividing by 3.0 was an empirical approximation for prose, but severely undercounted
+        # on code, ASCII, and digits (by up to 63%).
+        # Using byte_count guarantees zero undercount under all adversarial inputs.
+        tokens = byte_count
+        return (tokens, byte_count, "heuristic_bytes_upper_bound")
+
+    def measure_complete_request(
+        self,
+        prompt: str,
+        cmd_args: Optional[List[str]] = None,
+        sandbox_path: Optional[Path] = None,
+        extra_context: Optional[str] = None
+    ) -> Tuple[int, int, str, Dict[str, Any]]:
+        """
+        Assembles and measures all components of the outbound request:
+        - Effective prompt / Turn-0 context
+        - Workspace instruction files (.github/copilot-instructions.md, .codex/instructions.md)
+        - CLI arguments and configuration flags
+        - Extra context (tool definitions, schemas, etc.)
+        """
+        components: Dict[str, Dict[str, Any]] = {}
+        full_text_parts: List[str] = []
+
+        # 1. Main prompt & turn0 context
+        p_tokens, p_bytes, p_method = self.count_tokens(prompt or "")
+        components["prompt"] = {"tokens": p_tokens, "bytes": p_bytes}
+        full_text_parts.append(prompt or "")
+
+        # 2. Instruction files if present in sandbox
+        inst_text = ""
+        if sandbox_path:
+            sb = Path(sandbox_path)
+            for rel_path in [
+                Path(".github") / "copilot-instructions.md",
+                Path(".codex") / "instructions.md",
+                Path(".codex") / "config.toml"
+            ]:
+                target = sb / rel_path
+                if target.exists() and target.is_file():
+                    try:
+                        content = target.read_text(encoding="utf-8", errors="ignore")
+                        inst_text += f"\n--- {rel_path} ---\n{content}\n"
+                    except Exception:
+                        pass
+        i_tokens, i_bytes, _ = self.count_tokens(inst_text)
+        components["instructions"] = {"tokens": i_tokens, "bytes": i_bytes}
+        if inst_text:
+            full_text_parts.append(inst_text)
+
+        # 3. CLI arguments
+        cmd_text = " ".join(cmd_args) if cmd_args else ""
+        c_tokens, c_bytes, _ = self.count_tokens(cmd_text)
+        components["cli_arguments"] = {"tokens": c_tokens, "bytes": c_bytes}
+        if cmd_text:
+            full_text_parts.append(cmd_text)
+
+        # 4. Extra context (tool schemas, metadata)
+        if extra_context:
+            e_tokens, e_bytes, _ = self.count_tokens(extra_context)
+            components["extra_context"] = {"tokens": e_tokens, "bytes": e_bytes}
+            full_text_parts.append(extra_context)
+
+        full_request_text = "\n\n".join(full_text_parts)
+        tot_tokens, tot_bytes, method = self.count_tokens(full_request_text)
+
+        breakdown = {
+            "components": components,
+            "total_tokens": tot_tokens,
+            "total_bytes": tot_bytes,
+            "counting_method": method
+        }
+        return tot_tokens, tot_bytes, method, breakdown
+
+    def check_pre_dispatch(
+        self,
+        prompt: str,
+        cmd_args: Optional[List[str]] = None,
+        sandbox_path: Optional[Path] = None,
+        extra_context: Optional[str] = None,
+        limit_tokens: Optional[int] = None
+    ) -> Tuple[bool, int, int, str, Optional[str], Dict[str, Any]]:
+        """
+        Strict pre-dispatch boundary check.
+        Returns (passed, total_tokens, total_bytes, method, error_message, breakdown).
+        """
+        effective_limit = limit_tokens if limit_tokens is not None else self.default_limit_tokens
+        tokens, bytes_count, method, breakdown = self.measure_complete_request(
+            prompt=prompt,
+            cmd_args=cmd_args,
+            sandbox_path=sandbox_path,
+            extra_context=extra_context
+        )
+
+        if tokens > effective_limit:
+            msg = (
+                f"Pre-dispatch request boundary violation: Complete outbound request is {tokens:,} tokens "
+                f"({bytes_count:,} bytes, method: {method}), which exceeds the configured limit of "
+                f"{effective_limit:,} tokens by {tokens - effective_limit:,} tokens. "
+                f"Zero-truncation policy enforced: Execution rejected pre-dispatch."
+            )
+            return False, tokens, bytes_count, method, msg, breakdown
+
+        return True, tokens, bytes_count, method, None, breakdown
+
+
+@dataclass
+class RequestReservation:
+    """
+    Formal per-request token reservation.
+    R = input_tokens + reserved_output_tokens
+    """
+    request_id: str
+    turn_index: int
+    input_tokens: int
+    reserved_output_tokens: int
+    total_reserved_tokens: int
+    created_at: str
+    status: str = "ACTIVE"  # "ACTIVE", "RECONCILED", "REJECTED"
+    actual_input_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
+    actual_total_tokens: Optional[int] = None
+    reconciled_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "request_id": self.request_id,
+            "turn_index": self.turn_index,
+            "input_tokens": self.input_tokens,
+            "reserved_output_tokens": self.reserved_output_tokens,
+            "total_reserved_tokens": self.total_reserved_tokens,
+            "created_at": self.created_at,
+            "status": self.status,
+            "actual_input_tokens": self.actual_input_tokens,
+            "actual_output_tokens": self.actual_output_tokens,
+            "actual_total_tokens": self.actual_total_tokens,
+            "reconciled_at": self.reconciled_at,
+            "rejection_reason": self.rejection_reason
+        }
+
+
+class RequestReservationCoordinator:
+    """
+    Synchronous request-level budget reservation and enforcement coordinator.
+    Enforces that every model request reserves R = I + O before network dispatch,
+    guaranteeing that R <= B_remaining - B_reserve.
+    Fails closed immediately (zero truncation) if capacity is insufficient.
+    """
+    def __init__(
+        self,
+        aggregate_budget: int = 1_000_000,
+        safety_reserve: int = 45_000,
+        default_completion_allowance: int = 4_096
+    ):
+        if aggregate_budget <= 0:
+            raise ValueError(f"aggregate_budget must be positive, got {aggregate_budget}")
+        if safety_reserve < 0:
+            raise ValueError(f"safety_reserve cannot be negative, got {safety_reserve}")
+        self.aggregate_budget = aggregate_budget
+        self.safety_reserve = safety_reserve
+        self.default_completion_allowance = default_completion_allowance
+        self.cumulative_reconciled_tokens: int = 0
+        self.active_reservations: Dict[str, RequestReservation] = {}
+        self.reconciled_history: List[RequestReservation] = []
+        self.rejection_history: List[Dict[str, Any]] = []
+
+    @property
+    def in_flight_reserved_tokens(self) -> int:
+        return sum(res.total_reserved_tokens for res in self.active_reservations.values() if res.status == "ACTIVE")
+
+    @property
+    def total_committed_tokens(self) -> int:
+        return self.cumulative_reconciled_tokens + self.in_flight_reserved_tokens
+
+    @property
+    def remaining_budget(self) -> int:
+        return max(0, self.aggregate_budget - self.total_committed_tokens)
+
+    def reserve_request(
+        self,
+        request_id: str,
+        turn_index: int,
+        input_tokens: int,
+        completion_allowance: Optional[int] = None
+    ) -> Tuple[bool, Optional[str], Optional[RequestReservation]]:
+        """
+        Attempts to reserve capacity for an outbound request.
+        Fails closed if R = I + O > B_remaining - B_reserve.
+        """
+        out_allowance = completion_allowance if completion_allowance is not None else self.default_completion_allowance
+        r_total = input_tokens + out_allowance
+        avail_for_dispatch = self.remaining_budget - self.safety_reserve
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        if r_total > avail_for_dispatch:
+            deficit = r_total - avail_for_dispatch
+            reason = (
+                f"Request budget reservation rejected: Request {request_id} (Turn {turn_index}) requires "
+                f"{r_total:,} tokens (Input: {input_tokens:,}, Reserved Output: {out_allowance:,}), but available "
+                f"headroom above safety reserve ({self.safety_reserve:,}) is only {avail_for_dispatch:,} tokens "
+                f"(Remaining Budget: {self.remaining_budget:,}, In-Flight Reservations: {self.in_flight_reserved_tokens:,}). "
+                f"Deficit: {deficit:,} tokens. Zero-truncation policy enforced: Pre-dispatch rejected."
+            )
+            rejection_event = {
+                "request_id": request_id,
+                "turn_index": turn_index,
+                "estimated_input_tokens": input_tokens,
+                "reserved_output_tokens": out_allowance,
+                "total_requested_reservation": r_total,
+                "aggregate_remaining_budget": self.remaining_budget,
+                "safety_reserve": self.safety_reserve,
+                "available_headroom": avail_for_dispatch,
+                "rejection_reason": reason,
+                "enforcement_timestamp": now_iso,
+                "provider_dispatch_prevented": True
+            }
+            self.rejection_history.append(rejection_event)
+            return False, reason, None
+
+        reservation = RequestReservation(
+            request_id=request_id,
+            turn_index=turn_index,
+            input_tokens=input_tokens,
+            reserved_output_tokens=out_allowance,
+            total_reserved_tokens=r_total,
+            created_at=now_iso,
+            status="ACTIVE"
+        )
+        self.active_reservations[request_id] = reservation
+        return True, None, reservation
+
+    def reconcile_response(
+        self,
+        request_id: str,
+        actual_total_tokens: Optional[int] = None,
+        actual_input_tokens: Optional[int] = None,
+        actual_output_tokens: Optional[int] = None
+    ) -> RequestReservation:
+        """
+        Reconciles a completed request with actual provider usage.
+        If actual usage is missing or None, conservatively charges the full reserved capacity R.
+        """
+        reservation = self.active_reservations.pop(request_id, None)
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        if not reservation:
+            raise KeyError(f"No active reservation found for request {request_id}")
+
+        if actual_total_tokens is not None:
+            final_charge = actual_total_tokens
+        elif actual_input_tokens is not None and actual_output_tokens is not None:
+            final_charge = actual_input_tokens + actual_output_tokens
+        else:
+            # Conservative exposure preservation: missing usage does not release budget
+            final_charge = reservation.total_reserved_tokens
+
+        self.cumulative_reconciled_tokens += final_charge
+
+        reservation.status = "RECONCILED"
+        reservation.actual_input_tokens = actual_input_tokens
+        reservation.actual_output_tokens = actual_output_tokens
+        reservation.actual_total_tokens = final_charge
+        reservation.reconciled_at = now_iso
+        self.reconciled_history.append(reservation)
+        return reservation
+
+    def update_streaming_tokens(self, request_id: str, observed_output_tokens: int) -> None:
+        """
+        Updates in-flight reservation if streaming tokens exceed the initial output allowance.
+        """
+        reservation = self.active_reservations.get(request_id)
+        if not reservation:
+            return
+        if observed_output_tokens > reservation.reserved_output_tokens:
+            extra = observed_output_tokens - reservation.reserved_output_tokens
+            reservation.reserved_output_tokens = observed_output_tokens
+            reservation.total_reserved_tokens += extra
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        return {
+            "aggregate_budget": self.aggregate_budget,
+            "safety_reserve": self.safety_reserve,
+            "default_completion_allowance": self.default_completion_allowance,
+            "cumulative_reconciled_tokens": self.cumulative_reconciled_tokens,
+            "in_flight_reserved_tokens": self.in_flight_reserved_tokens,
+            "remaining_budget": self.remaining_budget,
+            "active_reservations": {k: v.to_dict() for k, v in self.active_reservations.items()},
+            "reconciled_history": [r.to_dict() for r in self.reconciled_history],
+            "rejection_history": list(self.rejection_history)
+        }
+
+    @classmethod
+    def from_state_dict(cls, data: Dict[str, Any]) -> "RequestReservationCoordinator":
+        coord = cls(
+            aggregate_budget=data["aggregate_budget"],
+            safety_reserve=data["safety_reserve"],
+            default_completion_allowance=data.get("default_completion_allowance", 4096)
+        )
+        coord.cumulative_reconciled_tokens = data.get("cumulative_reconciled_tokens", 0)
+        coord.rejection_history = data.get("rejection_history", [])
+        for k, v in data.get("active_reservations", {}).items():
+            coord.active_reservations[k] = RequestReservation(**v)
+        for r in data.get("reconciled_history", []):
+            coord.reconciled_history.append(RequestReservation(**r))
+        return coord
 
 KNOWN_RIPGREP_CANDIDATES: List[Path] = [
     Path(r"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CopilotCli\rg.exe"),
@@ -71,6 +432,15 @@ class RunExecutionResult:
     telemetry_status: str = "VALID"
     sandbox_policy: str = "workspace-write"
     provider: str = "cloud"
+    adaptive_activation: Optional[Dict[str, Any]] = None
+    request_size_gate_passed: bool = True
+    measured_request_tokens: int = 0
+    measured_request_bytes: int = 0
+    request_counting_method: str = "tiktoken_o200k_base"
+    configured_request_size_limit: int = 60_000
+    request_size_breakdown: Optional[Dict[str, Any]] = None
+    reservation_id: Optional[str] = None
+    reservation_details: Optional[Dict[str, Any]] = None
 
 
 class StreamingTokenTracker:
@@ -297,7 +667,7 @@ class StreamingTokenTracker:
                         reasoning = usage.get("reasoning_output_tokens", 0)
 
                         if isinstance(inp, int) and inp >= 0:
-                            if inp > 0:
+                            if inp > 0 and self.last_turn_request_tokens == 0:
                                 self.last_turn_request_tokens = inp
                             self.prompt_tokens_total += inp
                             if isinstance(cached, int) and 0 <= cached <= inp:
@@ -333,8 +703,8 @@ class StreamingTokenTracker:
                     self.has_pending_tool = True
             elif ev_type == "custom_tool_call_output":
                 self.has_pending_tool = True
-            elif ev_type in ("turn.started", "reasoning"):
-                # New model generation has commenced
+            elif ev_type in ("turn.started", "reasoning", "turn.completed"):
+                # New model generation has commenced or turn has concluded
                 self.has_pending_tool = False
 
         except Exception as e:
@@ -377,7 +747,7 @@ class StreamingTokenTracker:
         if ev_type == "turn.started":
             return (True, False, "TURN_STARTED_CANDIDATE_UNPROVEN")
 
-        if ev_type in ("token_usage_record", "event_msg", "turn.completed") and self.has_pending_tool:
+        if ev_type in ("token_usage_record", "event_msg") and self.has_pending_tool:
             return (True, False, "SNAPSHOT_PENDING_DISPATCH_UNPROVEN")
 
         return (False, False, "NOT_PRE_DISPATCH_BOUNDARY")
@@ -472,7 +842,7 @@ def extract_tokens_from_line(line: str) -> Optional[int]:
     return res if res > 0 else None
 
 
-SUPPORTED_PROVIDERS: Set[str] = {"cloud", "ollama", "lmstudio"}
+SUPPORTED_PROVIDERS: Set[str] = {"cloud", "ollama", "lmstudio", "openai", "mock", "controlled"}
 SUPPORTED_SANDBOX_POLICIES: Set[str] = {"read-only", "workspace-write", "danger-full-access"}
 
 
@@ -487,7 +857,8 @@ class CodexRunner:
         max_tokens_ceiling: int = 250_000,
         headroom_reserve: int = 45_000,
         sandbox_policy: str = "workspace-write",
-        provider: str = "cloud"
+        provider: str = "cloud",
+        max_request_tokens: int = 60_000
     ):
         if sandbox_policy not in SUPPORTED_SANDBOX_POLICIES:
             raise ValueError(
@@ -508,6 +879,12 @@ class CodexRunner:
         self.timeout_seconds = timeout_seconds
         self.max_tokens_ceiling = max_tokens_ceiling
         self.headroom_reserve = headroom_reserve
+        self.max_request_tokens = max_request_tokens
+        self.request_size_gate = RequestSizeGate(default_limit_tokens=max_request_tokens)
+        self.reservation_coordinator = RequestReservationCoordinator(
+            aggregate_budget=max_tokens_ceiling,
+            safety_reserve=headroom_reserve
+        )
 
         # Query version
         self.harness_version = "unknown"
@@ -562,7 +939,8 @@ class CodexRunner:
         prompt: str,
         arm: str,
         engram_executable: Optional[Path] = None,
-        fast_path_active: bool = False
+        fast_path_active: bool = False,
+        task_config: Optional[Dict[str, Any]] = None
     ) -> List[str]:
         """
         Constructs the exact CLI invocation for Codex.
@@ -610,8 +988,53 @@ class CodexRunner:
         ])
 
         # Dynamic per-invocation MCP configuration
-        is_engram_arm = arm in ("treatment_B", "v151_arm2", "v154_arm3", "arm_2_v151", "arm_3_v154")
-        if is_engram_arm and not fast_path_active:
+        is_native_arm = arm in ("control_A", "baseline_arm1", "arm_a_native")
+        if is_native_arm and engram_executable is not None:
+            raise SafetyViolationError(
+                f"FATAL: Native arm '{arm}' received an engram_executable ({engram_executable}). "
+                f"Native arms must NOT have any MCP server configured."
+            )
+
+        is_engram_arm = False
+        enabled_tools = None
+
+        if arm in (
+            "treatment_B", "v151_arm2", "v154_arm3", "arm_2_v151", "arm_3_v154",
+            "arm_b_cand3", "arm_b_cand3_always_on", "arm_c_cand4_always_on",
+            "arm_c_cand4_1_always_on", "arm_c_cand4_2_always_on",
+            "arm_c_cand42_always_on"
+        ):
+            is_engram_arm = True
+            enabled_tools = ["engram_get_context", "engram_inspect_symbol", "engram_preflight", "engram_postflight"]
+        elif arm in (
+            "arm_d_cand4_adaptive", "adaptive_cand4",
+            "arm_d_cand4_1_adaptive", "arm_d_cand4_2_adaptive",
+            "arm_d_cand42_adaptive", "arm_e_cand5_optimized"
+        ):
+            try:
+                from .classifier import TaskComplexityClassifier
+            except (ImportError, ValueError):
+                from classifier import TaskComplexityClassifier
+            override = task_config.get("adaptive_override") if task_config else None
+            cl_res = TaskComplexityClassifier.classify(prompt, repo_path=canonical_sandbox, explicit_override=override)
+            if cl_res.routed_mode == "BYPASS":
+                is_engram_arm = False
+            elif cl_res.routed_mode == "LEAN":
+                is_engram_arm = True
+                enabled_tools = ["engram_get_context", "engram_why"]
+            elif cl_res.routed_mode == "FULL":
+                is_engram_arm = True
+                enabled_tools = ["engram_get_context", "engram_inspect_symbol", "engram_preflight", "engram_postflight"]
+
+        # Always-On arms must retain active MCP tools regardless of fast_path_active
+        is_always_on = arm in (
+            "arm_b_cand3", "arm_b_cand3_always_on", "arm_c_cand4_always_on",
+            "arm_c_cand4_1_always_on", "arm_c_cand4_2_always_on",
+            "arm_c_cand42_always_on"
+        )
+        bypass_mcp = fast_path_active and not is_always_on
+
+        if is_engram_arm and not bypass_mcp:
             active_bin = engram_executable or self.engram_executable
             if not active_bin or not active_bin.exists():
                 raise FileNotFoundError(f"Engram executable missing: {active_bin}")
@@ -631,14 +1054,26 @@ class CodexRunner:
                 "-c", f'mcp_servers.engram.args=["-C", "{fwd_sandbox}", "mcp"]',
                 "-c", 'mcp_servers.engram.default_tools_approval_mode="approve"',
             ])
-            if arm in ("v154_arm3", "arm_3_v154", "treatment_B"):
+            if enabled_tools:
+                tools_json = json.dumps(enabled_tools)
                 cmd.extend([
-                    "-c", 'mcp_servers.engram.enabled_tools=["engram_get_context", "engram_inspect_symbol", "engram_preflight", "engram_postflight"]',
-                    "-c", 'mcp_servers.engram.tools.engram_get_context.approval_mode="approve"',
-                    "-c", 'mcp_servers.engram.tools.engram_inspect_symbol.approval_mode="approve"',
-                    "-c", 'mcp_servers.engram.tools.engram_preflight.approval_mode="approve"',
-                    "-c", 'mcp_servers.engram.tools.engram_postflight.approval_mode="approve"',
+                    "-c", f'mcp_servers.engram.enabled_tools={tools_json}',
                 ])
+                for t in enabled_tools:
+                    cmd.extend([
+                        "-c", f'mcp_servers.engram.tools.{t}.approval_mode="approve"',
+                    ])
+
+        # Enforce MCP registration invariants
+        has_mcp = any("mcp_servers.engram" in arg for arg in cmd)
+        if is_native_arm and has_mcp:
+            raise SafetyViolationError(
+                f"FATAL: Native arm '{arm}' unexpectedly configured with MCP command arguments: {cmd}"
+            )
+        if is_engram_arm and not bypass_mcp and not has_mcp:
+            raise SafetyViolationError(
+                f"FATAL: Candidate arm '{arm}' expected active MCP registration, but no MCP configuration was generated."
+            )
 
         cmd.append(prompt)
         return cmd
@@ -656,6 +1091,32 @@ class CodexRunner:
         """
         Executes a single benchmark run arm inside the specified sandbox.
         """
+        if self.provider in ("openai", "mock", "controlled"):
+            try:
+                from agent_runtime import ControlledRunner
+            except (ImportError, ValueError):
+                from .agent_runtime import ControlledRunner
+            c_runner = ControlledRunner(
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+                timeout_seconds=self.timeout_seconds,
+                max_tokens_ceiling=self.max_tokens_ceiling,
+                headroom_reserve=self.headroom_reserve,
+                sandbox_policy=self.sandbox_policy,
+                provider=self.provider,
+                max_request_tokens=self.max_request_tokens,
+                engram_executable=self.engram_executable
+            )
+            return c_runner.run(
+                sandbox_path=sandbox_path,
+                prompt=prompt,
+                arm=arm,
+                output_events_path=output_events_path,
+                is_dry_run=is_dry_run,
+                engram_executable=engram_executable,
+                task_config=task_config
+            )
+
         started_dt = datetime.datetime.now(datetime.timezone.utc)
         start_time = time.time()
         started_at = started_dt.isoformat()
@@ -672,10 +1133,49 @@ class CodexRunner:
         fwd_sandbox_lower = sandbox_str.lower().replace("\\", "/")
 
         # Determine whether this is an Engram arm and check for Fast Path eligibility
-        is_engram_arm = arm in ("treatment_B", "v151_arm2", "v154_arm3", "arm_2_v151", "arm_3_v154")
+        is_engram_arm = arm in ("treatment_B", "v151_arm2", "v154_arm3", "arm_2_v151", "arm_3_v154", "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive", "adaptive_cand4")
         fast_path_active = False
+        adaptive_activation = None
+        minimal_contract = None
 
-        if is_engram_arm:
+        if arm in ("arm_d_cand4_adaptive", "adaptive_cand4"):
+            try:
+                try:
+                    from .classifier import TaskComplexityClassifier
+                except (ImportError, ValueError):
+                    from classifier import TaskComplexityClassifier
+                override = task_config.get("adaptive_override") if task_config else None
+                cl_res = TaskComplexityClassifier.classify(prompt, repo_path=canonical_sandbox, explicit_override=override)
+                adaptive_activation = cl_res.to_dict()
+                routed_mode = cl_res.routed_mode
+                if routed_mode == "BYPASS":
+                    is_engram_arm = False
+                    target_files = []
+                    if task_config and task_config.get("target_files"):
+                        target_files = task_config["target_files"]
+                    elif cl_res.signals.get("files_mentioned"):
+                        target_files = cl_res.signals["files_mentioned"]
+                    target_str = ", ".join(target_files) if target_files else "specified target file"
+                    minimal_contract = (
+                        "[Engram Contract: BYPASS]\n"
+                        f"- Target: {target_str}\n"
+                        "- Action: Direct edit. Do not load auxiliary skills, test suites, or package managers.\n"
+                        "- Verification: Perform the task's required acceptance checks. Avoid unrelated exploratory testing and unnecessary tool or package-manager usage."
+                    )
+                elif routed_mode == "LEAN":
+                    is_engram_arm = True
+                    minimal_contract = (
+                        "[Engram Contract: LEAN]\n"
+                        "- Directive: Bounded read-only context tools available (`engram_get_context`, `engram_why`).\n"
+                        "- Verification: Confine edits strictly to authorized targets; verify with `git diff`."
+                    )
+                elif routed_mode == "FULL":
+                    is_engram_arm = True
+            except Exception as e:
+                adaptive_activation = {"error": str(e), "routed_mode": "FULL"}
+
+        # Only apply legacy fast path to legacy arms (treatment_B, etc.), not always-on or adaptive arms
+        if is_engram_arm and arm not in ("arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive", "adaptive_cand4"):
             try:
                 from classifier import classify_task_efficiency
                 classification = classify_task_efficiency(
@@ -688,7 +1188,7 @@ class CodexRunner:
             except Exception:
                 fast_path_active = False
 
-        # Turn-0 Context Injection for Arm 3 (v1.5.4) and Treatment B
+        # Turn-0 Context Injection & Decoupled Task Contract
         turn0_injected = False
         turn0_context = None
         turn0_context_bytes = 0
@@ -698,7 +1198,14 @@ class CodexRunner:
 
         active_bin = engram_executable or self.engram_executable
 
-        if arm in ("v154_arm3", "arm_3_v154", "treatment_B") and not fast_path_active:
+        if minimal_contract:
+            turn0_context = minimal_contract
+            turn0_injected = True
+            turn0_context_bytes = len(turn0_context.encode("utf-8"))
+            turn0_context_tokens = max(1, turn0_context_bytes // 4)
+            turn0_context_sha256 = hashlib.sha256(turn0_context.encode("utf-8")).hexdigest()
+            effective_prompt = f"{turn0_context}\n\nTask Instructions:\n{prompt}"
+        elif arm in ("v154_arm3", "arm_3_v154", "treatment_B", "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive", "adaptive_cand4") and not fast_path_active:
             if active_bin and active_bin.exists():
                 try:
                     inject_prompt = prompt
@@ -742,6 +1249,151 @@ class CodexRunner:
             # Append shell retrieval guidance for candidate arm
             effective_prompt = f"{effective_prompt}{SHELL_RETRIEVAL_GUIDANCE}"
 
+        # Build command with explicit model, reasoning, and canonical sandbox settings
+        cmd = self.build_codex_command(
+            sandbox_path=sandbox_path,
+            prompt=effective_prompt,
+            arm=arm,
+            engram_executable=active_bin if is_engram_arm else None,
+            fast_path_active=fast_path_active,
+            task_config=task_config
+        )
+
+        # Workstream A: Defensible Pre-Dispatch Request-Size Protection Gate
+        gate_passed, req_tokens, req_bytes, count_method, gate_err, req_breakdown = (
+            self.request_size_gate.check_pre_dispatch(
+                prompt=effective_prompt,
+                cmd_args=cmd,
+                sandbox_path=canonical_sandbox,
+                limit_tokens=self.max_request_tokens
+            )
+        )
+
+        if not gate_passed:
+            elapsed = round(time.time() - start_time, 2)
+            completed_dt = datetime.datetime.now(datetime.timezone.utc)
+            completed_at = completed_dt.isoformat()
+
+            # Write rejection event to events log
+            with open(output_events_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "type": "pre_dispatch_request_gate_violation",
+                    "timestamp": completed_at,
+                    "measured_request_tokens": req_tokens,
+                    "measured_request_bytes": req_bytes,
+                    "limit_tokens": self.max_request_tokens,
+                    "counting_method": count_method,
+                    "breakdown": req_breakdown,
+                    "error_message": gate_err
+                }) + "\n")
+
+            return RunExecutionResult(
+                exit_code=105,
+                elapsed_seconds=elapsed,
+                started_at=started_at,
+                completed_at=completed_at,
+                events_log_path=str(output_events_path),
+                thread_id=None,
+                model_name=self.model,
+                reasoning_effort=self.reasoning_effort,
+                harness_executable=str(self.codex_executable),
+                harness_version=self.harness_version,
+                path_sanitized=path_sanitized,
+                error_message=gate_err,
+                turn0_injected=turn0_injected,
+                initial_prompt=effective_prompt,
+                fast_path_active=fast_path_active,
+                pre_dispatch_guard_triggered=True,
+                stop_reason="PRE_DISPATCH_REQUEST_SIZE_EXCEEDED",
+                headroom_reserve=self.headroom_reserve,
+                cumulative_tokens_at_stop=0,
+                estimated_next_turn_cost=req_tokens,
+                configured_ceiling=self.max_tokens_ceiling,
+                remaining_budget_at_stop=self.max_tokens_ceiling,
+                last_turn_usage_at_stop=0,
+                guard_decision="REJECT_PRE_DISPATCH_REQUEST_SIZE_EXCEEDED",
+                guard_decision_timestamp=completed_at,
+                relevant_event_id=None,
+                telemetry_valid=True,
+                telemetry_status="VALID",
+                sandbox_policy=self.sandbox_policy,
+                provider=self.provider,
+                adaptive_activation=adaptive_activation,
+                request_size_gate_passed=False,
+                measured_request_tokens=req_tokens,
+                measured_request_bytes=req_bytes,
+                request_counting_method=count_method,
+                configured_request_size_limit=self.max_request_tokens,
+                request_size_breakdown=req_breakdown,
+                reservation_id=None,
+                reservation_details=None
+            )
+
+        # Workstream B/D: Synchronous Pre-Dispatch Capacity Reservation Gate
+        req_id = f"req-{arm}-{int(start_time)}"
+        res_ok, res_err, reservation = self.reservation_coordinator.reserve_request(
+            request_id=req_id,
+            turn_index=0,
+            input_tokens=req_tokens
+        )
+        if not res_ok and not is_dry_run:
+            elapsed = round(time.time() - start_time, 2)
+            completed_dt = datetime.datetime.now(datetime.timezone.utc)
+            completed_at = completed_dt.isoformat()
+
+            with open(output_events_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "type": "pre_dispatch_budget_reservation_violation",
+                    "timestamp": completed_at,
+                    "measured_request_tokens": req_tokens,
+                    "measured_request_bytes": req_bytes,
+                    "error_message": res_err,
+                    "remaining_budget": self.reservation_coordinator.remaining_budget,
+                    "safety_reserve": self.reservation_coordinator.safety_reserve
+                }) + "\n")
+
+            return RunExecutionResult(
+                exit_code=106,
+                elapsed_seconds=elapsed,
+                started_at=started_at,
+                completed_at=completed_at,
+                events_log_path=str(output_events_path),
+                thread_id=None,
+                model_name=self.model,
+                reasoning_effort=self.reasoning_effort,
+                harness_executable=str(self.codex_executable),
+                harness_version=self.harness_version,
+                path_sanitized=path_sanitized,
+                error_message=res_err,
+                turn0_injected=turn0_injected,
+                initial_prompt=effective_prompt,
+                fast_path_active=fast_path_active,
+                pre_dispatch_guard_triggered=True,
+                stop_reason="PRE_DISPATCH_BUDGET_RESERVATION_EXCEEDED",
+                headroom_reserve=self.headroom_reserve,
+                cumulative_tokens_at_stop=self.reservation_coordinator.cumulative_reconciled_tokens,
+                estimated_next_turn_cost=req_tokens,
+                configured_ceiling=self.max_tokens_ceiling,
+                remaining_budget_at_stop=self.reservation_coordinator.remaining_budget,
+                last_turn_usage_at_stop=0,
+                guard_decision="REJECT_PRE_DISPATCH_BUDGET_RESERVATION_EXCEEDED",
+                guard_decision_timestamp=completed_at,
+                relevant_event_id=None,
+                telemetry_valid=True,
+                telemetry_status="VALID",
+                sandbox_policy=self.sandbox_policy,
+                provider=self.provider,
+                adaptive_activation=adaptive_activation,
+                request_size_gate_passed=True,
+                measured_request_tokens=req_tokens,
+                measured_request_bytes=req_bytes,
+                request_counting_method=count_method,
+                configured_request_size_limit=self.max_request_tokens,
+                request_size_breakdown=req_breakdown,
+                reservation_id=req_id,
+                reservation_details=None
+            )
+
         if is_dry_run:
             time.sleep(0.1)
             elapsed = round(time.time() - start_time, 2)
@@ -756,6 +1408,13 @@ class CodexRunner:
                 initial_prompt=effective_prompt,
                 fast_path_active=fast_path_active
             )
+
+            # Reconcile reservation with dry run synthetic tokens (5,744)
+            if reservation:
+                self.reservation_coordinator.reconcile_response(
+                    request_id=reservation.request_id,
+                    actual_total_tokens=5744
+                )
 
             return RunExecutionResult(
                 exit_code=0,
@@ -787,17 +1446,17 @@ class CodexRunner:
                 telemetry_valid=True,
                 telemetry_status="VALID",
                 sandbox_policy=self.sandbox_policy,
-                provider=self.provider
+                provider=self.provider,
+                adaptive_activation=adaptive_activation,
+                request_size_gate_passed=True,
+                measured_request_tokens=req_tokens,
+                measured_request_bytes=req_bytes,
+                request_counting_method=count_method,
+                configured_request_size_limit=self.max_request_tokens,
+                request_size_breakdown=req_breakdown,
+                reservation_id=reservation.request_id if reservation else None,
+                reservation_details=reservation.to_dict() if reservation else None
             )
-
-        # Build command with explicit model, reasoning, and canonical sandbox settings
-        cmd = self.build_codex_command(
-            sandbox_path=sandbox_path,
-            prompt=effective_prompt,
-            arm=arm,
-            engram_executable=active_bin if is_engram_arm else None,
-            fast_path_active=fast_path_active
-        )
 
         exit_code = -1
         error_msg = None
@@ -1060,6 +1719,16 @@ class CodexRunner:
         completed_dt = datetime.datetime.now(datetime.timezone.utc)
         completed_at = completed_dt.isoformat()
 
+        if reservation:
+            actual_toks = current_cumulative_tokens if token_tracker and token_tracker.telemetry_valid else None
+            try:
+                self.reservation_coordinator.reconcile_response(
+                    request_id=reservation.request_id,
+                    actual_total_tokens=actual_toks
+                )
+            except Exception:
+                pass
+
         return RunExecutionResult(
             exit_code=exit_code,
             elapsed_seconds=elapsed,
@@ -1094,7 +1763,16 @@ class CodexRunner:
             telemetry_valid=token_tracker.telemetry_valid,
             telemetry_status=token_tracker.telemetry_status,
             sandbox_policy=self.sandbox_policy,
-            provider=self.provider
+            provider=self.provider,
+            adaptive_activation=adaptive_activation,
+            request_size_gate_passed=True,
+            measured_request_tokens=req_tokens,
+            measured_request_bytes=req_bytes,
+            request_counting_method=count_method,
+            configured_request_size_limit=self.max_request_tokens,
+            request_size_breakdown=req_breakdown,
+            reservation_id=reservation.request_id if reservation else None,
+            reservation_details=reservation.to_dict() if reservation else None
         )
 
     def _write_dry_run_events(
@@ -1141,7 +1819,31 @@ class CodexRunner:
                     }
                 }
             ])
-        elif arm in ("v154_arm3", "arm_3_v154"):
+        elif arm == "arm_e_cand5_optimized":
+            events.extend([
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "mcp_tool_call",
+                        "server": "engram",
+                        "tool": "engram_get_context",
+                        "arguments": {"task": "Task execution", "budget": 2000},
+                        "result": {"content": [{"type": "text", "text": "Optimized context compiled. Seven token-efficiency passes active."}]}
+                    }
+                },
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 2850,
+                        "cached_input_tokens": 2200,
+                        "cache_write_input_tokens": 0,
+                        "output_tokens": 60,
+                        "reasoning_output_tokens": 8
+                    }
+                }
+            ])
+        elif arm in ("v154_arm3", "arm_3_v154", "arm_c_cand42_always_on", "arm_d_cand42_adaptive", "arm_c_cand4_2_always_on", "arm_d_cand4_2_adaptive"):
             events.extend([
                 {
                     "type": "item.completed",
@@ -1165,7 +1867,7 @@ class CodexRunner:
                     }
                 }
             ])
-        elif arm in ("treatment_B", "v151_arm2", "arm_2_v151"):
+        elif arm in ("treatment_B", "v151_arm2", "arm_2_v151", "arm_b_cand3", "arm_b_cand3_always_on"):
             events.extend([
                 {
                     "type": "item.completed",

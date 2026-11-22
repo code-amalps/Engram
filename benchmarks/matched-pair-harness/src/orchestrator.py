@@ -6,6 +6,7 @@ before and after every run, runs automated verification gates, parses exact tele
 calculates independent correctness, and validates against JSON schemas.
 """
 from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
 from pathlib import Path
 import argparse
 import random
@@ -13,6 +14,7 @@ import datetime
 import json
 import sys
 import os
+import hashlib
 
 from isolation import (
     verify_frozen_binary,
@@ -63,6 +65,199 @@ TRIAD_BLOCK_SCHEDULES = {
 }
 
 
+@dataclass(frozen=True)
+class ArmCandidateIdentity:
+    """
+    Authoritative, immutable candidate identity for an individual benchmark arm.
+    Strictly disentangles the global benchmark candidate selection from the per-arm
+    binary and version metadata.
+    """
+    arm: str
+    requested_candidate_version: str
+    resolved_candidate_version: str
+    binary_path: Optional[Path]
+    expected_sha256: Optional[str]
+    is_engram: bool
+
+    def validate_against_ledger(self, ledger: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Validates this arm identity against the authoritative candidate ledger.
+        Fails closed on any inconsistency between arm configuration, candidate version,
+        binary path, and expected hash.
+        """
+        if not self.is_engram:
+            if self.requested_candidate_version != "native" or self.resolved_candidate_version != "native":
+                raise SafetyViolationError(
+                    f"Native arm '{self.arm}' candidate inconsistency: "
+                    f"requested='{self.requested_candidate_version}', resolved='{self.resolved_candidate_version}'"
+                )
+            if self.binary_path is not None or self.expected_sha256 is not None:
+                raise SafetyViolationError(
+                    f"Native arm '{self.arm}' cannot specify binary path or hash: "
+                    f"path='{self.binary_path}', expected_sha='{self.expected_sha256}'"
+                )
+            return
+
+        if self.arm in ("treatment_B", "v151_arm2", "v154_arm3"):
+            # Legacy pair and triad arms support custom test paths if specified
+            return
+
+        if self.resolved_candidate_version not in ledger:
+            raise SafetyViolationError(
+                f"Resolved candidate version '{self.resolved_candidate_version}' for arm '{self.arm}' "
+                f"not found in candidate ledger."
+            )
+
+        ledger_entry = ledger[self.resolved_candidate_version]
+        expected_bin = ledger_entry["bin"]
+        expected_sha = ledger_entry["sha"]
+
+        if expected_bin is None or expected_sha is None:
+            raise SafetyViolationError(
+                f"Candidate ledger entry for '{self.resolved_candidate_version}' has null binary or hash."
+            )
+
+        if self.binary_path is not None and expected_bin is not None:
+            if Path(self.binary_path).resolve() != Path(expected_bin).resolve():
+                raise SafetyViolationError(
+                    f"Binary path mismatch for arm '{self.arm}': "
+                    f"expected '{expected_bin}', got '{self.binary_path}'"
+                )
+
+        if self.expected_sha256 != expected_sha:
+            raise SafetyViolationError(
+                f"Expected SHA-256 mismatch for arm '{self.arm}': "
+                f"expected '{expected_sha}', got '{self.expected_sha256}'"
+            )
+
+    def verify_binary_integrity(self) -> str:
+        """
+        Verifies the physical binary exists and has matching SHA-256.
+        Returns the verified uppercase SHA-256 string, or 'NONE' for native arms.
+        Fails closed on missing file or hash mismatch.
+        """
+        if not self.is_engram:
+            return "NONE"
+        if not self.binary_path or not Path(self.binary_path).exists():
+            raise FileNotFoundError(
+                f"Candidate binary missing for arm '{self.arm}': {self.binary_path}"
+            )
+        actual_sha = hashlib.sha256(Path(self.binary_path).read_bytes()).hexdigest().upper()
+        if actual_sha != self.expected_sha256:
+            raise SafetyViolationError(
+                f"Pre-launch binary hash verification failed for arm '{self.arm}': "
+                f"expected {self.expected_sha256}, got {actual_sha}"
+            )
+        return actual_sha
+
+
+def audit_arm_candidate_identity(telemetry_record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Forensic helper to inspect and audit candidate identity from a run telemetry record.
+    Distinguishes historical records from corrected records, and detects metadata mismatches.
+    """
+    arm = telemetry_record.get("arm", "unknown")
+    iso = telemetry_record.get("isolation", {})
+    actual_sha = iso.get("engram_binary_actual_sha256")
+    expected_sha = iso.get("engram_binary_expected_sha256")
+    bin_path = iso.get("engram_binary_path")
+    benchmark_ver = iso.get("benchmark_candidate_version")
+    requested_ver = iso.get("requested_candidate_version")
+    resolved_ver = iso.get("resolved_candidate_version")
+    cand_status = iso.get("candidate_verification_status")
+    mcp_verified = iso.get("mcp_registration_verified")
+
+    inconsistencies = []
+
+    # Detect legacy records lacking new fields
+    is_legacy = benchmark_ver is None and requested_ver is None and resolved_ver is None
+
+    # Check for known historical Arm B defect
+    if arm in ("arm_b_cand3", "arm_b_cand3_always_on"):
+        CAND3_SHA = "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777"
+        if resolved_ver in ("cand4", "cand4_1", "cand4_2", "cand5"):
+            inconsistencies.append(
+                f"Metadata defect: arm '{arm}' resolved_candidate_version='{resolved_ver}', "
+                f"but actual binary is Candidate 3 ({actual_sha})"
+            )
+        if actual_sha and actual_sha != CAND3_SHA:
+            inconsistencies.append(
+                f"Binary mismatch: arm '{arm}' actual SHA '{actual_sha}' does not match Candidate 3 '{CAND3_SHA}'"
+            )
+
+    if arm == "arm_e_cand5_optimized":
+        CAND5_SHA = "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44"
+        if resolved_ver and resolved_ver != "cand5":
+            inconsistencies.append(
+                f"Metadata defect: arm '{arm}' resolved_candidate_version='{resolved_ver}', "
+                f"expected 'cand5'"
+            )
+        if actual_sha and actual_sha != CAND5_SHA:
+            inconsistencies.append(
+                f"Binary mismatch: arm '{arm}' actual SHA '{actual_sha}' does not match Candidate 5 '{CAND5_SHA}'"
+            )
+
+    if expected_sha and actual_sha and expected_sha != actual_sha:
+        inconsistencies.append(f"SHA mismatch: expected '{expected_sha}' != actual '{actual_sha}'")
+
+    if arm in ("arm_a_native", "control_A", "baseline_arm1"):
+        if bin_path or actual_sha or (resolved_ver and resolved_ver != "native"):
+            inconsistencies.append(f"Native arm '{arm}' has unexpected binary or candidate version")
+
+    return {
+        "arm": arm,
+        "is_legacy": is_legacy,
+        "benchmark_candidate_version": benchmark_ver,
+        "requested_candidate_version": requested_ver,
+        "resolved_candidate_version": resolved_ver,
+        "engram_binary_path": bin_path,
+        "engram_binary_expected_sha256": expected_sha,
+        "engram_binary_actual_sha256": actual_sha,
+        "candidate_verification_status": cand_status,
+        "mcp_registration_verified": mcp_verified,
+        "inconsistencies": inconsistencies,
+        "is_consistent": len(inconsistencies) == 0,
+    }
+
+
+def resolve_execution_policy(
+    execution_policy: Optional[str] = None,
+    no_stop_on_failure: bool = False,
+    parser: Optional[Any] = None,
+) -> Tuple[str, bool]:
+    """
+    Resolves the effective execution policy and stop_on_failure boolean flag.
+
+    Precedence and validation rules:
+    1. Default (execution_policy=None, no_stop_on_failure=False) -> ('strict', True)
+    2. execution_policy='strict' and no_stop_on_failure=True -> parser error (code 2) / ValueError (Conflict)
+    3. execution_policy=None and no_stop_on_failure=True -> ('diagnostic_continue', False) + DeprecationWarning
+    4. execution_policy='diagnostic_continue' and no_stop_on_failure=True -> ('diagnostic_continue', False) + DeprecationWarning
+    5. execution_policy specified alone -> (execution_policy, stop_on_failure=(execution_policy == 'strict'))
+    """
+    if execution_policy == "strict" and no_stop_on_failure:
+        msg = "Conflicting arguments: --no-stop-on-failure cannot be combined with --execution-policy strict."
+        if parser is not None:
+            parser.error(msg)
+        else:
+            raise ValueError(msg)
+
+    if no_stop_on_failure:
+        import warnings
+        warning_msg = (
+            "[DEPRECATION WARNING] --no-stop-on-failure is deprecated. "
+            "Please use --execution-policy diagnostic_continue instead."
+        )
+        print(warning_msg, file=sys.stderr)
+        warnings.warn(warning_msg, DeprecationWarning, stacklevel=2)
+        return "diagnostic_continue", False
+
+    if execution_policy is None:
+        return "strict", True
+
+    return execution_policy, (execution_policy == "strict")
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -88,6 +283,10 @@ class Orchestrator:
         headroom_reserve: int = 45_000,
         sandbox_policy: Optional[str] = None,
         provider: str = "cloud",
+        candidate_version: Optional[str] = None,
+        execution_policy: str = "strict",
+        global_tokens_ceiling: Optional[int] = None,
+        runner: Optional[Any] = None,
     ):
         if provider not in SUPPORTED_PROVIDERS:
             raise ValueError(
@@ -127,24 +326,246 @@ class Orchestrator:
         self.expected_treatment_sha256 = expected_treatment_sha256 or FROZEN_ENGRAM_SHA256
         self.expected_v151_sha256 = expected_v151_sha256 or FROZEN_ENGRAM_V151_SHA256
         self.expected_v154_sha256 = expected_v154_sha256 or (FROZEN_ENGRAM_V154_SHA256 if not engram_v154_bin else None)
-        self.stop_on_failure = stop_on_failure
+        if execution_policy not in ("strict", "diagnostic_continue"):
+            raise ValueError(
+                f"Invalid execution_policy '{execution_policy}'. Allowed choices: ('strict', 'diagnostic_continue')"
+            )
+        if execution_policy == "strict" and not stop_on_failure:
+            raise ValueError("Conflicting arguments: stop_on_failure=False cannot be combined with execution_policy='strict'")
+        self.execution_policy = execution_policy
+        self.stop_on_failure = (execution_policy == "strict")
+
+        if global_tokens_ceiling is not None:
+            if not isinstance(global_tokens_ceiling, int) or global_tokens_ceiling <= 0:
+                raise ValueError(
+                    f"global_tokens_ceiling must be a positive integer, got: {global_tokens_ceiling}"
+                )
+        self.global_tokens_ceiling = global_tokens_ceiling
+
         self.max_tokens_ceiling = max_tokens_ceiling
         self.headroom_reserve = headroom_reserve
 
-        self.arm_binaries: Dict[str, Optional[Path]] = {
-            "control_A": None,
-            "treatment_B": self.engram_bin,
-            "baseline_arm1": None,
-            "v151_arm2": self.engram_v151_bin,
-            "v154_arm3": self.engram_v154_bin,
+        cand3_bin = HARNESS_ROOT / "bin" / "candidate-phase3" / "engram.exe"
+        cand4_bin = HARNESS_ROOT / "bin" / "candidate-phase4" / "engram.exe"
+        cand4_1_bin = HARNESS_ROOT / "bin" / "candidate-phase4.1" / "engram.exe"
+        cand4_2_bin = HARNESS_ROOT / "bin" / "candidate-phase4.2" / "engram.exe"
+        cand5_bin = HARNESS_ROOT / "bin" / "candidate-phase5" / "engram.exe"
+        cand3_sha = "97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777"
+        cand4_sha = "FC605BC0CF3B6C9C5FDB1E7C83EE666FD7E049FD9AE25C893D478578681699F8"
+        cand4_1_sha = "300ACE35A31E8E4AF6DD531E8B83B0A5BA9F03E70B27F5E7823E3650CE494015"
+        cand4_2_sha = "78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2"
+        cand5_sha = "E4E5321624817CF20B6D300BF88897BFC1673F52308D75B21AEC3D143269AE44"
+
+        CANDIDATE_LEDGER = {
+            "native": {"bin": None, "sha": None, "label": "Native"},
+            "cand3": {"bin": cand3_bin, "sha": cand3_sha, "label": "Candidate 3"},
+            "cand4": {"bin": cand4_bin, "sha": cand4_sha, "label": "Candidate 4"},
+            "cand4_1": {"bin": cand4_1_bin, "sha": cand4_1_sha, "label": "Candidate 4.1"},
+            "cand4_2": {"bin": cand4_2_bin, "sha": cand4_2_sha, "label": "Candidate 4.2"},
+            "cand5": {"bin": cand5_bin, "sha": cand5_sha, "label": "Candidate 5 (Phase 5.8.1)"},
         }
-        self.arm_expected_hashes: Dict[str, Optional[str]] = {
-            "control_A": None,
-            "treatment_B": self.expected_treatment_sha256,
-            "baseline_arm1": None,
-            "v151_arm2": self.expected_v151_sha256,
-            "v154_arm3": self.expected_v154_sha256,
+
+        self.requested_candidate_version = candidate_version
+        self.candidate_ledger = CANDIDATE_LEDGER
+
+        # Check for legacy environment variables
+        env_cand4_2 = os.environ.get("ENGRAM_USE_CANDIDATE_4_2", "").strip().lower() in ("1", "true", "yes")
+        env_cand4_1 = os.environ.get("ENGRAM_USE_CANDIDATE_4_1", "").strip().lower() in ("1", "true", "yes")
+
+        if candidate_version is not None:
+            if candidate_version not in CANDIDATE_LEDGER:
+                raise ValueError(
+                    f"Invalid candidate version '{candidate_version}'. Allowed choices: {sorted(list(CANDIDATE_LEDGER.keys()))}"
+                )
+            # Fail closed on conflicting legacy environment variables
+            if candidate_version == "cand4" and env_cand4_2:
+                raise ValueError(
+                    "Conflicting configuration: explicit --candidate-version 'cand4' conflicts with legacy environment variable ENGRAM_USE_CANDIDATE_4_2=1"
+                )
+            if candidate_version == "cand4" and env_cand4_1:
+                raise ValueError(
+                    "Conflicting configuration: explicit --candidate-version 'cand4' conflicts with legacy environment variable ENGRAM_USE_CANDIDATE_4_1=1"
+                )
+            resolved_cand = candidate_version
+        else:
+            # Backward-compatibility fallback using legacy env vars if explicit flag is omitted
+            if env_cand4_2:
+                resolved_cand = "cand4_2"
+            elif env_cand4_1:
+                resolved_cand = "cand4_1"
+            else:
+                resolved_cand = "cand4"
+
+        # Fail-closed binary existence and integrity check
+        cand_entry = CANDIDATE_LEDGER[resolved_cand]
+        if cand_entry["bin"] is not None:
+            target_bin = cand_entry["bin"]
+            if not target_bin.exists():
+                raise FileNotFoundError(
+                    f"Requested candidate '{resolved_cand}' binary not found at '{target_bin}'. "
+                    f"Fail-closed: refusing silent fallback to another version."
+                )
+            actual_hash = hashlib.sha256(target_bin.read_bytes()).hexdigest().upper()
+            if actual_hash != cand_entry["sha"]:
+                raise SafetyViolationError(
+                    f"SHA-256 mismatch for candidate '{resolved_cand}': expected {cand_entry['sha']}, got {actual_hash}"
+                )
+            active_cand4_bin = target_bin
+            active_cand4_sha = cand_entry["sha"]
+        else:
+            active_cand4_bin = None
+            active_cand4_sha = None
+
+        self.resolved_candidate_version = resolved_cand
+        self.benchmark_candidate_version = resolved_cand
+
+        cand4_req = candidate_version if candidate_version is not None else resolved_cand
+
+        self.arm_identities: Dict[str, ArmCandidateIdentity] = {
+            "control_A": ArmCandidateIdentity(
+                arm="control_A",
+                requested_candidate_version="native",
+                resolved_candidate_version="native",
+                binary_path=None,
+                expected_sha256=None,
+                is_engram=False,
+            ),
+            "baseline_arm1": ArmCandidateIdentity(
+                arm="baseline_arm1",
+                requested_candidate_version="native",
+                resolved_candidate_version="native",
+                binary_path=None,
+                expected_sha256=None,
+                is_engram=False,
+            ),
+            "arm_a_native": ArmCandidateIdentity(
+                arm="arm_a_native",
+                requested_candidate_version="native",
+                resolved_candidate_version="native",
+                binary_path=None,
+                expected_sha256=None,
+                is_engram=False,
+            ),
+            "v151_arm2": ArmCandidateIdentity(
+                arm="v151_arm2",
+                requested_candidate_version="cand3",
+                resolved_candidate_version="cand3",
+                binary_path=self.engram_v151_bin or cand3_bin,
+                expected_sha256=self.expected_v151_sha256 or cand3_sha,
+                is_engram=True,
+            ),
+            "arm_b_cand3_always_on": ArmCandidateIdentity(
+                arm="arm_b_cand3_always_on",
+                requested_candidate_version="cand3",
+                resolved_candidate_version="cand3",
+                binary_path=cand3_bin,
+                expected_sha256=cand3_sha,
+                is_engram=True,
+            ),
+            "treatment_B": ArmCandidateIdentity(
+                arm="treatment_B",
+                requested_candidate_version=cand4_req,
+                resolved_candidate_version=resolved_cand,
+                binary_path=self.engram_bin,
+                expected_sha256=self.expected_treatment_sha256,
+                is_engram=True,
+            ),
+            "v154_arm3": ArmCandidateIdentity(
+                arm="v154_arm3",
+                requested_candidate_version=cand4_req,
+                resolved_candidate_version=resolved_cand,
+                binary_path=self.engram_v154_bin,
+                expected_sha256=self.expected_v154_sha256,
+                is_engram=True,
+            ),
+            "arm_c_cand4_always_on": ArmCandidateIdentity(
+                arm="arm_c_cand4_always_on",
+                requested_candidate_version=cand4_req,
+                resolved_candidate_version=resolved_cand,
+                binary_path=active_cand4_bin,
+                expected_sha256=active_cand4_sha,
+                is_engram=(resolved_cand != "native"),
+            ),
+            "arm_d_cand4_adaptive": ArmCandidateIdentity(
+                arm="arm_d_cand4_adaptive",
+                requested_candidate_version=cand4_req,
+                resolved_candidate_version=resolved_cand,
+                binary_path=active_cand4_bin,
+                expected_sha256=active_cand4_sha,
+                is_engram=(resolved_cand != "native"),
+            ),
+            "arm_c_cand4_1_always_on": ArmCandidateIdentity(
+                arm="arm_c_cand4_1_always_on",
+                requested_candidate_version="cand4_1",
+                resolved_candidate_version="cand4_1",
+                binary_path=cand4_1_bin,
+                expected_sha256=cand4_1_sha,
+                is_engram=True,
+            ),
+            "arm_d_cand4_1_adaptive": ArmCandidateIdentity(
+                arm="arm_d_cand4_1_adaptive",
+                requested_candidate_version="cand4_1",
+                resolved_candidate_version="cand4_1",
+                binary_path=cand4_1_bin,
+                expected_sha256=cand4_1_sha,
+                is_engram=True,
+            ),
+            "arm_c_cand4_2_always_on": ArmCandidateIdentity(
+                arm="arm_c_cand4_2_always_on",
+                requested_candidate_version="cand4_2",
+                resolved_candidate_version="cand4_2",
+                binary_path=cand4_2_bin,
+                expected_sha256=cand4_2_sha,
+                is_engram=True,
+            ),
+            "arm_d_cand4_2_adaptive": ArmCandidateIdentity(
+                arm="arm_d_cand4_2_adaptive",
+                requested_candidate_version="cand4_2",
+                resolved_candidate_version="cand4_2",
+                binary_path=cand4_2_bin,
+                expected_sha256=cand4_2_sha,
+                is_engram=True,
+            ),
+            "arm_b_cand3": ArmCandidateIdentity(
+                arm="arm_b_cand3",
+                requested_candidate_version="cand3",
+                resolved_candidate_version="cand3",
+                binary_path=cand3_bin,
+                expected_sha256=cand3_sha,
+                is_engram=True,
+            ),
+            "arm_c_cand42_always_on": ArmCandidateIdentity(
+                arm="arm_c_cand42_always_on",
+                requested_candidate_version="cand4_2",
+                resolved_candidate_version="cand4_2",
+                binary_path=cand4_2_bin,
+                expected_sha256=cand4_2_sha,
+                is_engram=True,
+            ),
+            "arm_d_cand42_adaptive": ArmCandidateIdentity(
+                arm="arm_d_cand42_adaptive",
+                requested_candidate_version="cand4_2",
+                resolved_candidate_version="cand4_2",
+                binary_path=cand4_2_bin,
+                expected_sha256=cand4_2_sha,
+                is_engram=True,
+            ),
+            "arm_e_cand5_optimized": ArmCandidateIdentity(
+                arm="arm_e_cand5_optimized",
+                requested_candidate_version="cand5",
+                resolved_candidate_version="cand5",
+                binary_path=cand5_bin,
+                expected_sha256=cand5_sha,
+                is_engram=True,
+            ),
         }
+
+        # Validate all configured arm identities against the candidate ledger
+        for identity in self.arm_identities.values():
+            identity.validate_against_ledger(CANDIDATE_LEDGER)
+
+        self.arm_binaries: Dict[str, Optional[Path]] = {k: v.binary_path for k, v in self.arm_identities.items()}
+        self.arm_expected_hashes: Dict[str, Optional[str]] = {k: v.expected_sha256 for k, v in self.arm_identities.items()}
 
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -152,7 +573,9 @@ class Orchestrator:
         # Safe Output Directory Handling (Remediation D)
         evidence_file_names = {
             "run_telemetry.json", "triad_summary.json", "single_summary.json",
-            "matched_pair_summary.json", "events.jsonl", "triad_report.md"
+            "matched_pair_summary.json", "events.jsonl", "triad_report.md",
+            "tetrad_summary.json", "tetrad_report.md",
+            "pentad_summary.json", "pentad_report.md"
         }
         if output_dir is not None:
             out_p = Path(output_dir).resolve()
@@ -224,16 +647,34 @@ class Orchestrator:
             self.triad_schema = None
 
         self.evaluator = Evaluator(self.task_config)
-        self.runner = CodexRunner(
-            codex_executable=self.codex_bin,
-            engram_executable=self.engram_bin,
-            model=self.model,
-            reasoning_effort=self.reasoning_effort,
-            max_tokens_ceiling=self.max_tokens_ceiling,
-            headroom_reserve=self.headroom_reserve,
-            sandbox_policy=self.sandbox_policy,
-            provider=self.provider
-        )
+        if runner is not None:
+            self.runner = runner
+        elif self.provider in ("controlled", "openai", "mock"):
+            try:
+                from agent_runtime import ControlledRunner
+            except (ImportError, ValueError):
+                from .agent_runtime import ControlledRunner
+            allow_live = not self.is_dry_run and self.provider in ("controlled", "openai")
+            self.runner = ControlledRunner(
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+                max_tokens_ceiling=self.max_tokens_ceiling,
+                headroom_reserve=self.headroom_reserve,
+                sandbox_policy=self.sandbox_policy,
+                provider=self.provider,
+                allow_live_network=allow_live
+            )
+        else:
+            self.runner = CodexRunner(
+                codex_executable=self.codex_bin,
+                engram_executable=self.engram_bin,
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+                max_tokens_ceiling=self.max_tokens_ceiling,
+                headroom_reserve=self.headroom_reserve,
+                sandbox_policy=self.sandbox_policy,
+                provider=self.provider
+            )
         self.process_tracker = ProcessTracker()
 
         # Capture baseline golden dependency fingerprint based on repository type
@@ -304,12 +745,12 @@ class Orchestrator:
         if ctrl_skipped:
             pair_summary["acceptance"]["control_A_accepted"] = None
         else:
-            pair_summary["acceptance"]["control_A_accepted"] = bool(ctrl_corr.get("passed_all_requirements", False) and (ctrl_corr.get("score") == 1.0))
+            pair_summary["acceptance"]["control_A_accepted"] = Orchestrator.is_run_accepted(ctrl)
 
         if treat_skipped:
             pair_summary["acceptance"]["treatment_B_accepted"] = None
         else:
-            pair_summary["acceptance"]["treatment_B_accepted"] = bool(treat_corr.get("passed_all_requirements", False) and (treat_corr.get("score") == 1.0))
+            pair_summary["acceptance"]["treatment_B_accepted"] = Orchestrator.is_run_accepted(treat)
 
         if ctrl_skipped or treat_skipped:
             pair_summary["acceptance"]["pair_acceptance_parity"] = None
@@ -457,12 +898,261 @@ class Orchestrator:
         }
         return True, "VALID", parsed
 
+    ALL_TETRAD_ARMS: List[str] = [
+        "arm_a_native",
+        "arm_b_cand3_always_on",
+        "arm_c_cand4_always_on",
+        "arm_d_cand4_adaptive"
+    ]
+
+    @staticmethod
+    def validate_tetrad_arm_order(arm_order: Any, allow_none: bool = False) -> Optional[List[str]]:
+        """
+        Authoritative validator for tetrad arm execution order.
+        Invariants:
+        1. If arm_order is None:
+           - If allow_none=True: returns None (caller applies deterministic seeded default).
+           - If allow_none=False: raises SafetyViolationError.
+        2. Explicit order must be a non-empty string or list.
+        3. Normalizes whitespace around comma-separated entries.
+        4. Rejects empty entries, whitespace-only entries, or unsupported separators (; | etc).
+        5. Rejects whitespace within individual arm identifiers.
+        6. Enforces exact cardinality: len(order) == 4.
+        7. Enforces strict uniqueness: len(set(order)) == 4 (no duplicates).
+        8. Enforces exact set equivalence: set(order) == set(ALL_TETRAD_ARMS) (no unknown/missing arms).
+        9. Enforces exact casing (case-sensitive match).
+        """
+        if arm_order is None:
+            if allow_none:
+                return None
+            raise SafetyViolationError(
+                "Invalid tetrad arm order: explicit order required but received None."
+            )
+
+        if isinstance(arm_order, str):
+            raw_str = arm_order.strip()
+            if not raw_str:
+                raise SafetyViolationError(
+                    "Invalid tetrad arm order: explicit order string cannot be empty or whitespace."
+                )
+            if any(sep in raw_str for sep in [";", "|", "\n", "\r", "\t"]):
+                raise SafetyViolationError(
+                    f"Invalid tetrad arm order: unsupported separator in '{raw_str}'. Expected comma-separated list."
+                )
+            tokens = [a.strip() for a in raw_str.split(",")]
+            if any(t == "" for t in tokens):
+                raise SafetyViolationError(
+                    "Invalid tetrad arm order: empty entry encountered in comma-separated list."
+                )
+            for t in tokens:
+                if " " in t:
+                    raise SafetyViolationError(
+                        f"Invalid tetrad arm order: whitespace within arm identifier '{t}'. Use comma-separated list without spaces in identifiers."
+                    )
+        elif isinstance(arm_order, (list, tuple)):
+            if len(arm_order) == 0:
+                raise SafetyViolationError(
+                    "Invalid tetrad arm order: explicit arm list cannot be empty."
+                )
+            tokens = []
+            for a in arm_order:
+                if not isinstance(a, str):
+                    raise SafetyViolationError(
+                        f"Invalid tetrad arm order: arm identifier must be a string, got {type(a).__name__} ({a})."
+                    )
+                t = a.strip()
+                if not t:
+                    raise SafetyViolationError(
+                        "Invalid tetrad arm order: empty or whitespace arm identifier in list."
+                    )
+                if " " in t:
+                    raise SafetyViolationError(
+                        f"Invalid tetrad arm order: whitespace within arm identifier '{t}'."
+                    )
+                tokens.append(t)
+        else:
+            raise SafetyViolationError(
+                f"Invalid tetrad arm order type: expected str or list, got {type(arm_order).__name__}."
+            )
+
+        if len(tokens) != 4:
+            raise SafetyViolationError(
+                f"Invalid tetrad arm order: expected exactly 4 arms, received {len(tokens)}: {tokens}. "
+                f"Expected exact permutation of {sorted(Orchestrator.ALL_TETRAD_ARMS)}."
+            )
+
+        seen = set()
+        duplicates = []
+        for t in tokens:
+            if t in seen and t not in duplicates:
+                duplicates.append(t)
+            seen.add(t)
+        if duplicates:
+            raise SafetyViolationError(
+                f"Invalid tetrad arm order: duplicate arm(s) detected: {duplicates} in order {tokens}."
+            )
+
+        all_set = set(Orchestrator.ALL_TETRAD_ARMS)
+        order_set = set(tokens)
+        unknown = order_set - all_set
+        missing = all_set - order_set
+        if unknown or missing:
+            parts = []
+            if unknown:
+                parts.append(f"unregistered arm(s): {sorted(unknown)}")
+            if missing:
+                parts.append(f"missing registered arm(s): {sorted(missing)}")
+            raise SafetyViolationError(
+                f"Invalid tetrad arm order: {'; '.join(parts)}. Expected exact permutation of {sorted(Orchestrator.ALL_TETRAD_ARMS)}."
+            )
+
+        return tokens
+
+    ALL_PENTAD_ARMS: List[str] = [
+        "arm_a_native",
+        "arm_b_cand3",
+        "arm_c_cand42_always_on",
+        "arm_d_cand42_adaptive",
+        "arm_e_cand5_optimized",
+    ]
+
+    @staticmethod
+    def validate_pentad_arm_order(arm_order: Any, allow_none: bool = False) -> Optional[List[str]]:
+        """
+        Authoritative validator for pentad arm execution order.
+        Invariants:
+        1. If arm_order is None:
+           - If allow_none=True: returns None (caller applies deterministic seeded default).
+           - If allow_none=False: raises SafetyViolationError.
+        2. Explicit order must be a non-empty string or list.
+        3. Normalizes whitespace around comma-separated entries.
+        4. Rejects empty entries, whitespace-only entries, or unsupported separators (; | etc).
+        5. Rejects whitespace within individual arm identifiers.
+        6. Enforces exact cardinality: len(order) == 5.
+        7. Enforces strict uniqueness: len(set(order)) == 5 (no duplicates).
+        8. Enforces exact set equivalence: set(order) == set(ALL_PENTAD_ARMS) (no unknown/missing arms).
+        9. Enforces exact casing (case-sensitive match).
+        """
+        if arm_order is None:
+            if allow_none:
+                return None
+            raise SafetyViolationError(
+                "Invalid pentad arm order: explicit order required but received None."
+            )
+
+        if isinstance(arm_order, str):
+            if not arm_order.strip():
+                raise SafetyViolationError("Invalid pentad arm order: empty or whitespace-only string.")
+            if ";" in arm_order or "|" in arm_order:
+                raise SafetyViolationError(
+                    f"Invalid pentad arm order separator in '{arm_order}'. Use comma-separated list."
+                )
+            tokens = [token.strip() for token in arm_order.split(",")]
+        elif isinstance(arm_order, list):
+            if len(arm_order) == 0:
+                raise SafetyViolationError("Invalid pentad arm order: empty list.")
+            tokens = []
+            for item in arm_order:
+                if not isinstance(item, str):
+                    raise SafetyViolationError(
+                        f"Invalid pentad arm order element: expected str, got {type(item).__name__} ({item})"
+                    )
+                tokens.append(item.strip())
+        else:
+            raise SafetyViolationError(
+                f"Invalid pentad arm order type: expected str or list, got {type(arm_order).__name__}"
+            )
+
+        for token in tokens:
+            if not token:
+                raise SafetyViolationError(
+                    "Invalid pentad arm order: contains empty or whitespace-only element."
+                )
+            if any(char.isspace() for char in token):
+                raise SafetyViolationError(
+                    f"Invalid pentad arm identifier '{token}': contains internal whitespace."
+                )
+
+        if len(tokens) != 5:
+            raise SafetyViolationError(
+                f"Invalid pentad arm order length: expected exactly 5 arms, received {len(tokens)}: {tokens}. "
+                f"Expected exact permutation of {sorted(Orchestrator.ALL_PENTAD_ARMS)}."
+            )
+
+        seen = set()
+        duplicates = []
+        for t in tokens:
+            if t in seen and t not in duplicates:
+                duplicates.append(t)
+            seen.add(t)
+        if duplicates:
+            raise SafetyViolationError(
+                f"Invalid pentad arm order: duplicate arm(s) detected: {duplicates} in order {tokens}."
+            )
+
+        all_set = set(Orchestrator.ALL_PENTAD_ARMS)
+        order_set = set(tokens)
+        unknown = order_set - all_set
+        missing = all_set - order_set
+        if unknown or missing:
+            parts = []
+            if unknown:
+                parts.append(f"unregistered arm(s): {sorted(unknown)}")
+            if missing:
+                parts.append(f"missing registered arm(s): {sorted(missing)}")
+            raise SafetyViolationError(
+                f"Invalid pentad arm order: {'; '.join(parts)}. Expected exact permutation of {sorted(Orchestrator.ALL_PENTAD_ARMS)}."
+            )
+
+        return tokens
+
+    @staticmethod
+    def is_run_accepted(run_dict: Dict[str, Any]) -> bool:
+        """
+        Evaluates full acceptance gate criteria for a single arm execution:
+        1. Execution status must be SUCCESS.
+        2. Functional correctness must be proven (score == 1.0, passed_all_requirements is True).
+        3. Top-level telemetry_valid must be True.
+        4. Embedded telemetry object must exist and indicate telemetry_valid is True.
+        5. Telemetry must be mathematically sound, complete, and trustworthy via validate_telemetry_integrity.
+        6. Total model tokens must be a positive integer.
+        7. Total model tokens must not exceed configured ceiling if specified.
+        """
+        if not isinstance(run_dict, dict) or not run_dict:
+            return False
+        if run_dict.get("execution_status") != "SUCCESS":
+            return False
+        corr = run_dict.get("correctness", {})
+        if not isinstance(corr, dict) or corr.get("score") != 1.0 or not corr.get("passed_all_requirements", False):
+            return False
+        if run_dict.get("telemetry_valid") is not True:
+            return False
+        telem = run_dict.get("telemetry", {})
+        if not isinstance(telem, dict) or telem.get("telemetry_valid") is not True:
+            return False
+        tel_valid, _, tel_data = Orchestrator.validate_telemetry_integrity(telem)
+        if not tel_valid or not tel_data:
+            return False
+        tot = tel_data.get("total_model_tokens")
+        if not isinstance(tot, int) or tot <= 0:
+            return False
+        guard = run_dict.get("headroom_guard", {})
+        configured_ceiling = guard.get("configured_ceiling")
+        if isinstance(configured_ceiling, int) and configured_ceiling > 0:
+            if tot > configured_ceiling:
+                return False
+        gate = run_dict.get("request_size_gate")
+        if isinstance(gate, dict) and gate.get("gate_passed") is False:
+            return False
+        return True
+
     @staticmethod
     def compute_comparative_analysis(
         ctrl_run: Dict[str, Any],
         treat_run: Dict[str, Any],
         baseline_label: str = "control_A",
-        treatment_label: str = "treatment_B"
+        treatment_label: str = "treatment_B",
+        block_incomplete: bool = False
     ) -> Dict[str, Any]:
         """
         Computes rigorous matched-pair comparative metrics.
@@ -471,6 +1161,8 @@ class Orchestrator:
            on either arm, comparative savings are STRICTLY INELIGIBLE even if functional acceptance passed.
         2. Acceptance Guard: Token savings, context reductions, and efficiency percentages are
            STRICTLY INVALIDATED whenever either arm fails functional correctness (C < 1.0 or passed_all_requirements == False).
+        3. Block Completeness Guard: When block_incomplete is True (e.g. diagnostic continuation or stop-on-failure),
+           comparative savings claims are STRICTLY INVALIDATED regardless of individual pairwise arm status.
         """
         def _build_metric_entry(c_val, t_val, delta, pct, status):
             entry = {
@@ -484,6 +1176,49 @@ class Orchestrator:
                 entry["baseline"] = c_val
                 entry["treatment"] = t_val
             return entry
+
+        # 0. Validate block-level completeness guard
+        if block_incomplete:
+            ctrl_tel_valid, ctrl_tel_reason, ctrl_tel_data = Orchestrator.validate_telemetry_integrity(ctrl_run.get("telemetry"))
+            treat_tel_valid, treat_tel_reason, treat_tel_data = Orchestrator.validate_telemetry_integrity(treat_run.get("telemetry"))
+            ctrl_corr = ctrl_run.get("correctness", {})
+            treat_corr = treat_run.get("correctness", {})
+            return {
+                "savings_claim_eligible": False,
+                "savings_claim_status": "INVALIDATED_BY_ACCEPTANCE_FAILURE",
+                "verdict": "MUTUAL_ACCEPTANCE_FAILURE",
+                "explanation": (
+                    f"Block execution incomplete, halted, or failed mutual acceptance across all arms; "
+                    f"comparative token savings and efficiency claims are STRICTLY INVALIDATED."
+                ),
+                "metrics": {
+                    "total_model_tokens": _build_metric_entry(
+                        ctrl_tel_data["total_model_tokens"] if ctrl_tel_data else None,
+                        treat_tel_data["total_model_tokens"] if treat_tel_data else None,
+                        None, None, "INVALIDATED_UNACCEPTED"
+                    ),
+                    "prompt_tokens_total": _build_metric_entry(
+                        ctrl_tel_data["prompt_tokens_total"] if ctrl_tel_data else None,
+                        treat_tel_data["prompt_tokens_total"] if treat_tel_data else None,
+                        None, None, "INVALIDATED_UNACCEPTED"
+                    ),
+                    "completion_tokens": _build_metric_entry(
+                        ctrl_tel_data["completion_tokens"] if ctrl_tel_data else None,
+                        treat_tel_data["completion_tokens"] if treat_tel_data else None,
+                        None, None, "INVALIDATED_UNACCEPTED"
+                    ),
+                    "peak_single_request_context": _build_metric_entry(
+                        ctrl_tel_data["peak_single_request_context"] if ctrl_tel_data else None,
+                        treat_tel_data["peak_single_request_context"] if treat_tel_data else None,
+                        None, None, "INVALIDATED_UNACCEPTED"
+                    ),
+                    "quality_adjusted_cost": _build_metric_entry(
+                        float(ctrl_corr.get("quality_adjusted_cost")) if (ctrl_tel_data and "quality_adjusted_cost" in ctrl_corr) else None,
+                        float(treat_corr.get("quality_adjusted_cost")) if (treat_tel_data and "quality_adjusted_cost" in treat_corr) else None,
+                        None, None, "INVALIDATED_UNACCEPTED"
+                    )
+                }
+            }
 
         # 1. Validate Telemetry Integrity on both arms
         ctrl_tel_valid, ctrl_tel_reason, ctrl_tel_data = Orchestrator.validate_telemetry_integrity(ctrl_run.get("telemetry"))
@@ -685,11 +1420,41 @@ class Orchestrator:
             verdict = "EFFICIENCY_NEUTRAL"
             explanation = f"{treatment_label} and {baseline_label} used identical total token counts."
 
+        # Round trip comparison if present on both arms
+        ctrl_rt = (ctrl_run.get("telemetry") or {}).get("round_trip_summary")
+        treat_rt = (treat_run.get("telemetry") or {}).get("round_trip_summary")
+        rt_comp = None
+        if ctrl_rt and treat_rt:
+            c_rts = ctrl_rt.get("total_round_trips", 0)
+            t_rts = treat_rt.get("total_round_trips", 0)
+            rt_delta = c_rts - t_rts
+            rt_pct = round((rt_delta / c_rts) * 100.0, 2) if c_rts > 0 else 0.0
+
+            c_turns = ctrl_rt.get("total_agent_turns", 0)
+            t_turns = treat_rt.get("total_agent_turns", 0)
+            turn_delta = c_turns - t_turns
+            turn_pct = round((turn_delta / c_turns) * 100.0, 2) if c_turns > 0 else 0.0
+
+            rt_comp = {
+                "baseline_round_trips": c_rts,
+                "treatment_round_trips": t_rts,
+                "round_trips_delta": rt_delta,
+                "round_trips_reduction_pct": rt_pct,
+                "baseline_agent_turns": c_turns,
+                "treatment_agent_turns": t_turns,
+                "agent_turns_reduction_pct": turn_pct,
+                "treatment_engram_mcp_calls": treat_rt.get("engram_mcp_calls", 0),
+                "baseline_p50_latency_ms": ctrl_rt.get("latency_median_ms", 0.0),
+                "treatment_p50_latency_ms": treat_rt.get("latency_median_ms", 0.0),
+                "verdict": "ROUND_TRIPS_REDUCED" if rt_pct > 0 else ("ROUND_TRIPS_EQUIVALENT" if rt_pct == 0 else "ROUND_TRIPS_INCREASED")
+            }
+
         return {
             "savings_claim_eligible": True,
             "savings_claim_status": "VALID",
             "verdict": verdict,
             "explanation": explanation,
+            "round_trips": rt_comp,
             "metrics": {
                 "total_model_tokens": _build_metric_entry(ctrl_total, treat_total, total_delta, total_savings_pct, "VALID"),
                 "prompt_tokens_total": _build_metric_entry(ctrl_prompt, treat_prompt, prompt_delta, prompt_savings_pct, "VALID"),
@@ -862,8 +1627,26 @@ class Orchestrator:
         run_id = f"{self.task_id}_{self.pair_id}_{arm}"
         run_vault = self.output_dir / arm
         run_vault.mkdir(parents=True, exist_ok=True)
-        is_engram = arm in ("treatment_B", "v151_arm2", "v154_arm3")
-        expected_sha = self.arm_expected_hashes.get(arm)
+        arm_identity = self.arm_identities.get(arm)
+        if arm_identity:
+            is_engram = arm_identity.is_engram
+            expected_sha = arm_identity.expected_sha256
+            bin_path = str(arm_identity.binary_path) if arm_identity.binary_path else None
+            req_cand = arm_identity.requested_candidate_version
+            res_cand = arm_identity.resolved_candidate_version
+            cand_status = "SKIPPED" if is_engram else "NOT_APPLICABLE"
+        else:
+            is_engram = arm in (
+                "treatment_B", "v151_arm2", "v154_arm3",
+                "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive",
+                "arm_c_cand4_1_always_on", "arm_d_cand4_1_adaptive",
+                "arm_c_cand4_2_always_on", "arm_d_cand4_2_adaptive"
+            )
+            expected_sha = self.arm_expected_hashes.get(arm)
+            bin_path = str(self.arm_binaries.get(arm)) if self.arm_binaries.get(arm) else None
+            req_cand = self.requested_candidate_version
+            res_cand = self.resolved_candidate_version if is_engram else "native"
+            cand_status = "SKIPPED" if is_engram else "NOT_APPLICABLE"
         parser = TelemetryParser(provenance="UNAVAILABLE")
         telemetry = parser.create_unavailable_metrics(reason)
 
@@ -920,6 +1703,14 @@ class Orchestrator:
                 "cold_start_verified": False,
                 "engram_enabled": is_engram,
                 "engram_binary_sha256": expected_sha or "NONE",
+                "engram_binary_expected_sha256": expected_sha,
+                "engram_binary_actual_sha256": None,
+                "engram_binary_path": bin_path,
+                "benchmark_candidate_version": self.benchmark_candidate_version,
+                "requested_candidate_version": req_cand,
+                "resolved_candidate_version": res_cand,
+                "candidate_verification_status": cand_status,
+                "mcp_registration_verified": False,
                 "mcp_server_status": "SKIPPED",
                 "dependency_fingerprint_verified": True,
                 "path_sanitized": True,
@@ -945,25 +1736,45 @@ class Orchestrator:
 
         return record
 
-    def _execute_single_arm(self, arm: str, exec_order: int) -> Dict[str, Any]:
+    def _execute_single_arm(
+        self,
+        arm: str,
+        exec_order: int,
+        arm_max_tokens_ceiling: Optional[int] = None
+    ) -> Dict[str, Any]:
         """Executes, evaluates, and verifies a single arm in an isolated sandbox."""
         print(f"\n=======================================================")
         print(f"Executing Arm: {arm} (Order: {exec_order}) [Task: {self.task_id}]")
         print(f"=======================================================")
 
+        orig_runner_ceiling = getattr(self.runner, "max_tokens_ceiling", self.max_tokens_ceiling)
+        if arm_max_tokens_ceiling is not None:
+            self.runner.max_tokens_ceiling = arm_max_tokens_ceiling
+
         run_id = f"{self.task_id}_{self.pair_id}_{arm}"
         run_vault = self.output_dir / arm
         run_vault.mkdir(parents=True, exist_ok=True)
         # 1. Verify Engram binary immediately before execution if arm uses Engram
-        binary = self.arm_binaries.get(arm)
-        expected_sha = self.arm_expected_hashes.get(arm)
-        is_engram = arm in ("treatment_B", "v151_arm2", "v154_arm3")
+        arm_identity = self.arm_identities.get(arm)
+        if arm_identity is None:
+            raise SafetyViolationError(f"FATAL: Unregistered arm '{arm}' encountered in orchestrator.")
 
-        if is_engram:
-            if not binary or not binary.exists():
-                raise FileNotFoundError(f"Engram binary missing for arm '{arm}': {binary}")
-            if expected_sha:
-                verify_frozen_binary(binary, expected_sha)
+        # Fail-closed validation against candidate ledger
+        arm_identity.validate_against_ledger(self.candidate_ledger)
+
+        binary = arm_identity.binary_path
+        expected_sha = arm_identity.expected_sha256
+        is_engram = arm_identity.is_engram
+        is_native = not is_engram
+
+        if is_native:
+            if binary is not None or is_engram:
+                raise SafetyViolationError(
+                    f"FATAL: Native arm '{arm}' unexpectedly configured with Engram binary '{binary}'. "
+                    f"Native arms must execute with zero MCP integration."
+                )
+        elif is_engram:
+            arm_identity.verify_binary_integrity()
 
         # 2. Strict Live-Run Guard: Safe Dependency Strategy (Remediation C)
         task_requires_deps = self.task_config.get("requires_dependencies", True)
@@ -1023,6 +1834,8 @@ class Orchestrator:
             # Determine execution status
             if getattr(exec_res, "timed_out", False):
                 execution_status = "TIMEOUT"
+            elif getattr(exec_res, "stop_reason", None) == "PRE_DISPATCH_REQUEST_SIZE_EXCEEDED" or not getattr(exec_res, "request_size_gate_passed", True):
+                execution_status = "PRE_DISPATCH_REQUEST_SIZE_EXCEEDED"
             elif getattr(exec_res, "pre_dispatch_guard_triggered", False):
                 execution_status = "PRE_DISPATCH_HEADROOM_EXHAUSTED"
             elif getattr(exec_res, "token_ceiling_breached", False):
@@ -1037,7 +1850,8 @@ class Orchestrator:
                 execution_status = "SUCCESS"
 
             # 5. Parse Telemetry safely
-            provenance = "SYNTHETIC_TEST" if self.is_dry_run else "DIRECT_API"
+            is_mock_transport = getattr(getattr(self.runner, "transport", None), "provider_name", "") == "mock_transport"
+            provenance = "SYNTHETIC_TEST" if (self.is_dry_run or is_mock_transport) else "DIRECT_API"
             parser = TelemetryParser(provenance=provenance)
             try:
                 if events_jsonl_path.exists() and events_jsonl_path.stat().st_size > 0:
@@ -1048,6 +1862,17 @@ class Orchestrator:
                     telemetry = parser.create_unavailable_metrics(exec_res.error_message or "Events file missing or unwritten")
             except Exception as telem_err:
                 telemetry = parser.create_unavailable_metrics(f"Telemetry parsing failed: {telem_err}")
+
+            # Reconcile parsed telemetry against effective arm ceiling
+            effective_ceiling = arm_max_tokens_ceiling if arm_max_tokens_ceiling is not None else getattr(self.runner, "max_tokens_ceiling", self.max_tokens_ceiling)
+            if effective_ceiling is not None and isinstance(getattr(telemetry, "total_model_tokens", None), int):
+                if telemetry.total_model_tokens > effective_ceiling:
+                    execution_status = "TOKEN_CEILING_BREACHED"
+                    exec_res.token_ceiling_breached = True
+                    if not exec_res.error_message:
+                        exec_res.error_message = (
+                            f"Execution breached effective token ceiling ({telemetry.total_model_tokens:,} > {effective_ceiling:,} tokens)"
+                        )
 
             # 6. Evaluate Git Impact & Check for Dependency Mutations
             patch_path = run_vault / "changes.patch"
@@ -1151,14 +1976,32 @@ class Orchestrator:
                     "reasoning_effort": exec_res.reasoning_effort if self.provider == "cloud" else "none",
                     "harness_executable": exec_res.harness_executable,
                     "harness_version": exec_res.harness_version,
+                    "transport_identity": getattr(getattr(self.runner, "transport", None), "__class__", type(None)).__name__,
+                    "transport_name": getattr(getattr(self.runner, "transport", None), "provider_name", "unknown"),
+                    "transport_allow_live_network": getattr(getattr(self.runner, "transport", None), "allow_live_network", False),
                 },
                 "isolation": {
                     "baseline_commit": baseline_commit,
                     "sandbox_path": str(sandbox_path),
                     "cold_start_verified": True,
-                    "engram_enabled": is_engram,
-                    "engram_binary_sha256": expected_sha or (self.expected_treatment_sha256 if is_engram else "NONE"),
-                    "mcp_server_status": "FAST_PATH_BYPASS" if getattr(exec_res, "fast_path_active", False) else ("ACTIVE" if is_engram else "DISABLED"),
+                    "engram_enabled": arm_identity.is_engram,
+                    "engram_binary_sha256": arm_identity.expected_sha256 or "NONE",
+                    "engram_binary_expected_sha256": arm_identity.expected_sha256,
+                    "engram_binary_actual_sha256": (hashlib.sha256(binary.read_bytes()).hexdigest().upper() if (arm_identity.is_engram and binary and binary.exists()) else None),
+                    "engram_binary_path": str(binary) if binary else None,
+                    "benchmark_candidate_version": self.benchmark_candidate_version,
+                    "requested_candidate_version": arm_identity.requested_candidate_version,
+                    "resolved_candidate_version": arm_identity.resolved_candidate_version,
+                    "candidate_verification_status": (
+                        "NOT_APPLICABLE" if not arm_identity.is_engram
+                        else ("VERIFIED" if (binary and binary.exists() and hashlib.sha256(binary.read_bytes()).hexdigest().upper() == arm_identity.expected_sha256) else "FAILED")
+                    ),
+                    "mcp_registration_verified": True if arm_identity.is_engram else False,
+                    "mcp_server_status": (
+                        "ADAPTIVE_BYPASS" if (getattr(exec_res, "adaptive_activation", {}) or {}).get("routed_mode") == "BYPASS"
+                        else ("FAST_PATH_BYPASS" if getattr(exec_res, "fast_path_active", False)
+                        else ("ACTIVE" if arm_identity.is_engram else "DISABLED"))
+                    ),
                     "dependency_fingerprint_verified": True,
                     "path_sanitized": exec_res.path_sanitized,
                     "sandbox_policy": getattr(exec_res, "sandbox_policy", self.runner.sandbox_policy),
@@ -1179,8 +2022,19 @@ class Orchestrator:
                     "timestamp": getattr(exec_res, "guard_decision_timestamp", None) or exec_res.completed_at,
                     "relevant_event_id": getattr(exec_res, "relevant_event_id", None),
                     "telemetry_valid": getattr(exec_res, "telemetry_valid", True)
+                },
+                "request_size_gate": {
+                    "gate_passed": getattr(exec_res, "request_size_gate_passed", True),
+                    "measured_request_tokens": getattr(exec_res, "measured_request_tokens", 0),
+                    "measured_request_bytes": getattr(exec_res, "measured_request_bytes", 0),
+                    "counting_method": getattr(exec_res, "request_counting_method", "tiktoken_o200k_base"),
+                    "limit_tokens": getattr(exec_res, "configured_request_size_limit", 60_000),
+                    "breakdown": getattr(exec_res, "request_size_breakdown", None)
                 }
             }
+
+            if getattr(exec_res, "adaptive_activation", None) is not None:
+                record["adaptive_activation"] = exec_res.adaptive_activation
 
             # 10. Validate strictly against schema
             validate_instance(record, self.telemetry_schema)
@@ -1199,6 +2053,8 @@ class Orchestrator:
             return record
 
         finally:
+            if arm_max_tokens_ceiling is not None:
+                self.runner.max_tokens_ceiling = orig_runner_ceiling
             # 12. Teardown sandbox safely
             teardown_sandbox(sandbox_path, self.golden_repo, preserve_archive=self.preserve_sandboxes, repo_type=self.repo_type)
             # 13. Re-verify golden dependency tree integrity post teardown
@@ -1295,8 +2151,7 @@ class Orchestrator:
         arm3_data = triad_summary["runs"].get("v154_arm3", {})
 
         def _is_accepted(run_dict: Dict[str, Any]) -> bool:
-            corr = run_dict.get("correctness", {})
-            return bool(corr.get("passed_all_requirements", False) and (corr.get("score", 0.0) == 1.0))
+            return Orchestrator.is_run_accepted(run_dict)
 
         arm1_acc = _is_accepted(arm1_data)
         arm2_acc = _is_accepted(arm2_data)
@@ -1526,18 +2381,732 @@ class Orchestrator:
             print(f"  - Reason: {p_res.get('explanation')}")
         print("=======================================================\n")
 
+    def run_tetrad(
+        self,
+        block_id: Optional[str] = None,
+        arm_order: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Executes a 4-arm matched block (Phase 5.4 Architecture) across:
+        1. arm_a_native: Native baseline without Engram
+        2. arm_b_cand3_always_on: Candidate 3 Always-On (quantifies unpruned payload overhead)
+        3. arm_c_cand4_always_on: Candidate 4 Always-On (proves engine remediation impact)
+        4. arm_d_cand4_adaptive: Candidate 4 Adaptive (proves complexity-aware routing value)
+        """
+        effective_block_id = block_id or f"tetrad_{self.pair_id}"
+        all_tetrad_arms = list(Orchestrator.ALL_TETRAD_ARMS)
+
+        if arm_order is not None:
+            order = Orchestrator.validate_tetrad_arm_order(arm_order, allow_none=False)
+        else:
+            rng = random.Random(self.seed)
+            order = list(all_tetrad_arms)
+            rng.shuffle(order)
+
+        tetrad_summary: Dict[str, Any] = {
+            "schema_version": "2.0.0",
+            "block_id": effective_block_id,
+            "task_id": self.task_id,
+            "seed": self.seed,
+            "order": order,
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "golden_dependency_fingerprint_verified": True,
+            "execution_policy": self.execution_policy,
+            "block_status": "RUNNING",
+            "global_tokens_ceiling": self.global_tokens_ceiling,
+            "cumulative_global_tokens": 0,
+            "acceptance": {},
+            "comparative_analysis": {},
+            "runs": {}
+        }
+
+        cumulative_global_tokens = 0
+        block_status = "COMPLETED"
+        is_budget_uncertain = False
+
+        for exec_order, arm in enumerate(order, start=1):
+            # Check global headroom reserve if global_tokens_ceiling is set
+            if self.global_tokens_ceiling is not None:
+                global_remaining = self.global_tokens_ceiling - cumulative_global_tokens
+                if global_remaining < self.headroom_reserve:
+                    print(
+                        f"\n[ORCHESTRATOR GLOBAL-BUDGET HALT] Global remaining tokens ({global_remaining:,}) "
+                        f"below headroom reserve ({self.headroom_reserve:,}). Halting tetrad."
+                    )
+                    block_status = "ABORTED_GLOBAL_BUDGET"
+                    for rem_idx in range(exec_order - 1, len(order)):
+                        rem_arm = order[rem_idx]
+                        skip_reason = (
+                            f"Execution halted: global token budget headroom reserve exhausted "
+                            f"(remaining {global_remaining:,} < reserve {self.headroom_reserve:,})"
+                        )
+                        tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                            rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_GLOBAL_BUDGET"
+                        )
+                    break
+
+                effective_arm_ceiling = min(self.max_tokens_ceiling, global_remaining)
+            else:
+                effective_arm_ceiling = self.max_tokens_ceiling
+
+            try:
+                run_data = self._execute_single_arm(
+                    arm=arm,
+                    exec_order=exec_order,
+                    arm_max_tokens_ceiling=effective_arm_ceiling
+                )
+                tetrad_summary["runs"][arm] = run_data
+
+                arm_telem = run_data.get("telemetry", {})
+                arm_status = run_data.get("execution_status", "SUCCESS")
+
+                # Validate telemetry integrity and fail-closed budget accounting
+                tel_valid, tel_reason, tel_data = Orchestrator.validate_telemetry_integrity(arm_telem)
+
+                # Over-ceiling safety violation detection:
+                # If an arm reports SUCCESS while consuming more tokens than its effective ceiling,
+                # this indicates a harness safety violation or an unconstrained test mock bypass.
+                if effective_arm_ceiling is not None and tel_valid and tel_data:
+                    raw_spent = tel_data.get("total_model_tokens", 0)
+                    if raw_spent > effective_arm_ceiling and arm_status == "SUCCESS":
+                        raise SafetyViolationError(
+                            f"Arm '{arm}' reported consumption ({raw_spent:,}) exceeding effective ceiling "
+                            f"({effective_arm_ceiling:,}) while reporting execution_status SUCCESS."
+                        )
+
+                # Accounting fail-closed check
+                if tel_valid and tel_data and isinstance(tel_data.get("total_model_tokens"), int) and tel_data["total_model_tokens"] > 0:
+                    spent = tel_data["total_model_tokens"]
+                    cumulative_global_tokens += spent
+                    is_budget_uncertain = False
+
+                    # Immediate fail-closed check: if global ceiling reached or headroom reserve exhausted, halt immediately
+                    if self.global_tokens_ceiling is not None and exec_order < len(order):
+                        rem_global = self.global_tokens_ceiling - cumulative_global_tokens
+                        if rem_global < self.headroom_reserve:
+                            halt_reason = (
+                                f"global token ceiling reached or exceeded ({cumulative_global_tokens:,} >= {self.global_tokens_ceiling:,})"
+                                if rem_global <= 0
+                                else f"global token budget headroom reserve exhausted (remaining {rem_global:,} < reserve {self.headroom_reserve:,})"
+                            )
+                            print(f"\n[ORCHESTRATOR GLOBAL-BUDGET HALT] Execution halted: {halt_reason}. Halting tetrad immediately.")
+                            block_status = "ABORTED_GLOBAL_BUDGET"
+                            for rem_idx in range(exec_order, len(order)):
+                                rem_arm = order[rem_idx]
+                                skip_reason = f"Execution halted: {halt_reason}"
+                                tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                                    rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_GLOBAL_BUDGET"
+                                )
+                            break
+                else:
+                    spent = None
+                    is_budget_uncertain = True
+                    run_data.setdefault("telemetry", {})["token_usage_trustworthy"] = False
+                    run_data["telemetry"]["budget_uncertain"] = True
+
+            except (SafetyViolationError, FileNotFoundError) as safety_err:
+                print(f"\n[ORCHESTRATOR SAFETY-VIOLATION] Arm {arm} encountered safety violation: {safety_err}. Halting block immediately.")
+                block_status = "ABORTED_SAFETY_FAILURE"
+                tetrad_summary["runs"][arm] = self._create_skipped_arm_record(
+                    arm, exec_order, f"Safety violation in {arm}: {safety_err}", execution_status="ABORTED_SAFETY_FAILURE"
+                )
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = f"Execution halted: safety failure in preceding arm {arm} ({safety_err})"
+                    tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_SAFETY_FAILURE"
+                    )
+                break
+            except KeyboardInterrupt:
+                print(f"\n[ORCHESTRATOR USER-CANCEL] Execution cancelled by user during arm {arm}.")
+                block_status = "ABORTED_USER_CANCEL"
+                tetrad_summary["runs"][arm] = self._create_skipped_arm_record(
+                    arm, exec_order, "Execution cancelled by user", execution_status="ABORTED_USER_CANCEL"
+                )
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = "Execution cancelled by user"
+                    tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_USER_CANCEL"
+                    )
+                break
+
+            # Fail closed immediately if budget is uncertain
+            if is_budget_uncertain:
+                print(
+                    f"\n[ORCHESTRATOR UNCERTAIN-BUDGET HALT] Arm {arm} produced uncertain/unverified token telemetry "
+                    f"({tel_reason}). Halting block immediately."
+                )
+                block_status = "ABORTED_UNCERTAIN_BUDGET"
+                tetrad_summary["global_budget_uncertain"] = True
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = f"Execution halted: uncertain token budget in preceding arm {arm} ({tel_reason})"
+                    tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_UNCERTAIN_BUDGET"
+                    )
+                break
+
+            arm_status = run_data.get("execution_status", "SUCCESS")
+            arm_telem = run_data.get("telemetry", {})
+            telem_valid = arm_telem.get("telemetry_valid", True)
+            is_accepted = Orchestrator.is_run_accepted(run_data)
+            is_failed = (arm_status != "SUCCESS") or (not telem_valid)
+
+            if self.execution_policy == "strict" and self.stop_on_failure and is_failed and exec_order < len(order):
+                print(f"\n[ORCHESTRATOR STOP-ON-FAILURE] Arm {arm} failed ({arm_status}). Halting tetrad execution immediately.")
+                block_status = "MUTUAL_ACCEPTANCE_FAILURE"
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = f"Execution halted: stop-on-failure triggered by {arm} ({arm_status})"
+                    tetrad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED"
+                    )
+                break
+            elif self.execution_policy == "diagnostic_continue" and is_failed:
+                print(
+                    f"\n[ORCHESTRATOR DIAGNOSTIC-CONTINUE] Arm {arm} failed ({arm_status}, accepted={is_accepted}). "
+                    f"Diagnostic continuation active; continuing to subsequent arms."
+                )
+
+        for arm in all_tetrad_arms:
+            if arm not in tetrad_summary["runs"]:
+                deferred_order = len(order) + 1
+                skip_reason = f"Execution deferred (not in execution order {order})"
+                tetrad_summary["runs"][arm] = self._create_skipped_arm_record(
+                    arm, deferred_order, skip_reason, execution_status="DEFERRED"
+                )
+
+        def _is_accepted(run_dict: Dict[str, Any]) -> bool:
+            return Orchestrator.is_run_accepted(run_dict)
+
+        for arm in all_tetrad_arms:
+            tetrad_summary["acceptance"][f"{arm}_accepted"] = _is_accepted(tetrad_summary["runs"].get(arm, {}))
+
+        all_arms_accepted = all(tetrad_summary["acceptance"].values())
+        tetrad_summary["acceptance"]["all_arms_accepted"] = all_arms_accepted
+
+        # Resolve final block_status
+        if block_status == "COMPLETED":
+            if self.execution_policy == "diagnostic_continue":
+                block_status = "DIAGNOSTIC_COMPLETE" if all_arms_accepted else "DIAGNOSTIC_INCOMPLETE"
+            else:
+                block_status = "ACCEPTED" if all_arms_accepted else "MUTUAL_ACCEPTANCE_FAILURE"
+
+        tetrad_summary["block_status"] = block_status
+        tetrad_summary["cumulative_global_tokens"] = cumulative_global_tokens
+        tetrad_summary["global_budget_uncertain"] = is_budget_uncertain
+
+        block_incomplete = not all_arms_accepted
+
+        # Pairwise Comparative Analyses:
+        runs = tetrad_summary["runs"]
+        arm_a = runs.get("arm_a_native", {})
+        arm_b = runs.get("arm_b_cand3_always_on", {})
+        arm_c = runs.get("arm_c_cand4_always_on", {})
+        arm_d = runs.get("arm_d_cand4_adaptive", {})
+
+        tetrad_summary["comparative_analysis"] = {
+            "cand4_adaptive_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_d, baseline_label="arm_a_native", treatment_label="arm_d_cand4_adaptive",
+                block_incomplete=block_incomplete
+            ),
+            "cand4_always_on_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_c, baseline_label="arm_a_native", treatment_label="arm_c_cand4_always_on",
+                block_incomplete=block_incomplete
+            ),
+            "cand3_always_on_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_b, baseline_label="arm_a_native", treatment_label="arm_b_cand3_always_on",
+                block_incomplete=block_incomplete
+            ),
+            "cand4_vs_cand3": self.compute_comparative_analysis(
+                ctrl_run=arm_b, treat_run=arm_c, baseline_label="arm_b_cand3_always_on", treatment_label="arm_c_cand4_always_on",
+                block_incomplete=block_incomplete
+            ),
+            "adaptive_vs_always_on": self.compute_comparative_analysis(
+                ctrl_run=arm_c, treat_run=arm_d, baseline_label="arm_c_cand4_always_on", treatment_label="arm_d_cand4_adaptive",
+                block_incomplete=block_incomplete
+            ),
+        }
+
+        # Write tetrad summary JSON
+        summary_path = self.output_dir / "tetrad_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(tetrad_summary, f, indent=2)
+
+        # Write tetrad markdown report
+        md_content = self.generate_tetrad_markdown_report(tetrad_summary)
+        report_path = self.output_dir / "tetrad_report.md"
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        return tetrad_summary
+
+    @staticmethod
+    def generate_tetrad_markdown_report(tetrad_summary: Dict[str, Any]) -> str:
+        """Generates a comprehensive 4-arm matched benchmark report."""
+        task_id = tetrad_summary.get("task_id", "")
+        block_id = tetrad_summary.get("block_id", "")
+        seed = tetrad_summary.get("seed", "")
+        order = " -> ".join(tetrad_summary.get("order", []))
+        model = tetrad_summary.get("model", "")
+        reasoning = tetrad_summary.get("reasoning_effort", "")
+
+        acceptance = tetrad_summary.get("acceptance", {})
+        runs = tetrad_summary.get("runs", {})
+        comp = tetrad_summary.get("comparative_analysis", {})
+
+        execution_policy = tetrad_summary.get("execution_policy", "strict")
+        block_status = tetrad_summary.get("block_status", "UNKNOWN")
+
+        lines = [
+            f"# Phase 5.4 4-Arm Benchmark Report: `{task_id}` (`{block_id}`)",
+            "",
+            f"- **Protocol:** Phase 5.4 4-Arm Evaluation Model",
+            f"- **Execution Policy:** `{execution_policy}`",
+            f"- **Block Status:** `{block_status}`",
+            f"- **Model:** `{model}` (Reasoning: `{reasoning}`)",
+            f"- **Execution Order:** {order} (Seed: `{seed}`)",
+            f"- **Golden Dependency Fingerprint:** Verified Intact",
+            "",
+            "---",
+        ]
+
+        if block_status == "ABORTED_UNCERTAIN_BUDGET":
+            lines.extend([
+                "",
+                "> [!CAUTION]",
+                "> **Global Budget Integrity Alert: Execution Aborted Due to Uncertain Budget**",
+                "> One or more arms produced missing, malformed, or unverified token telemetry.",
+                "> To prevent global budget leakage, the orchestrator halted execution fail-closed.",
+                "> All trailing arms were marked `SKIPPED_UNCERTAIN_BUDGET`.",
+                ""
+            ])
+
+        lines.extend([
+            "",
+            "## 1. Acceptance & Correctness Gate",
+            "",
+            "| Arm | Binary Candidate | Status | Expected SHA-256 | Actual SHA-256 | Correctness Score ($C$) | Requirements Passed | Gate Verdict |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ])
+
+        arm_labels = [
+            ("arm_a_native", "Native (None)", "NATIVE"),
+            ("arm_b_cand3_always_on", "Candidate 3", "ALWAYS_ON"),
+            ("arm_c_cand4_always_on", "Candidate 4", "ALWAYS_ON"),
+            ("arm_d_cand4_adaptive", "Candidate 4", "ADAPTIVE"),
+        ]
+
+        for arm_key, candidate_lbl, status_lbl in arm_labels:
+            arm_data = runs.get(arm_key, {})
+            iso = arm_data.get("isolation", {})
+            res_cand = iso.get("resolved_candidate_version")
+            candidate_map = {
+                "native": "Native (None)",
+                "cand3": "Candidate 3",
+                "cand4": "Candidate 4",
+                "cand4_1": "Candidate 4.1",
+                "cand4_2": "Candidate 4.2",
+            }
+            display_candidate = candidate_map.get(res_cand, candidate_lbl)
+            exp_sha = (iso.get("engram_binary_expected_sha256") or "N/A")[:8]
+            act_sha = (iso.get("engram_binary_actual_sha256") or "N/A")[:8]
+            corr = arm_data.get("correctness", {})
+            score = corr.get("score")
+            passed = corr.get("passed_all_requirements")
+            arm_status = arm_data.get("execution_status", "")
+            arm_accepted = acceptance.get(f"{arm_key}_accepted", False)
+
+            if score is not None:
+                score_str = f"{score:.2f}"
+            elif arm_status:
+                score_str = arm_status
+            else:
+                score_str = "SKIPPED"
+
+            passed_str = str(passed) if passed is not None else "NOT_EVALUATED"
+
+            if "SKIPPED" in arm_status or "DEFERRED" in arm_status:
+                verdict = arm_status
+            elif arm_accepted:
+                verdict = "PASS"
+            else:
+                verdict = "FAIL"
+
+            lines.append(f"| **{arm_key}** | {display_candidate} | {status_lbl} | `{exp_sha}` | `{act_sha}` | {score_str} | {passed_str} | {verdict} |")
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 2. Comparative Analysis & Efficiency Claims",
+            "",
+            f"### A. Candidate 4 Adaptive vs Native: `{comp.get('cand4_adaptive_vs_native', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand4_adaptive_vs_native', {}).get('explanation', '')}",
+            "",
+            f"### B. Candidate 4 Always-On vs Native: `{comp.get('cand4_always_on_vs_native', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand4_always_on_vs_native', {}).get('explanation', '')}",
+            "",
+            f"### C. Candidate 3 Always-On vs Native: `{comp.get('cand3_always_on_vs_native', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand3_always_on_vs_native', {}).get('explanation', '')}",
+            "",
+            f"### D. Candidate 4 vs Candidate 3 (Engine Bounding Impact): `{comp.get('cand4_vs_cand3', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand4_vs_cand3', {}).get('explanation', '')}",
+            "",
+            f"### E. Adaptive vs Always-On (Routing Optimization): `{comp.get('adaptive_vs_always_on', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('adaptive_vs_always_on', {}).get('explanation', '')}",
+            "",
+            "---",
+            "*Report generated deterministically by Engram Phase 5.4 4-Arm Benchmark Harness.*",
+            ""
+        ])
+
+        return "\n".join(lines)
+
+    def run_pentad(
+        self,
+        block_id: Optional[str] = None,
+        arm_order: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Executes a 5-arm matched pentad block (Phase 5.8.1 Architecture) across:
+        1. arm_a_native: Native baseline without Engram
+        2. arm_b_cand3: Candidate 3 Always-On (v1.5.1 baseline, flat context)
+        3. arm_c_cand42_always_on: Candidate 4.2 Always-On (v1.5.4 engine without adaptive routing)
+        4. arm_d_cand42_adaptive: Candidate 4.2 Adaptive (v1.5.4 engine with adaptive complexity gating)
+        5. arm_e_cand5_optimized: Candidate 5 Optimized (v1.5.4 engine with 7 Token-Efficiency Optimizations)
+        """
+        effective_block_id = block_id or f"pentad_{self.pair_id}"
+        all_pentad_arms = list(Orchestrator.ALL_PENTAD_ARMS)
+
+        # Phase 5.9.1.1 Mandatory Safety Guard:
+        # All pentad benchmark arms must execute via ControlledAgentRuntime and ProviderTransport.
+        # Legacy Codex subprocess dispatch is strictly forbidden in live pentad runs.
+        if not self.is_dry_run and self.provider == "cloud":
+            raise SafetyViolationError(
+                "FATAL: Pentad benchmark execution requires a controlled provider transport "
+                "(provider in ['controlled', 'openai', 'mock']). Legacy 'cloud' subprocess dispatch "
+                "is strictly forbidden in live pentad runs."
+            )
+
+        if arm_order is not None:
+            order = Orchestrator.validate_pentad_arm_order(arm_order, allow_none=False)
+        else:
+            rng = random.Random(self.seed)
+            order = list(all_pentad_arms)
+            rng.shuffle(order)
+
+        pentad_summary: Dict[str, Any] = {
+            "schema_version": "2.1.0",
+            "block_id": effective_block_id,
+            "task_id": self.task_id,
+            "seed": self.seed,
+            "order": order,
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "golden_dependency_fingerprint_verified": True,
+            "execution_policy": self.execution_policy,
+            "block_status": "RUNNING",
+            "global_tokens_ceiling": self.global_tokens_ceiling,
+            "cumulative_global_tokens": 0,
+            "acceptance": {},
+            "comparative_analysis": {},
+            "runs": {}
+        }
+
+        cumulative_global_tokens = 0
+        block_status = "COMPLETED"
+        is_budget_uncertain = False
+
+        for exec_order, arm in enumerate(order, start=1):
+            if self.global_tokens_ceiling is not None:
+                global_remaining = self.global_tokens_ceiling - cumulative_global_tokens
+                if global_remaining < self.headroom_reserve:
+                    print(
+                        f"\n[ORCHESTRATOR GLOBAL-BUDGET HALT] Global remaining tokens ({global_remaining:,}) "
+                        f"below headroom reserve ({self.headroom_reserve:,}). Halting pentad."
+                    )
+                    block_status = "ABORTED_GLOBAL_BUDGET"
+                    for rem_idx in range(exec_order - 1, len(order)):
+                        rem_arm = order[rem_idx]
+                        skip_reason = (
+                            f"Execution halted: global token budget headroom reserve exhausted "
+                            f"(remaining {global_remaining:,} < reserve {self.headroom_reserve:,})"
+                        )
+                        pentad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                            rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_GLOBAL_BUDGET"
+                        )
+                    break
+
+                effective_arm_ceiling = min(self.max_tokens_ceiling, global_remaining)
+            else:
+                effective_arm_ceiling = self.max_tokens_ceiling
+
+            try:
+                run_data = self._execute_single_arm(
+                    arm=arm,
+                    exec_order=exec_order,
+                    arm_max_tokens_ceiling=effective_arm_ceiling
+                )
+                pentad_summary["runs"][arm] = run_data
+
+                arm_telem = run_data.get("telemetry", {})
+                arm_status = run_data.get("execution_status", "SUCCESS")
+
+                tel_valid, tel_reason, tel_data = Orchestrator.validate_telemetry_integrity(arm_telem)
+
+                if effective_arm_ceiling is not None and tel_valid and tel_data:
+                    raw_spent = tel_data.get("total_model_tokens", 0)
+                    if raw_spent > effective_arm_ceiling and arm_status == "SUCCESS":
+                        print(
+                            f"\n[ORCHESTRATOR SAFETY VIOLATION] Arm '{arm}' consumed {raw_spent:,} tokens, "
+                            f"exceeding ceiling ({effective_arm_ceiling:,}). Overriding status to TOKEN_CEILING_BREACHED."
+                        )
+                        arm_status = "TOKEN_CEILING_BREACHED"
+                        run_data["execution_status"] = arm_status
+                        run_data["stop_reason"] = "TOKEN_CEILING_BREACHED"
+                        run_data["token_ceiling_breached"] = True
+
+                if not tel_valid:
+                    is_budget_uncertain = True
+
+                if tel_valid and tel_data:
+                    spent = tel_data.get("total_model_tokens", 0)
+                else:
+                    spent = arm_telem.get("total_model_tokens", 0)
+
+                cumulative_global_tokens += spent
+
+            except Exception as e:
+                print(f"\n[ORCHESTRATOR ERROR] Execution failed for arm {arm}: {e}")
+                err_run = self._create_skipped_arm_record(
+                    arm, exec_order, f"Execution failed with exception: {e}", execution_status="EXECUTION_ERROR"
+                )
+                pentad_summary["runs"][arm] = err_run
+                arm_status = "EXECUTION_ERROR"
+
+            is_accepted = Orchestrator.is_run_accepted(pentad_summary["runs"].get(arm, {}))
+            is_failed = not is_accepted or arm_status in (
+                "FAILED", "TIMEOUT", "EXECUTION_ERROR", "TOKEN_CEILING_BREACHED",
+                "PRE_DISPATCH_HEADROOM_EXHAUSTED", "TELEMETRY_INVALID", "PROCESS_CRASH"
+            )
+
+            if is_budget_uncertain and self.global_tokens_ceiling is not None:
+                block_status = "ABORTED_UNCERTAIN_BUDGET"
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = f"Execution halted: preceding arm '{arm}' produced invalid or unverified telemetry"
+                    pentad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED_UNCERTAIN_BUDGET"
+                    )
+                break
+            elif self.stop_on_failure and is_failed:
+                block_status = f"HALTED_ON_FAILURE_{arm.upper()}"
+                for rem_idx in range(exec_order, len(order)):
+                    rem_arm = order[rem_idx]
+                    skip_reason = f"Execution halted after failure in prior arm '{arm}' (status: {arm_status}, accepted: {is_accepted})"
+                    pentad_summary["runs"][rem_arm] = self._create_skipped_arm_record(
+                        rem_arm, rem_idx + 1, skip_reason, execution_status="SKIPPED"
+                    )
+                break
+            elif self.execution_policy == "diagnostic_continue" and is_failed:
+                print(
+                    f"\n[ORCHESTRATOR DIAGNOSTIC-CONTINUE] Arm {arm} failed ({arm_status}, accepted={is_accepted}). "
+                    f"Diagnostic continuation active; continuing to subsequent arms."
+                )
+
+        for arm in all_pentad_arms:
+            if arm not in pentad_summary["runs"]:
+                deferred_order = len(order) + 1
+                skip_reason = f"Execution deferred (not in execution order {order})"
+                pentad_summary["runs"][arm] = self._create_skipped_arm_record(
+                    arm, deferred_order, skip_reason, execution_status="DEFERRED"
+                )
+
+        def _is_accepted(run_dict: Dict[str, Any]) -> bool:
+            return Orchestrator.is_run_accepted(run_dict)
+
+        for arm in all_pentad_arms:
+            pentad_summary["acceptance"][f"{arm}_accepted"] = _is_accepted(pentad_summary["runs"].get(arm, {}))
+
+        all_arms_accepted = all(pentad_summary["acceptance"].values())
+        pentad_summary["acceptance"]["all_arms_accepted"] = all_arms_accepted
+
+        if block_status == "COMPLETED":
+            if self.execution_policy == "diagnostic_continue":
+                block_status = "DIAGNOSTIC_COMPLETE" if all_arms_accepted else "DIAGNOSTIC_INCOMPLETE"
+            else:
+                block_status = "ACCEPTED" if all_arms_accepted else "MUTUAL_ACCEPTANCE_FAILURE"
+
+        pentad_summary["block_status"] = block_status
+        pentad_summary["cumulative_global_tokens"] = cumulative_global_tokens
+        pentad_summary["global_budget_uncertain"] = is_budget_uncertain
+
+        block_incomplete = not all_arms_accepted
+
+        runs = pentad_summary["runs"]
+        arm_a = runs.get("arm_a_native", {})
+        arm_b = runs.get("arm_b_cand3", {})
+        arm_c = runs.get("arm_c_cand42_always_on", {})
+        arm_d = runs.get("arm_d_cand42_adaptive", {})
+        arm_e = runs.get("arm_e_cand5_optimized", {})
+
+        pentad_summary["comparative_analysis"] = {
+            "cand5_optimized_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_e, baseline_label="arm_a_native", treatment_label="arm_e_cand5_optimized",
+                block_incomplete=block_incomplete
+            ),
+            "cand5_optimized_vs_cand42_adaptive": self.compute_comparative_analysis(
+                ctrl_run=arm_d, treat_run=arm_e, baseline_label="arm_d_cand42_adaptive", treatment_label="arm_e_cand5_optimized",
+                block_incomplete=block_incomplete
+            ),
+            "cand5_optimized_vs_cand42_always_on": self.compute_comparative_analysis(
+                ctrl_run=arm_c, treat_run=arm_e, baseline_label="arm_c_cand42_always_on", treatment_label="arm_e_cand5_optimized",
+                block_incomplete=block_incomplete
+            ),
+            "cand5_optimized_vs_cand3": self.compute_comparative_analysis(
+                ctrl_run=arm_b, treat_run=arm_e, baseline_label="arm_b_cand3", treatment_label="arm_e_cand5_optimized",
+                block_incomplete=block_incomplete
+            ),
+            "cand42_adaptive_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_d, baseline_label="arm_a_native", treatment_label="arm_d_cand42_adaptive",
+                block_incomplete=block_incomplete
+            ),
+            "cand42_always_on_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_c, baseline_label="arm_a_native", treatment_label="arm_c_cand42_always_on",
+                block_incomplete=block_incomplete
+            ),
+            "cand3_vs_native": self.compute_comparative_analysis(
+                ctrl_run=arm_a, treat_run=arm_b, baseline_label="arm_a_native", treatment_label="arm_b_cand3",
+                block_incomplete=block_incomplete
+            ),
+        }
+
+        # Write pentad summary JSON
+        summary_path = self.output_dir / "pentad_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(pentad_summary, f, indent=2)
+
+        # Write pentad markdown report
+        md_content = self.generate_pentad_markdown_report(pentad_summary)
+        report_path = self.output_dir / "pentad_report.md"
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        return pentad_summary
+
+    @staticmethod
+    def generate_pentad_markdown_report(pentad_summary: Dict[str, Any]) -> str:
+        """Generates a comprehensive 5-arm matched benchmark report."""
+        task_id = pentad_summary.get("task_id", "")
+        block_id = pentad_summary.get("block_id", "")
+        seed = pentad_summary.get("seed", "")
+        order = " -> ".join(pentad_summary.get("order", []))
+        model = pentad_summary.get("model", "")
+        reasoning = pentad_summary.get("reasoning_effort", "")
+
+        acceptance = pentad_summary.get("acceptance", {})
+        runs = pentad_summary.get("runs", {})
+        comp = pentad_summary.get("comparative_analysis", {})
+
+        execution_policy = pentad_summary.get("execution_policy", "strict")
+        block_status = pentad_summary.get("block_status", "UNKNOWN")
+
+        lines = [
+            f"# Phase 5.8.1 5-Arm Benchmark Report: `{task_id}` (`{block_id}`)",
+            "",
+            f"- **Protocol:** Phase 5.8.1 5-Arm Pentad Evaluation Model",
+            f"- **Execution Policy:** `{execution_policy}`",
+            f"- **Block Status:** `{block_status}`",
+            f"- **Model:** `{model}` (Reasoning: `{reasoning}`)",
+            f"- **Execution Order:** {order} (Seed: `{seed}`)",
+            f"- **Golden Dependency Fingerprint:** Verified Intact",
+            "",
+            "---",
+        ]
+
+        if block_status == "ABORTED_UNCERTAIN_BUDGET":
+            lines.extend([
+                "",
+                "> [!CAUTION]",
+                "> **Global Budget Integrity Alert: Execution Aborted Due to Uncertain Budget**",
+                "> One or more arms produced missing, malformed, or unverified token telemetry.",
+                "> To prevent global budget leakage, the orchestrator halted execution fail-closed.",
+                "> All trailing arms were marked `SKIPPED_UNCERTAIN_BUDGET`.",
+                ""
+            ])
+
+        lines.extend([
+            "",
+            "## 1. Acceptance & Correctness Gate",
+            "",
+            "| Arm | Binary Candidate | Status | Expected SHA-256 | Actual SHA-256 | Correctness Score ($C$) | Requirements Passed | Gate Verdict |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ])
+
+        arm_labels = [
+            ("arm_a_native", "Native (None)", "NATIVE"),
+            ("arm_b_cand3", "Candidate 3", "ALWAYS_ON"),
+            ("arm_c_cand42_always_on", "Candidate 4.2", "ALWAYS_ON"),
+            ("arm_d_cand42_adaptive", "Candidate 4.2", "ADAPTIVE"),
+            ("arm_e_cand5_optimized", "Candidate 5", "OPTIMIZED_ADAPTIVE"),
+        ]
+
+        for arm_key, candidate_lbl, status_lbl in arm_labels:
+            run_dict = runs.get(arm_key, {})
+            iso = run_dict.get("isolation", {})
+            corr = run_dict.get("correctness", {})
+            reqs = corr.get("requirements", {})
+
+            exp_sha = iso.get("engram_binary_expected_sha256") or "NONE"
+            act_sha = iso.get("engram_binary_actual_sha256") or "NONE"
+            score = corr.get("score", 0.0)
+            req_str = f"{sum(1 for v in reqs.values() if v == 'PASSED')}/{len(reqs)}" if reqs else "N/A"
+            gate_verdict = "ACCEPTED" if acceptance.get(f"{arm_key}_accepted", False) else "REJECTED"
+
+            lines.append(
+                f"| `{arm_key}` | {candidate_lbl} | `{status_lbl}` | `{exp_sha[:10]}...` | `{act_sha[:10]}...` | `{score}` | `{req_str}` | **`{gate_verdict}`** |"
+            )
+
+        lines.extend([
+            "",
+            "## 2. Comparative Analysis Matrix",
+            "",
+            f"### A. Candidate 5 Optimized vs Native Baseline: `{comp.get('cand5_optimized_vs_native', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand5_optimized_vs_native', {}).get('explanation', '')}",
+            "",
+            f"### B. Candidate 5 Optimized vs Candidate 4.2 Adaptive: `{comp.get('cand5_optimized_vs_cand42_adaptive', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand5_optimized_vs_cand42_adaptive', {}).get('explanation', '')}",
+            "",
+            f"### C. Candidate 5 Optimized vs Candidate 4.2 Always-On: `{comp.get('cand5_optimized_vs_cand42_always_on', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand5_optimized_vs_cand42_always_on', {}).get('explanation', '')}",
+            "",
+            f"### D. Candidate 5 Optimized vs Candidate 3: `{comp.get('cand5_optimized_vs_cand3', {}).get('verdict', 'UNKNOWN')}`",
+            f"- {comp.get('cand5_optimized_vs_cand3', {}).get('explanation', '')}",
+            "",
+            "---",
+            "*Report generated deterministically by Engram Phase 5.8.1 5-Arm Pentad Benchmark Harness.*",
+            ""
+        ])
+
+        return "\n".join(lines)
+
     def run_single(self, arm: str) -> Dict[str, Any]:
         """
         Executes a strictly isolated single arm (Remediation B for smoke tests).
         Executes exactly one requested arm without invoking control or companion arms.
         """
-        allowed_arms = {"control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3"}
+        allowed_arms = {
+            "control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3",
+            "arm_a_native", "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive"
+        }
         if arm not in allowed_arms:
             raise ValueError(f"Invalid arm '{arm}' for single mode. Allowed arms: {sorted(allowed_arms)}")
 
         run_data = self._execute_single_arm(arm=arm, exec_order=1)
-        corr = run_data.get("correctness", {})
-        arm_accepted = bool(corr.get("passed_all_requirements", False) and (corr.get("score", 0.0) == 1.0))
+        arm_accepted = Orchestrator.is_run_accepted(run_data)
 
         single_summary: Dict[str, Any] = {
             "schema_version": "2.0.0",
@@ -1614,16 +3183,17 @@ class Orchestrator:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Reproducible Matched-Pair and Triad Benchmark Orchestrator")
-    parser.add_argument("--mode", choices=["pair", "triad", "single"], default="pair", help="Execution mode (pair, triad, or single)")
+    parser = argparse.ArgumentParser(description="Reproducible Matched-Pair, Triad, Tetrad, and Pentad Benchmark Orchestrator")
+    parser.add_argument("--mode", choices=["pair", "triad", "single", "tetrad", "pentad"], default="pair", help="Execution mode (pair, triad, single, tetrad, or pentad)")
     parser.add_argument("--task", default="task_a_typo", help="Task ID or path to task JSON")
     parser.add_argument("--pair", default="pair_01", help="Matched pair identifier (e.g. pair_01)")
     parser.add_argument("--block", default=None, help="Triad block ID (e.g. block_01 .. block_10)")
     parser.add_argument("--arm-order", "--arms", dest="arm_order", default=None, help="Comma-separated arm order (e.g. v154_arm3 for single, or v154_arm3,baseline_arm1 for triad)")
-    parser.add_argument("--provider", choices=["cloud", "ollama", "lmstudio"], default="cloud", help="Execution provider: cloud, ollama, or lmstudio (default: cloud)")
+    parser.add_argument("--provider", choices=["controlled", "openai", "mock", "cloud", "ollama", "lmstudio"], default="controlled", help="Execution provider: controlled, openai, mock, cloud, ollama, or lmstudio (default: controlled)")
     parser.add_argument("--model", default="gpt-5.6-luna", help="Explicit model identifier")
     parser.add_argument("--reasoning", default="medium", help="Explicit reasoning effort (low/medium/high/xhigh/max)")
     parser.add_argument("--dry-run", action="store_true", help="Simulate execution without model API consumption")
+    parser.add_argument("--candidate-version", choices=["native", "cand3", "cand4", "cand4_1", "cand4_2", "cand5"], default=None, help="Explicit candidate version selection (fail-closed: native, cand3, cand4, cand4_1, cand4_2, cand5)")
     parser.add_argument("--dependency-strategy", choices=["copy", "junction", "none"], default="copy", help="Dependency isolation mode (default: copy for full write isolation)")
     parser.add_argument("--preserve-sandboxes", action="store_true", help="Preserve sandbox folders")
     parser.add_argument("--seed", type=int, default=None, help="Randomization seed")
@@ -1635,11 +3205,23 @@ def main():
     parser.add_argument("--headroom-reserve", type=int, default=45_000, help="Pre-dispatch token headroom reserve in tokens (default: 45,000)")
     parser.add_argument("--golden-repo", "--source-repo", dest="golden_repo", default=None, help="Explicit path to source/golden repository")
     parser.add_argument("--output-dir", default=None, help="Explicit target directory for benchmark output reports")
-    parser.add_argument("--no-stop-on-failure", action="store_true", help="Do not halt block if an arm fails")
+    parser.add_argument("--no-stop-on-failure", action="store_true", help="Deprecated legacy alias for --execution-policy diagnostic_continue")
+    parser.add_argument("--execution-policy", choices=["strict", "diagnostic_continue"], default=None, help="Benchmark execution policy: 'strict' (default, stop on any failure) or 'diagnostic_continue' (continue subsequent arms for diagnosis)")
+    parser.add_argument("--global-tokens-ceiling", type=int, default=None, help="Global token ceiling across all arms in the block (default: None, unbounded block ceiling)")
     args = parser.parse_args()
+
+    effective_policy, stop_on_failure = resolve_execution_policy(
+        execution_policy=args.execution_policy,
+        no_stop_on_failure=args.no_stop_on_failure,
+        parser=parser,
+    )
 
     if args.mode == "single":
         mode = "single"
+    elif args.mode == "pentad":
+        mode = "pentad"
+    elif args.mode == "tetrad":
+        mode = "tetrad"
     elif args.block or args.mode == "triad":
         mode = "triad"
     else:
@@ -1656,20 +3238,48 @@ def main():
         print(f"Error: Task configuration not found: {task_name}")
         sys.exit(1)
 
-    arm_order = [a.strip() for a in args.arm_order.split(",")] if args.arm_order else None
-
-    if mode == "single":
+    if mode == "pentad":
+        if args.arm_order is not None:
+            if not args.arm_order.strip():
+                print("Error: Explicit --arm-order cannot be empty for pentad mode.")
+                sys.exit(1)
+            try:
+                arm_order = Orchestrator.validate_pentad_arm_order(args.arm_order, allow_none=False)
+            except SafetyViolationError as e:
+                print(f"Error: Invalid pentad arm order: {e}")
+                sys.exit(1)
+        else:
+            arm_order = None
+    elif mode == "tetrad":
+        if args.arm_order is not None:
+            if not args.arm_order.strip():
+                print("Error: Explicit --arm-order cannot be empty for tetrad mode.")
+                sys.exit(1)
+            try:
+                arm_order = Orchestrator.validate_tetrad_arm_order(args.arm_order, allow_none=False)
+            except SafetyViolationError as e:
+                print(f"Error: Invalid tetrad arm order: {e}")
+                sys.exit(1)
+        else:
+            arm_order = None
+    elif mode == "single":
+        arm_order = [a.strip() for a in args.arm_order.split(",")] if args.arm_order else None
         if not arm_order or len(arm_order) == 0:
             print("Error: Single mode requires exactly one arm specified via --arms (e.g. --arms v154_arm3). Received zero arms.")
             sys.exit(1)
         if len(arm_order) > 1:
             print(f"Error: Single mode requires exactly one arm specified via --arms. Received multiple arms: {arm_order}")
             sys.exit(1)
-        allowed_arms = {"control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3"}
+        allowed_arms = {
+            "control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3",
+            "arm_a_native", "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_d_cand4_adaptive"
+        }
         target_arm = arm_order[0]
         if target_arm not in allowed_arms:
             print(f"Error: Invalid arm identifier for single mode: '{target_arm}'. Allowed arms: {sorted(allowed_arms)}")
             sys.exit(1)
+    else:
+        arm_order = [a.strip() for a in args.arm_order.split(",")] if args.arm_order else None
 
     orchestrator = Orchestrator(
         task_config_path=task_path,
@@ -1686,10 +3296,13 @@ def main():
         engram_v151_bin=Path(args.engram_v151_bin) if args.engram_v151_bin else None,
         engram_v154_bin=Path(args.engram_v154_bin) if args.engram_v154_bin else None,
         expected_v154_sha256=args.expected_v154_sha256,
-        stop_on_failure=(not args.no_stop_on_failure),
+        stop_on_failure=stop_on_failure,
         max_tokens_ceiling=args.max_tokens_ceiling,
         headroom_reserve=args.headroom_reserve,
         golden_repo=Path(args.golden_repo) if args.golden_repo else None,
+        candidate_version=args.candidate_version,
+        execution_policy=effective_policy,
+        global_tokens_ceiling=args.global_tokens_ceiling,
     )
 
     if mode == "single":
@@ -1702,6 +3315,16 @@ def main():
         print("\nStage 1 Core Triad Execution Finished!")
         print(f"Summary saved to: {orchestrator.output_dir / 'triad_summary.json'}")
         print(f"Report saved to:  {orchestrator.output_dir / 'triad_report.md'}")
+    elif mode == "pentad":
+        results = orchestrator.run_pentad(block_id=args.block, arm_order=arm_order)
+        print("\nPhase 5.8.1 5-Arm Pentad Execution Finished!")
+        print(f"Summary saved to: {orchestrator.output_dir / 'pentad_summary.json'}")
+        print(f"Report saved to:  {orchestrator.output_dir / 'pentad_report.md'}")
+    elif mode == "tetrad":
+        results = orchestrator.run_tetrad(block_id=args.block, arm_order=arm_order)
+        print("\nPhase 5.4 4-Arm Tetrad Execution Finished!")
+        print(f"Summary saved to: {orchestrator.output_dir / 'tetrad_summary.json'}")
+        print(f"Report saved to:  {orchestrator.output_dir / 'tetrad_report.md'}")
     else:
         results = orchestrator.run_pair(arm_order=arm_order)
         print("\nMatched Pair Execution Finished!")

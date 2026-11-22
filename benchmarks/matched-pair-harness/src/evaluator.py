@@ -230,7 +230,7 @@ class Evaluator:
         if an agent runs `git add`.
         """
         # 1. Get changed files from git status --porcelain
-        cmd_status = ["git", "status", "--porcelain"]
+        cmd_status = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "status", "--porcelain"]
         res_status = subprocess.run(cmd_status, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         changed_files = []
         untracked_files = []
@@ -257,20 +257,53 @@ class Evaluator:
                 untracked_files.append(norm_fpath)
 
         # 2. Get numstat covering BOTH staged and unstaged changes against HEAD
-        cmd_diff = ["git", "diff", "HEAD", "--numstat"]
+        cmd_diff = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "diff", "HEAD", "--numstat"]
         res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if res_diff.returncode != 0:
             # Fallback if HEAD does not exist (e.g. bare initialized repo in synthetic tests)
-            cmd_diff = ["git", "diff", "--numstat"]
+            cmd_diff = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "diff", "--numstat"]
             res_diff = subprocess.run(cmd_diff, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
         insertions = 0
         deletions = 0
+        spurious_deleted_files = set()
+
         for line in res_diff.stdout.splitlines():
-            parts = line.split()
+            parts = line.split(maxsplit=2)
             if len(parts) >= 3 and parts[0].isdigit() and parts[1].isdigit():
-                insertions += int(parts[0])
-                deletions += int(parts[1])
+                file_ins = int(parts[0])
+                file_del = int(parts[1])
+                fpath_diff = parts[2].strip().strip('"').replace("\\", "/")
+                if (
+                    fpath_diff.startswith(".engram/")
+                    or fpath_diff == ".engram"
+                    or fpath_diff.startswith(".github/")
+                    or fpath_diff == ".github"
+                ):
+                    continue
+
+                # Distinguish actual modifications from evaluator-generated path failures:
+                # If git diff reports all lines deleted, verify if the file still exists on disk
+                # and matches HEAD.
+                upath = sandbox_path / fpath_diff
+                if file_ins == 0 and file_del > 0 and upath.is_file():
+                    cmd_show = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "show", f"HEAD:{fpath_diff}"]
+                    res_show = subprocess.run(cmd_show, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True)
+                    if res_show.returncode == 0:
+                        try:
+                            if upath.read_bytes() == res_show.stdout:
+                                # Spurious deletion caused by git working-tree path failure: ignore
+                                spurious_deleted_files.add(fpath_diff)
+                                if fpath_diff in changed_files:
+                                    changed_files.remove(fpath_diff)
+                                continue
+                        except Exception:
+                            pass
+
+                insertions += file_ins
+                deletions += file_del
+                if fpath_diff not in changed_files and fpath_diff not in spurious_deleted_files:
+                    changed_files.append(fpath_diff)
 
         # Account for insertions in untracked files
         for uf in untracked_files:
@@ -283,13 +316,31 @@ class Evaluator:
                     pass
 
         # 3. Export full patch covering BOTH staged and unstaged changes against HEAD
-        cmd_patch = ["git", "diff", "HEAD"]
+        cmd_patch = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "diff", "HEAD"]
         res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if res_patch.returncode != 0:
-            cmd_patch = ["git", "diff"]
+            cmd_patch = ["git", "-c", "core.longpaths=true", "-c", "core.quotepath=false", "diff"]
             res_patch = subprocess.run(cmd_patch, cwd=sandbox_path, stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
         patch_text = res_patch.stdout
+
+        # Filter out spurious deletion diff chunks if any were generated
+        if spurious_deleted_files:
+            filtered_chunks = []
+            current_chunk = []
+            skip_chunk = False
+            for line in patch_text.splitlines(keepends=True):
+                if line.startswith("diff --git"):
+                    if current_chunk and not skip_chunk:
+                        filtered_chunks.extend(current_chunk)
+                    current_chunk = [line]
+                    skip_chunk = any(f"b/{sp_f}" in line or f"a/{sp_f}" in line for sp_f in spurious_deleted_files)
+                else:
+                    current_chunk.append(line)
+            if current_chunk and not skip_chunk:
+                filtered_chunks.extend(current_chunk)
+            patch_text = "".join(filtered_chunks)
+
         for uf in untracked_files:
             upath = sandbox_path / uf
             if upath.is_file():

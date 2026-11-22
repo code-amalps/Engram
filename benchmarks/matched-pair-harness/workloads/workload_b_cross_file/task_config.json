@@ -1,0 +1,11 @@
+{
+  "workload_id": "workload_b_cross_file",
+  "title": "Workload B: Cross-file implementation",
+  "prompt": "Add is_active boolean field (default True) to Account model in src/models.py and filter by is_active in AccountService.get_active_accounts in src/service.py.",
+  "complexity": "MODERATE",
+  "verification_command": "python -m unittest tests/test_service.py",
+  "target_files": [
+    "src/models.py",
+    "src/service.py"
+  ]
+}

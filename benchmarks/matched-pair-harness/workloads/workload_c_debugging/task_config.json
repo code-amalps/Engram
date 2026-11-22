@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload_c_debugging",
+  "title": "Workload C: Debugging",
+  "prompt": "Fix safe_divide in src/indexer.py to safely handle empty lists and all-zero lists without ZeroDivisionError.",
+  "complexity": "MODERATE",
+  "verification_command": "python -m unittest tests/test_indexer.py",
+  "target_file": "src/indexer.py"
+}

@@ -22,7 +22,7 @@
     "run_id": { "type": "string" },
     "pair_id": { "type": "string" },
     "task_id": { "type": "string" },
-    "arm": { "type": "string", "enum": ["control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3"] },
+    "arm": { "type": "string", "enum": ["control_A", "treatment_B", "baseline_arm1", "v151_arm2", "v154_arm3", "arm_a_native", "arm_b_cand3", "arm_b_cand3_always_on", "arm_c_cand4_always_on", "arm_c_cand42_always_on", "arm_d_cand4_adaptive", "arm_d_cand42_adaptive", "arm_e_cand5_optimized"] },
     "execution_order_in_pair": { "type": "integer", "minimum": 1, "maximum": 10 },
     "execution_status": { "type": "string" },
     "error_message": { "type": ["string", "null"] },
@@ -64,6 +64,14 @@
         "cold_start_verified": { "type": "boolean" },
         "engram_enabled": { "type": "boolean" },
         "engram_binary_sha256": { "type": "string" },
+        "engram_binary_expected_sha256": { "type": ["string", "null"] },
+        "engram_binary_actual_sha256": { "type": ["string", "null"] },
+        "engram_binary_path": { "type": ["string", "null"] },
+        "benchmark_candidate_version": { "type": ["string", "null"] },
+        "requested_candidate_version": { "type": ["string", "null"] },
+        "resolved_candidate_version": { "type": ["string", "null"] },
+        "candidate_verification_status": { "type": ["string", "null"] },
+        "mcp_registration_verified": { "type": ["boolean", "null"] },
         "mcp_server_status": { "type": "string" },
         "dependency_fingerprint_verified": { "type": "boolean" },
         "path_sanitized": { "type": "boolean" },
@@ -116,9 +124,50 @@
             "engram_excerpts_reread_count": { "type": "integer", "minimum": 0 },
             "serialized_invocations_bytes": { "type": "integer", "minimum": 0 },
             "serialized_responses_bytes": { "type": "integer", "minimum": 0 },
+            "inner_response_content_bytes": { "type": "integer", "minimum": 0 },
+            "serialized_jsonrpc_response_bytes": { "type": "integer", "minimum": 0 },
+            "max_individual_response_bytes": { "type": "integer", "minimum": 0 },
+            "aggregate_auxiliary_payload_bytes": { "type": "integer", "minimum": 0 },
             "estimated_payload_tokens": { "type": "integer", "minimum": 0 },
             "replacement_status": { "type": "string", "enum": ["MEASURED", "ESTIMATED", "UNKNOWN", "NOT_OBSERVABLE"] },
             "tokens_per_successful_task": { "type": ["number", "null"] }
+          }
+        },
+        "round_trip_summary": {
+          "type": ["object", "null"],
+          "properties": {
+            "total_agent_turns": { "type": "integer", "minimum": 0 },
+            "total_round_trips": { "type": "integer", "minimum": 0 },
+            "engram_mcp_calls": { "type": "integer", "minimum": 0 },
+            "standard_tool_calls": { "type": "integer", "minimum": 0 },
+            "total_retries": { "type": "integer", "minimum": 0 },
+            "latency_mean_ms": { "type": "number", "minimum": 0 },
+            "latency_median_ms": { "type": "number", "minimum": 0 },
+            "latency_p95_ms": { "type": "number", "minimum": 0 },
+            "latency_min_ms": { "type": "number", "minimum": 0 },
+            "latency_max_ms": { "type": "number", "minimum": 0 },
+            "total_request_bytes": { "type": "integer", "minimum": 0 },
+            "total_response_bytes": { "type": "integer", "minimum": 0 },
+            "adaptive_bypass_count": { "type": "integer", "minimum": 0 },
+            "status": { "type": "string" }
+          }
+        },
+        "round_trip_events": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "call_id": { "type": "string" },
+              "tool_name": { "type": "string" },
+              "is_engram": { "type": "boolean" },
+              "is_retry": { "type": "boolean" },
+              "attempt_number": { "type": "integer", "minimum": 1 },
+              "request_bytes": { "type": "integer", "minimum": 0 },
+              "response_bytes": { "type": "integer", "minimum": 0 },
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "status": { "type": "string" },
+              "timestamp": { "type": ["string", "null"] }
+            }
           }
         }
       }
@@ -172,6 +221,30 @@
         "timestamp": { "type": ["string", "null"] },
         "relevant_event_id": { "type": ["string", "null"] },
         "telemetry_valid": { "type": ["boolean", "null"] }
+      }
+    },
+    "adaptive_activation": {
+      "type": ["object", "null"],
+      "properties": {
+        "tier": { "type": "string" },
+        "routed_mode": { "type": "string" },
+        "reasoning": { "type": "string" },
+        "execution_time_ms": { "type": "number" },
+        "signals": { "type": "object" },
+        "override_applied": { "type": ["string", "null"] },
+        "escalation_count": { "type": "integer" },
+        "escalation_history": { "type": "array" }
+      }
+    },
+    "request_size_gate": {
+      "type": ["object", "null"],
+      "properties": {
+        "gate_passed": { "type": "boolean" },
+        "measured_request_tokens": { "type": "integer", "minimum": 0 },
+        "measured_request_bytes": { "type": "integer", "minimum": 0 },
+        "counting_method": { "type": "string" },
+        "limit_tokens": { "type": "integer", "minimum": 0 },
+        "breakdown": { "type": ["object", "null"] }
       }
     }
   }

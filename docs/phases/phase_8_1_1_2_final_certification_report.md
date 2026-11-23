@@ -103,6 +103,12 @@ This report formally supersedes the benchmark execution claims of Phase 8.1.1 ([
 - **Category 1 Overall (Equivalent Work):** **31.0% mean paired wire reduction** (34.4% aggregate change).
 - **Category 2 Trivial Bypass:** **+46.8% mean paired latency speedup** (+47.9% aggregate change) with **21.3% wire savings**.
 
+### 4.1 Explicit Benchmark Execution & Architecture Limitations
+1. **Persistent Server Instance per Workload:** A single persistent MCP server process (`engram mcp`) was spawned and maintained throughout each 30-iteration workload, mirroring production IDE daemon workflows (VS Code, Cursor).
+2. **State Directory Reset:** The `.engram/contracts` and `.engram/sessions` directories were purged and recreated between workflow runs, but not between the two consecutive baseline calls.
+3. **No Cold-Process Certification:** The empirical results do not measure or establish fully cold-process startup performance (where the binary is spawned fresh for each individual tool call).
+4. **Separate Cold-Start vs Warm-Session Not Certified:** Cold-start latency and warm-session execution latency were not separately isolated or certified. All timings represent warm-session tool-call round-trips over live OS pipes.
+
 ---
 
 ## 5. Documentation Deliverables Index

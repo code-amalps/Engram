@@ -296,14 +296,44 @@ impl Drop for LiveMcpWireClient {
 }
 
 /// Reset any active contract or ephemeral session state so runs never contaminate each other.
-fn reset_workspace_contract_state(root: &Path) {
+/// Returns Result to guarantee fail-closed behavior on filesystem errors.
+pub fn reset_workspace_contract_state(root: &Path) -> std::io::Result<()> {
     let contracts_dir = root.join(".engram/contracts");
-    let _ = fs::remove_dir_all(&contracts_dir);
-    let _ = fs::create_dir_all(&contracts_dir);
+    if contracts_dir.exists() {
+        fs::remove_dir_all(&contracts_dir)?;
+    }
+    fs::create_dir_all(&contracts_dir)?;
 
     let sessions_dir = root.join(".engram/sessions");
-    let _ = fs::remove_dir_all(&sessions_dir);
-    let _ = fs::create_dir_all(&sessions_dir);
+    if sessions_dir.exists() {
+        fs::remove_dir_all(&sessions_dir)?;
+    }
+    fs::create_dir_all(&sessions_dir)?;
+
+    // Verify post-condition: directories exist and are completely empty
+    let contracts_count = fs::read_dir(&contracts_dir)?.count();
+    if contracts_count != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Stale contracts survived reset: {} items remaining",
+                contracts_count
+            ),
+        ));
+    }
+
+    let sessions_count = fs::read_dir(&sessions_dir)?.count();
+    if sessions_count != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Stale sessions survived reset: {} items remaining",
+                sessions_count
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 fn setup_benchmark_fixture(name: &str) -> PathBuf {
@@ -539,24 +569,28 @@ fn test_rigorous_30_run_live_stdio_benchmark() {
 
             if order == "baseline_then_engage" {
                 // 1. Run Baseline Workflow over live stdio OS pipe
-                reset_workspace_contract_state(&ws);
+                reset_workspace_contract_state(&ws)
+                    .expect("Workspace state reset failed before baseline");
                 let c1 = client.call_tool("engram_get_context", &w.baseline_get_context);
                 let c2 = client.call_tool("engram_preflight", &w.baseline_preflight);
                 b_calls.push(c1);
                 b_calls.push(c2);
 
                 // 2. Run Engage Workflow over live stdio OS pipe
-                reset_workspace_contract_state(&ws);
+                reset_workspace_contract_state(&ws)
+                    .expect("Workspace state reset failed before engage");
                 let ce = client.call_tool("engram_engage", &w.engage_args);
                 e_calls.push(ce);
             } else {
                 // 1. Run Engage Workflow over live stdio OS pipe
-                reset_workspace_contract_state(&ws);
+                reset_workspace_contract_state(&ws)
+                    .expect("Workspace state reset failed before engage");
                 let ce = client.call_tool("engram_engage", &w.engage_args);
                 e_calls.push(ce);
 
                 // 2. Run Baseline Workflow over live stdio OS pipe
-                reset_workspace_contract_state(&ws);
+                reset_workspace_contract_state(&ws)
+                    .expect("Workspace state reset failed before baseline");
                 let c1 = client.call_tool("engram_get_context", &w.baseline_get_context);
                 let c2 = client.call_tool("engram_preflight", &w.baseline_preflight);
                 b_calls.push(c1);
@@ -943,4 +977,105 @@ fn test_validate_raw_results_integrity_and_statistics() {
             raw_agg_lat
         );
     }
+}
+
+#[test]
+fn test_state_reset_success_and_staleness_verification() {
+    let tmp =
+        std::env::temp_dir().join(format!("engram_reset_test_clean_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&tmp).unwrap();
+
+    // Populate fake contracts and sessions
+    let contracts_dir = tmp.join(".engram/contracts");
+    fs::create_dir_all(&contracts_dir).unwrap();
+    fs::write(
+        contracts_dir.join("active.json"),
+        r#"{"contract_id": "test"}"#,
+    )
+    .unwrap();
+    fs::write(
+        contracts_dir.join("12345.json"),
+        r#"{"contract_id": "12345"}"#,
+    )
+    .unwrap();
+
+    let sessions_dir = tmp.join(".engram/sessions");
+    fs::create_dir_all(&sessions_dir).unwrap();
+    fs::write(
+        sessions_dir.join("session_1.json"),
+        r#"{"session": "data"}"#,
+    )
+    .unwrap();
+
+    assert_eq!(fs::read_dir(&contracts_dir).unwrap().count(), 2);
+    assert_eq!(fs::read_dir(&sessions_dir).unwrap().count(), 1);
+
+    // Execute state reset
+    reset_workspace_contract_state(&tmp).expect("State reset should succeed");
+
+    // Verify post-conditions
+    assert!(contracts_dir.exists());
+    assert!(sessions_dir.exists());
+    assert_eq!(
+        fs::read_dir(&contracts_dir).unwrap().count(),
+        0,
+        "No contracts should survive reset"
+    );
+    assert_eq!(
+        fs::read_dir(&sessions_dir).unwrap().count(),
+        0,
+        "No sessions should survive reset"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_state_reset_fails_on_creation_error_blocking_file() {
+    let tmp = std::env::temp_dir().join(format!(
+        "engram_reset_test_fail_create_{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&tmp).unwrap();
+
+    // Create .engram directory
+    let engram_dir = tmp.join(".engram");
+    fs::create_dir_all(&engram_dir).unwrap();
+
+    // Create a plain file at .engram/contracts so that create_dir_all fails
+    let blocking_contracts = engram_dir.join("contracts");
+    fs::write(&blocking_contracts, "blocking file instead of directory").unwrap();
+
+    // Attempt reset: should fail because contracts is a file, or if removed cannot be recreated as dir if permissions blocked
+    // Specifically test that if removal is blocked or path is invalid, it returns Err
+    // To ensure remove_dir_all or create_dir_all fails:
+    // If remove_dir_all is called on a file, it returns an error on most OSes:
+    let res = reset_workspace_contract_state(&tmp);
+    // It must return an error and fail closed
+    assert!(
+        res.is_err(),
+        "State reset must return Err when contracts path is invalid or blocked"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_state_reset_idempotency_on_empty_or_missing_dirs() {
+    let tmp =
+        std::env::temp_dir().join(format!("engram_reset_test_empty_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&tmp).unwrap();
+
+    // Reset when .engram/contracts does not even exist yet
+    let res1 = reset_workspace_contract_state(&tmp);
+    assert!(res1.is_ok(), "Reset must succeed on fresh directory");
+
+    assert!(tmp.join(".engram/contracts").exists());
+    assert!(tmp.join(".engram/sessions").exists());
+
+    // Reset again immediately (idempotent)
+    let res2 = reset_workspace_contract_state(&tmp);
+    assert!(res2.is_ok(), "Reset must be idempotent");
+
+    let _ = fs::remove_dir_all(&tmp);
 }

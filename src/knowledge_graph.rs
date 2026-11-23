@@ -20,7 +20,7 @@ use std::{
 
 use crate::storage::{cache_dir, hash, root_path};
 
-pub const GRAPH_SCHEMA_VERSION: &str = "1.0.0";
+pub const GRAPH_SCHEMA_VERSION: &str = "1.1.0";
 pub const DEFAULT_MAX_QUERY_DEPTH: usize = 3;
 pub const DEFAULT_MAX_QUERY_LIMIT: usize = 100;
 
@@ -182,6 +182,34 @@ pub enum GraphLifecycleState {
     Stale,
     Unavailable,
     Corrupt,
+    Failed,
+}
+
+impl GraphLifecycleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ready => "READY",
+            Self::Indexing => "INDEXING",
+            Self::PartiallyIndexed => "PARTIALLY_INDEXED",
+            Self::Stale => "STALE",
+            Self::Unavailable => "UNAVAILABLE",
+            Self::Corrupt => "CORRUPT",
+            Self::Failed => "FAILED",
+        }
+    }
+
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "READY" => Some(Self::Ready),
+            "INDEXING" => Some(Self::Indexing),
+            "PARTIALLY_INDEXED" => Some(Self::PartiallyIndexed),
+            "STALE" => Some(Self::Stale),
+            "UNAVAILABLE" => Some(Self::Unavailable),
+            "CORRUPT" => Some(Self::Corrupt),
+            "FAILED" => Some(Self::Failed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,6 +263,9 @@ pub struct GraphStatus {
     pub last_indexed_commit: Option<String>,
     pub indexed_files_count: usize,
     pub stale_files_count: usize,
+    pub failed_files_count: usize,
+    pub unsupported_files_count: usize,
+    pub last_error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -256,13 +287,65 @@ pub fn open_graph_db(root: &Path) -> Result<Connection> {
         )
     })?;
     conn.busy_timeout(std::time::Duration::from_secs(10))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     init_graph_tables(&conn)?;
+    run_schema_migrations(&conn)?;
     Ok(conn)
+}
+
+pub fn run_schema_migrations(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS kg_schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL,
+            description TEXT NOT NULL
+        );",
+    )?;
+
+    let applied: HashSet<String> = {
+        let mut stmt = conn.prepare("SELECT version FROM kg_schema_migrations")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        let mut set = HashSet::new();
+        for r in rows {
+            set.insert(r?);
+        }
+        set
+    };
+
+    if !applied.contains("1.0.0") {
+        init_graph_tables(conn)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR IGNORE INTO kg_schema_migrations (version, applied_at, description) VALUES ('1.0.0', ?1, 'Initial graph schema tables')",
+            params![now],
+        )?;
+    }
+
+    if !applied.contains("1.1.0") {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_kg_nodes_label ON kg_nodes(label);
+             CREATE INDEX IF NOT EXISTS idx_kg_edges_path ON kg_edges(source_path);
+             DELETE FROM kg_edges WHERE source_id NOT IN (SELECT id FROM kg_nodes) OR target_id NOT IN (SELECT id FROM kg_nodes);",
+        )?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR IGNORE INTO kg_schema_migrations (version, applied_at, description) VALUES ('1.1.0', ?1, 'Phase 9.0.1 integrity indexes and referential sweep')",
+            params![now],
+        )?;
+    }
+
+    Ok(())
 }
 
 pub fn init_graph_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS kg_nodes (
+        "CREATE TABLE IF NOT EXISTS kg_schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL,
+            description TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS kg_nodes (
             id TEXT PRIMARY KEY,
             category TEXT NOT NULL,
             label TEXT NOT NULL,
@@ -301,10 +384,12 @@ pub fn init_graph_tables(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_kg_nodes_path ON kg_nodes(relative_path);
         CREATE INDEX IF NOT EXISTS idx_kg_nodes_cat ON kg_nodes(category);
+        CREATE INDEX IF NOT EXISTS idx_kg_nodes_label ON kg_nodes(label);
         CREATE INDEX IF NOT EXISTS idx_kg_nodes_mod ON kg_nodes(module_path);
         CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id);
         CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
-        CREATE INDEX IF NOT EXISTS idx_kg_edges_cat ON kg_edges(category);",
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_cat ON kg_edges(category);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_path ON kg_edges(source_path);",
     )?;
     Ok(())
 }
@@ -349,6 +434,10 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
 
     // Discover repository source files (pruning large build/dependency/benchmark directories)
     let mut current_files: HashMap<String, String> = HashMap::new();
+    let mut failed_files_count = 0;
+    let mut unsupported_files_count = 0;
+    let mut last_error: Option<String> = None;
+
     let walker = ignore::WalkBuilder::new(&root)
         .hidden(true)
         .git_ignore(true)
@@ -388,14 +477,22 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
                     || rel_str.ends_with(".yml");
 
                 if !is_code && !is_doc && !is_cfg {
+                    unsupported_files_count += 1;
                     continue;
                 }
 
-                if let Ok(bytes) = fs::read(path) {
-                    if bytes.len() > 1_000_000 || bytes.contains(&0) {
-                        continue;
+                match fs::read(path) {
+                    Ok(bytes) => {
+                        if bytes.len() > 1_000_000 || bytes.contains(&0) {
+                            unsupported_files_count += 1;
+                            continue;
+                        }
+                        current_files.insert(rel_str, hash(&bytes));
                     }
-                    current_files.insert(rel_str, hash(&bytes));
+                    Err(e) => {
+                        failed_files_count += 1;
+                        last_error = Some(format!("Failed to read '{}': {e}", path.display()));
+                    }
                 }
             }
         }
@@ -427,16 +524,49 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
 
     let tx = conn.transaction()?;
 
-    // Invalidate nodes & edges for removed/modified files
-    for path in &files_to_remove {
-        tx.execute(
-            "DELETE FROM kg_nodes WHERE relative_path = ?1",
-            params![path],
+    if force_full {
+        tx.execute_batch(
+            "DELETE FROM kg_edges;
+             DELETE FROM kg_nodes;
+             DELETE FROM kg_file_fingerprints;
+             DELETE FROM kg_metadata;",
         )?;
-        tx.execute("DELETE FROM kg_edges WHERE source_path = ?1", params![path])?;
+    } else {
+        // Invalidate nodes & edges for removed/modified files
+        for path in &files_to_remove {
+            let mut node_ids: Vec<String> = Vec::new();
+            {
+                let mut stmt = tx.prepare("SELECT id FROM kg_nodes WHERE relative_path = ?1")?;
+                let rows = stmt.query_map(params![path], |r| r.get(0))?;
+                for nid in rows {
+                    if let Ok(id) = nid {
+                        node_ids.push(id);
+                    }
+                }
+            }
+            node_ids.push(format!("file:{path}"));
+
+            for nid in &node_ids {
+                tx.execute(
+                    "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
+                    params![nid],
+                )?;
+            }
+            tx.execute("DELETE FROM kg_edges WHERE source_path = ?1", params![path])?;
+            tx.execute(
+                "DELETE FROM kg_nodes WHERE relative_path = ?1",
+                params![path],
+            )?;
+            tx.execute(
+                "DELETE FROM kg_file_fingerprints WHERE relative_path = ?1",
+                params![path],
+            )?;
+        }
+
+        // Referential sweep for orphan edges
         tx.execute(
-            "DELETE FROM kg_file_fingerprints WHERE relative_path = ?1",
-            params![path],
+            "DELETE FROM kg_edges WHERE source_id NOT IN (SELECT id FROM kg_nodes) OR target_id NOT IN (SELECT id FROM kg_nodes)",
+            [],
         )?;
     }
 
@@ -444,9 +574,12 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
     let files_to_index: Vec<String> = added.iter().chain(modified.iter()).cloned().collect();
     let mut nodes_to_insert = Vec::new();
     let mut edges_to_insert = Vec::new();
+    let mut known_node_ids = HashSet::new();
+    let mut symbol_name_to_ids: HashMap<String, Vec<String>> = HashMap::new();
 
     // 1. Root repository node
     let repo_id = "repo:root".to_string();
+    known_node_ids.insert(repo_id.clone());
     nodes_to_insert.push(GraphNode {
         id: repo_id.clone(),
         category: NodeCategory::Repository,
@@ -460,12 +593,22 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
         metadata: serde_json::json!({ "root": root.to_string_lossy() }),
     });
 
+    struct ParsedFileDetails {
+        rel_path: String,
+        file_id: String,
+        fp: String,
+        symbols: Vec<crate::analyzer::Symbol>,
+        rels: Vec<crate::analyzer::Relationship>,
+    }
+
+    let mut parsed_file_details = Vec::new();
+
     for rel_path in &files_to_index {
         let abs_path = root.join(rel_path);
         let fp = current_files.get(rel_path).cloned().unwrap_or_default();
         let file_id = format!("file:{rel_path}");
+        known_node_ids.insert(file_id.clone());
 
-        // File node
         let is_test = rel_path.contains("test") || rel_path.starts_with("tests/");
         let is_doc = rel_path.ends_with(".md");
         let is_cfg = rel_path.ends_with(".toml")
@@ -527,85 +670,258 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
 
         // Extract AST symbols and calls if source file
         if crate::analyzer::language(&abs_path).is_some() {
-            if let Ok(code) = fs::read(&abs_path) {
-                if let Ok((_record, symbols, rels)) =
-                    crate::analyzer::parse_file(&root, rel_path, &code, "head")
-                {
-                    for sym in &symbols {
-                        let sym_id = format!("symbol:{rel_path}::{}", sym.name);
-                        let sym_cat = match sym.kind.to_ascii_uppercase().as_str() {
-                            "FUNCTION" => NodeCategory::Function,
-                            "METHOD" => NodeCategory::Method,
-                            "STRUCT" | "CLASS" | "TYPE" | "INTERFACE" | "TRAIT" | "ENUM"
-                            | "RECORD" | "IMPL" => NodeCategory::Type,
-                            _ => NodeCategory::Symbol,
-                        };
+            match fs::read(&abs_path) {
+                Ok(code) => match crate::analyzer::parse_file(&root, rel_path, &code, "head") {
+                    Ok((_record, symbols, rels)) => {
+                        for sym in &symbols {
+                            let sym_id = format!(
+                                "symbol:{rel_path}::{}::{}::{}",
+                                sym.kind.to_ascii_uppercase(),
+                                sym.name,
+                                &sym.fingerprint[..8.min(sym.fingerprint.len())]
+                            );
+                            known_node_ids.insert(sym_id.clone());
 
-                        nodes_to_insert.push(GraphNode {
-                            id: sym_id.clone(),
-                            category: sym_cat,
-                            label: sym.name.clone(),
-                            relative_path: rel_path.clone(),
-                            module_path: Some(mod_path.clone()),
-                            start_line: Some(sym.line),
-                            end_line: Some(sym.end_line),
-                            signature: Some(sym.signature.clone()),
-                            fingerprint: sym.fingerprint.clone(),
-                            metadata: serde_json::json!({ "kind": sym.kind }),
-                        });
-
-                        // File declares symbol
-                        edges_to_insert.push(GraphEdge {
-                            id: compute_edge_id(&file_id, RelationCategory::Declares, &sym_id),
-                            source_id: file_id.clone(),
-                            target_id: sym_id.clone(),
-                            category: RelationCategory::Declares,
-                            provenance: EdgeProvenance {
-                                source_path: rel_path.clone(),
-                                source_line: Some(sym.line),
-                                content_hash: sym.fingerprint.clone(),
-                                extraction_method: "ast_tree_sitter".to_string(),
-                                classification: EvidenceClassification::DirectFact,
-                                confidence: 1.0,
-                            },
-                        });
-                    }
-
-                    // Relationships (calls, imports)
-                    for r in &rels {
-                        let target_clean = r.target.trim();
-                        let target_node_id =
-                            if target_clean.contains('/') || target_clean.ends_with(".rs") {
-                                format!("file:{target_clean}")
-                            } else {
-                                format!("symbol:{target_clean}")
+                            let sym_cat = match sym.kind.to_ascii_uppercase().as_str() {
+                                "FUNCTION" => NodeCategory::Function,
+                                "METHOD" => NodeCategory::Method,
+                                "STRUCT" | "CLASS" | "TYPE" | "INTERFACE" | "TRAIT" | "ENUM"
+                                | "RECORD" | "IMPL" => NodeCategory::Type,
+                                _ => NodeCategory::Symbol,
                             };
 
-                        let edge_cat = match r.kind.to_ascii_uppercase().as_str() {
-                            "CALLS" => RelationCategory::Calls,
-                            "IMPORTS" | "USE" => RelationCategory::Imports,
-                            "IMPLEMENTS" => RelationCategory::Implements,
-                            "EXTENDS" => RelationCategory::Extends,
-                            _ => RelationCategory::References,
-                        };
+                            nodes_to_insert.push(GraphNode {
+                                id: sym_id.clone(),
+                                category: sym_cat,
+                                label: sym.name.clone(),
+                                relative_path: rel_path.clone(),
+                                module_path: Some(mod_path.clone()),
+                                start_line: Some(sym.line),
+                                end_line: Some(sym.end_line),
+                                signature: Some(sym.signature.clone()),
+                                fingerprint: sym.fingerprint.clone(),
+                                metadata: serde_json::json!({ "kind": sym.kind }),
+                            });
 
-                        edges_to_insert.push(GraphEdge {
-                            id: compute_edge_id(&file_id, edge_cat, &target_node_id),
-                            source_id: file_id.clone(),
-                            target_id: target_node_id,
-                            category: edge_cat,
-                            provenance: EdgeProvenance {
-                                source_path: rel_path.clone(),
-                                source_line: Some(r.line),
-                                content_hash: fp.clone(),
-                                extraction_method: "ast_tree_sitter".to_string(),
-                                classification: EvidenceClassification::DirectFact,
-                                confidence: r.confidence,
-                            },
+                            // File declares symbol
+                            edges_to_insert.push(GraphEdge {
+                                id: compute_edge_id(&file_id, RelationCategory::Declares, &sym_id),
+                                source_id: file_id.clone(),
+                                target_id: sym_id.clone(),
+                                category: RelationCategory::Declares,
+                                provenance: EdgeProvenance {
+                                    source_path: rel_path.clone(),
+                                    source_line: Some(sym.line),
+                                    content_hash: sym.fingerprint.clone(),
+                                    extraction_method: "ast_tree_sitter".to_string(),
+                                    classification: EvidenceClassification::DirectFact,
+                                    confidence: 1.0,
+                                },
+                            });
+
+                            symbol_name_to_ids
+                                .entry(sym.name.clone())
+                                .or_default()
+                                .push(sym_id.clone());
+                            symbol_name_to_ids
+                                .entry(format!("{rel_path}::{}", sym.name))
+                                .or_default()
+                                .push(sym_id);
+                        }
+
+                        parsed_file_details.push(ParsedFileDetails {
+                            rel_path: rel_path.clone(),
+                            file_id,
+                            fp,
+                            symbols,
+                            rels,
                         });
                     }
+                    Err(e) => {
+                        failed_files_count += 1;
+                        last_error = Some(format!("Failed to parse '{rel_path}': {e}"));
+                    }
+                },
+                Err(e) => {
+                    failed_files_count += 1;
+                    last_error = Some(format!("Failed to read '{rel_path}': {e}"));
                 }
             }
+        }
+    }
+
+    // Pass 2: Connect relationships (Calls, Imports, Tests) with scope-aware callers and resolved callees
+    for info in &parsed_file_details {
+        for r in &info.rels {
+            let edge_cat = match r.kind.to_ascii_uppercase().as_str() {
+                "CALLS" => RelationCategory::Calls,
+                "IMPORTS" | "USE" => RelationCategory::Imports,
+                "IMPLEMENTS" => RelationCategory::Implements,
+                "EXTENDS" => RelationCategory::Extends,
+                "TESTS" => RelationCategory::Tests,
+                _ => RelationCategory::References,
+            };
+
+            let target_clean = r.target.trim();
+            if target_clean.is_empty() {
+                continue;
+            }
+
+            let (source_node_id, target_node_id) = match edge_cat {
+                RelationCategory::Calls => {
+                    // Resolve caller symbol enclosing r.line
+                    let caller_id = info
+                        .symbols
+                        .iter()
+                        .filter(|s| {
+                            s.line <= r.line
+                                && s.end_line >= r.line
+                                && (s.kind == "FUNCTION" || s.kind == "METHOD")
+                        })
+                        .min_by_key(|s| s.end_line - s.line)
+                        .map(|s| {
+                            format!(
+                                "symbol:{}::{}::{}::{}",
+                                info.rel_path,
+                                s.kind.to_ascii_uppercase(),
+                                s.name,
+                                &s.fingerprint[..8.min(s.fingerprint.len())]
+                            )
+                        })
+                        .or_else(|| {
+                            info.symbols
+                                .iter()
+                                .filter(|s| s.line <= r.line && s.end_line >= r.line)
+                                .min_by_key(|s| s.end_line - s.line)
+                                .map(|s| {
+                                    format!(
+                                        "symbol:{}::{}::{}::{}",
+                                        info.rel_path,
+                                        s.kind.to_ascii_uppercase(),
+                                        s.name,
+                                        &s.fingerprint[..8.min(s.fingerprint.len())]
+                                    )
+                                })
+                        })
+                        .unwrap_or_else(|| info.file_id.clone());
+
+                    // Resolve callee target symbol
+                    let bare_name = target_clean
+                        .rsplit("::")
+                        .next()
+                        .unwrap_or(target_clean)
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(target_clean);
+                    let target_id = if let Some(candidates) = symbol_name_to_ids.get(bare_name) {
+                        candidates
+                            .iter()
+                            .find(|id| id.contains(&info.rel_path))
+                            .cloned()
+                            .unwrap_or_else(|| candidates[0].clone())
+                    } else {
+                        let ext_id = format!("symbol:ext::{target_clean}");
+                        if known_node_ids.insert(ext_id.clone()) {
+                            nodes_to_insert.push(GraphNode {
+                                id: ext_id.clone(),
+                                category: NodeCategory::Symbol,
+                                label: target_clean.to_string(),
+                                relative_path: "".to_string(),
+                                module_path: None,
+                                start_line: None,
+                                end_line: None,
+                                signature: None,
+                                fingerprint: hash(target_clean.as_bytes()),
+                                metadata: serde_json::json!({ "external": true }),
+                            });
+                        }
+                        ext_id
+                    };
+                    (caller_id, target_id)
+                }
+                RelationCategory::Imports => {
+                    let target_file_id = if target_clean.contains('/')
+                        || target_clean.ends_with(".rs")
+                        || target_clean.ends_with(".ts")
+                        || target_clean.ends_with(".py")
+                    {
+                        format!("file:{target_clean}")
+                    } else {
+                        format!("file:ext::{target_clean}")
+                    };
+                    if known_node_ids.insert(target_file_id.clone()) {
+                        nodes_to_insert.push(GraphNode {
+                            id: target_file_id.clone(),
+                            category: NodeCategory::File,
+                            label: target_clean.to_string(),
+                            relative_path: target_clean.to_string(),
+                            module_path: None,
+                            start_line: None,
+                            end_line: None,
+                            signature: None,
+                            fingerprint: hash(target_clean.as_bytes()),
+                            metadata: serde_json::json!({ "external": true }),
+                        });
+                    }
+                    (info.file_id.clone(), target_file_id)
+                }
+                RelationCategory::Tests => {
+                    let target_file_id = format!("file:{target_clean}");
+                    if known_node_ids.insert(target_file_id.clone()) {
+                        nodes_to_insert.push(GraphNode {
+                            id: target_file_id.clone(),
+                            category: NodeCategory::File,
+                            label: target_clean.to_string(),
+                            relative_path: target_clean.to_string(),
+                            module_path: None,
+                            start_line: None,
+                            end_line: None,
+                            signature: None,
+                            fingerprint: hash(target_clean.as_bytes()),
+                            metadata: serde_json::json!({ "external": true }),
+                        });
+                    }
+                    (info.file_id.clone(), target_file_id)
+                }
+                _ => {
+                    let target_node_id =
+                        if target_clean.contains('/') || target_clean.ends_with(".rs") {
+                            format!("file:{target_clean}")
+                        } else {
+                            format!("symbol:ext::{target_clean}")
+                        };
+                    if known_node_ids.insert(target_node_id.clone()) {
+                        nodes_to_insert.push(GraphNode {
+                            id: target_node_id.clone(),
+                            category: NodeCategory::Symbol,
+                            label: target_clean.to_string(),
+                            relative_path: "".to_string(),
+                            module_path: None,
+                            start_line: None,
+                            end_line: None,
+                            signature: None,
+                            fingerprint: hash(target_clean.as_bytes()),
+                            metadata: serde_json::json!({ "external": true }),
+                        });
+                    }
+                    (info.file_id.clone(), target_node_id)
+                }
+            };
+
+            edges_to_insert.push(GraphEdge {
+                id: compute_edge_id(&source_node_id, edge_cat, &target_node_id),
+                source_id: source_node_id,
+                target_id: target_node_id,
+                category: edge_cat,
+                provenance: EdgeProvenance {
+                    source_path: info.rel_path.clone(),
+                    source_line: Some(r.line),
+                    content_hash: info.fp.clone(),
+                    extraction_method: "ast_tree_sitter".to_string(),
+                    classification: EvidenceClassification::DirectFact,
+                    confidence: r.confidence,
+                },
+            });
         }
     }
 
@@ -753,10 +1069,30 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
         "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('last_indexed_commit', ?1)",
         params![head_sha],
     )?;
+    let final_state = if failed_files_count > 0 {
+        GraphLifecycleState::PartiallyIndexed
+    } else {
+        GraphLifecycleState::Ready
+    };
+
     tx.execute(
-        "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('state', 'READY')",
-        [],
+        "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('state', ?1)",
+        params![final_state.as_str()],
     )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('failed_files_count', ?1)",
+        params![failed_files_count.to_string()],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('unsupported_files_count', ?1)",
+        params![unsupported_files_count.to_string()],
+    )?;
+    if let Some(ref err) = last_error {
+        tx.execute(
+            "INSERT OR REPLACE INTO kg_metadata (key, value) VALUES ('last_error', ?1)",
+            params![err],
+        )?;
+    }
 
     tx.commit()?;
 
@@ -778,7 +1114,7 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
     );
 
     Ok(GraphStatus {
-        state: GraphLifecycleState::Ready,
+        state: final_state,
         schema_version: GRAPH_SCHEMA_VERSION.to_string(),
         index_generation: 1,
         node_count,
@@ -786,6 +1122,9 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
         last_indexed_commit: Some(head_sha),
         indexed_files_count: current_files.len(),
         stale_files_count: 0,
+        failed_files_count,
+        unsupported_files_count,
+        last_error,
     })
 }
 
@@ -876,6 +1215,14 @@ impl KnowledgeGraphIndex {
                     .entry(node.label.to_ascii_lowercase())
                     .or_default()
                     .push(node.id.clone());
+                if !node.relative_path.is_empty() {
+                    let qual =
+                        format!("{}::{}", node.relative_path, node.label).to_ascii_lowercase();
+                    label_to_nodes
+                        .entry(qual)
+                        .or_default()
+                        .push(node.id.clone());
+                }
                 nodes_by_id.insert(node.id.clone(), node);
             }
         }
@@ -908,6 +1255,12 @@ impl KnowledgeGraphIndex {
 
             for row in rows {
                 let edge = row?;
+                // Referential validation: drop dangling edges
+                if !nodes_by_id.contains_key(&edge.source_id)
+                    || !nodes_by_id.contains_key(&edge.target_id)
+                {
+                    continue;
+                }
                 outgoing
                     .entry(edge.source_id.clone())
                     .or_default()
@@ -944,7 +1297,18 @@ impl KnowledgeGraphIndex {
         if let Some(nodes) = self.label_to_nodes.get(&norm.to_ascii_lowercase()) {
             return nodes.clone();
         }
-        Vec::new()
+        let norm_lower = norm.to_ascii_lowercase();
+        let mut matches = Vec::new();
+        for (id, n) in &self.nodes_by_id {
+            if n.label.to_ascii_lowercase() == norm_lower
+                || id.to_ascii_lowercase().contains(&norm_lower)
+            {
+                matches.push(id.clone());
+            }
+        }
+        matches.sort();
+        matches.dedup();
+        matches
     }
 
     /// Queries the neighborhood around a target node up to `depth` hops with max limit.
@@ -1162,6 +1526,23 @@ impl KnowledgeGraphIndex {
                 continue;
             }
 
+            // If current node is a file, also evaluate blast-radius from its declared symbols
+            if let Some(curr_node) = self.nodes_by_id.get(&curr) {
+                if curr_node.category == NodeCategory::File
+                    || curr_node.category == NodeCategory::Test
+                {
+                    if let Some(edges) = self.outgoing.get(&curr) {
+                        for e in edges {
+                            if e.category == RelationCategory::Declares {
+                                if visited_nodes.insert(e.target_id.clone()) {
+                                    queue.push_back((e.target_id.clone(), curr_depth));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Incoming callers and dependents (reverse callers)
             if let Some(edges) = self.incoming.get(&curr) {
                 for e in edges {
@@ -1371,6 +1752,13 @@ pub fn rank_context_with_graph(
                 }
             }
         }
+
+        // Direct candidate file path lexical match
+        for f in candidate_files {
+            if f.to_ascii_lowercase().contains(term) {
+                *scored_files.entry(f.clone()).or_insert(0.0) += 4.0;
+            }
+        }
     }
 
     // Include candidate files with base weight
@@ -1386,13 +1774,22 @@ pub fn rank_context_with_graph(
     ranked_files.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Select top files bounded by token budget
+    let estimate_file_tokens = |file: &str| -> usize {
+        let abs = root.join(file);
+        if let Ok(meta) = fs::metadata(&abs) {
+            ((meta.len() as usize) / 4).clamp(300, 4000)
+        } else {
+            300
+        }
+    };
+
     let mut prioritized = Vec::new();
     let mut accumulated_tokens = 0;
-    let tokens_per_file_avg = 350; // Average AST symbol context tokens per file
 
     for (f, _) in ranked_files {
-        if accumulated_tokens + tokens_per_file_avg <= token_budget {
-            accumulated_tokens += tokens_per_file_avg;
+        let ft = estimate_file_tokens(&f);
+        if accumulated_tokens + ft <= token_budget {
+            accumulated_tokens += ft;
             prioritized.push(f);
         } else {
             break;
@@ -1400,9 +1797,12 @@ pub fn rank_context_with_graph(
     }
 
     let baseline_files_count = candidate_files.len().max(prioritized.len());
-    let estimated_baseline = baseline_files_count * tokens_per_file_avg;
-    let estimated_graph = prioritized.len() * tokens_per_file_avg;
-    let reduction = if estimated_baseline > 0 {
+    let estimated_baseline: usize = candidate_files
+        .iter()
+        .map(|f| estimate_file_tokens(f))
+        .sum();
+    let estimated_graph: usize = prioritized.iter().map(|f| estimate_file_tokens(f)).sum();
+    let reduction = if estimated_baseline > 0 && estimated_baseline > estimated_graph {
         ((estimated_baseline as f64 - estimated_graph as f64) / estimated_baseline as f64) * 100.0
     } else {
         0.0

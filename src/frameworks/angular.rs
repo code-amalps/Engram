@@ -33,28 +33,49 @@ impl FrameworkRelationshipProvider for AngularNgRxAdapter {
     }
 
     fn detect(&self, workspace_root: &Path, files: &[String]) -> bool {
-        // 1. Manifest detection: angular.json or package.json
+        self.detect_confidence(workspace_root, files).is_some()
+    }
+
+    fn detect_confidence(
+        &self,
+        workspace_root: &Path,
+        files: &[String],
+    ) -> Option<super::AdapterConfidence> {
+        // 1. Manifest detection: angular.json or package.json -> Exact
         if workspace_root.join("angular.json").exists() {
-            return true;
+            return Some(super::AdapterConfidence::Exact);
         }
         let pkg_path = workspace_root.join("package.json");
         if pkg_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&pkg_path) {
                 if content.contains("@angular/core") || content.contains("@ngrx/") {
-                    return true;
+                    return Some(super::AdapterConfidence::Exact);
                 }
             }
         }
 
-        // 2. File pattern detection in indexed files list
-        files.iter().any(|f| {
+        // 2. File pattern detection in indexed files list -> Pattern
+        let has_pattern = files.iter().any(|f| {
             let l = f.to_ascii_lowercase();
             l.ends_with(".component.ts")
                 || l.ends_with(".effects.ts")
                 || l.ends_with(".actions.ts")
                 || l.ends_with(".reducer.ts")
                 || l.ends_with(".module.ts")
-        })
+        });
+        if has_pattern {
+            return Some(super::AdapterConfidence::Pattern);
+        }
+
+        // 3. Directory heuristic -> Candidate
+        if files
+            .iter()
+            .any(|f| f.contains("/app/") || f.starts_with("src/app"))
+        {
+            return Some(super::AdapterConfidence::Candidate);
+        }
+
+        None
     }
 
     fn expand_companions(

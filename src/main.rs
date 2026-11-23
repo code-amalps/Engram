@@ -1852,6 +1852,15 @@ fn run() -> Result<()> {
                     println!("  Total Nodes: {}", status.node_count);
                     println!("  Total Edges: {}", status.edge_count);
                     println!("  Indexed Files: {}", status.indexed_files_count);
+                    if status.failed_files_count > 0 {
+                        println!("  Failed Files: {}", status.failed_files_count);
+                    }
+                    if status.unsupported_files_count > 0 {
+                        println!("  Unsupported Files: {}", status.unsupported_files_count);
+                    }
+                    if let Some(ref err) = status.last_error {
+                        println!("  Last Error: {}", err);
+                    }
                     println!(
                         "  Last Indexed Commit: {}",
                         status

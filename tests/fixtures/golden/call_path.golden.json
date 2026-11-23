@@ -1,0 +1,5 @@
+[
+  "symbol:src/lib.rs::FUNCTION::initialize",
+  "symbol:src/service.rs::FUNCTION::run_service",
+  "symbol:src/math.rs::FUNCTION::compute"
+]

@@ -1460,6 +1460,93 @@ fn extract_fallback_symbols(source: &str, path: &str, lang: &str, out: &mut Vec<
     }
 }
 
+pub fn extract_call_target(n: Node, src: &[u8], lang: &str) -> Option<String> {
+    match lang {
+        "rust" => {
+            if n.kind() == "call_expression" {
+                if let Some(func_node) = n.child_by_field_name("function") {
+                    let text = node_text(func_node, src);
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            } else if n.kind() == "method_call_expression" {
+                if let Some(name_node) = n
+                    .child_by_field_name("name")
+                    .or_else(|| n.child_by_field_name("method"))
+                {
+                    let text = node_text(name_node, src);
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+                let mut cursor = n.walk();
+                for child in n.children(&mut cursor) {
+                    if child.kind() == "field_identifier" {
+                        let text = node_text(child, src);
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                }
+            }
+        }
+        "typescript" | "javascript" => {
+            if n.kind() == "call_expression" {
+                if let Some(func_node) = n.child_by_field_name("function") {
+                    if func_node.kind() == "identifier" {
+                        let text = node_text(func_node, src);
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    } else if func_node.kind() == "member_expression" {
+                        if let Some(prop) = func_node.child_by_field_name("property") {
+                            let text = node_text(prop, src);
+                            if !text.is_empty() {
+                                return Some(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "python" => {
+            if n.kind() == "call" {
+                if let Some(func_node) = n.child_by_field_name("function") {
+                    if func_node.kind() == "identifier" {
+                        let text = node_text(func_node, src);
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    } else if func_node.kind() == "attribute" {
+                        if let Some(attr) = func_node.child_by_field_name("attribute") {
+                            let text = node_text(attr, src);
+                            if !text.is_empty() {
+                                return Some(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "csharp" => {
+            if n.kind() == "invocation_expression" {
+                if let Some(expr) = n.child_by_field_name("expression") {
+                    if expr.kind() == "identifier" {
+                        return Some(node_text(expr, src));
+                    } else if expr.kind() == "member_access_expression" {
+                        if let Some(name) = expr.child_by_field_name("name") {
+                            return Some(node_text(name, src));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 pub fn visit_ast(
     n: Node,
     src: &[u8],
@@ -1552,6 +1639,20 @@ pub fn visit_ast(
                     is_external: is_ext,
                 });
             }
+        }
+    }
+
+    if let Some(target) = extract_call_target(n, src, lang) {
+        if !target.is_empty() && target.len() < 120 {
+            rels.push(Relationship {
+                source: path.into(),
+                target,
+                kind: "CALLS".into(),
+                evidence: "AST_CALL_EXPRESSION".into(),
+                confidence: 0.95,
+                line: n.start_position().row + 1,
+                is_external: false,
+            });
         }
     }
 

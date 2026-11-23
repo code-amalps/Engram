@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use engram::knowledge_graph::{
-    GRAPH_SCHEMA_VERSION, GraphLifecycleState, KnowledgeGraphIndex, NodeCategory,
-    init_graph_tables, open_graph_db, rank_context_with_graph, sync_knowledge_graph,
+    GRAPH_SCHEMA_VERSION, GraphLifecycleState, KnowledgeGraphIndex, NodeCategory, RelationCategory,
+    init_graph_tables, open_graph_db, rank_context_with_graph, run_schema_migrations,
+    sync_knowledge_graph,
 };
 
 struct TestWorkspace {
@@ -390,4 +391,189 @@ fn test_token_efficient_context_ranking() {
     assert_eq!(report.prioritized_files[0], "src/math.rs");
     assert!(report.prioritized_files.len() < candidate_files.len());
     assert!(report.token_reduction_percentage > 0.0);
+}
+
+#[test]
+fn test_schema_migration_1_0_0_to_1_1_0() {
+    let ws = TestWorkspace::new("migration");
+    let root = ws.path();
+
+    let conn = open_graph_db(root).expect("Failed to open DB");
+    run_schema_migrations(&conn).expect("Failed to run migrations");
+
+    // Check kg_schema_migrations table
+    let mut stmt = conn
+        .prepare("SELECT version FROM kg_schema_migrations ORDER BY version")
+        .unwrap();
+    let versions: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+
+    assert!(versions.contains(&"1.0.0".to_string()));
+    assert!(versions.contains(&"1.1.0".to_string()));
+
+    // Verify indexes created by 1.1.0 migration
+    let mut idx_stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+        .unwrap();
+    let indices: Vec<String> = idx_stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+
+    assert!(indices.contains(&"idx_kg_nodes_label".to_string()));
+    assert!(indices.contains(&"idx_kg_edges_path".to_string()));
+}
+
+#[test]
+fn test_dangling_edge_invalidation_on_file_deletion() {
+    let ws = TestWorkspace::new("dangling_edges");
+    let root = ws.path();
+
+    // 1. Initial sync
+    sync_knowledge_graph(root, true).unwrap();
+
+    // 2. Add client file that calls Calculator::new and compute
+    fs::write(
+        root.join("src/client.rs"),
+        r#"use crate::math::Calculator;
+
+pub fn execute_client() -> f64 {
+    let calc = Calculator::new(10);
+    calc.compute(5.0)
+}
+"#,
+    )
+    .unwrap();
+
+    let s2 = sync_knowledge_graph(root, false).unwrap();
+    assert_eq!(s2.state, GraphLifecycleState::Ready);
+
+    let conn = open_graph_db(root).unwrap();
+    let idx2 = KnowledgeGraphIndex::load_from_db(&conn).unwrap();
+    assert!(idx2.nodes_by_id.contains_key("file:src/client.rs"));
+
+    // 3. Delete client.rs and sync
+    fs::remove_file(root.join("src/client.rs")).unwrap();
+    let s3 = sync_knowledge_graph(root, false).unwrap();
+    assert_eq!(s3.state, GraphLifecycleState::Ready);
+
+    // 4. Verify no dangling edges in DB
+    let orphan_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM kg_edges WHERE source_id NOT IN (SELECT id FROM kg_nodes) OR target_id NOT IN (SELECT id FROM kg_nodes)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan_count, 0, "No dangling edges must remain in DB");
+
+    // 5. Verify no references to client.rs in memory index
+    let idx3 = KnowledgeGraphIndex::load_from_db(&conn).unwrap();
+    assert!(!idx3.nodes_by_id.contains_key("file:src/client.rs"));
+    for edges in idx3.outgoing.values() {
+        for e in edges {
+            assert!(
+                !e.source_id.contains("src/client.rs"),
+                "Deleted file node must not appear as edge source"
+            );
+            assert!(
+                !e.target_id.contains("src/client.rs"),
+                "Deleted file node must not appear as edge target"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_call_graph_caller_symbol_precision() {
+    let ws = TestWorkspace::new("call_precision");
+    let root = ws.path();
+
+    sync_knowledge_graph(root, true).unwrap();
+
+    let conn = open_graph_db(root).unwrap();
+    let index = KnowledgeGraphIndex::load_from_db(&conn).unwrap();
+
+    // Verify CALLS edges have symbol source IDs rather than file ID
+    let call_edges: Vec<_> = index
+        .outgoing
+        .values()
+        .flatten()
+        .filter(|e| e.category == RelationCategory::Calls)
+        .collect();
+
+    assert!(!call_edges.is_empty(), "Must detect call expressions");
+    for edge in &call_edges {
+        assert!(
+            edge.source_id.starts_with("symbol:"),
+            "CALLS source_id must be a caller symbol ID, got: {}",
+            edge.source_id
+        );
+    }
+
+    // Verify shortest call path from run_service to compute
+    let path = index.call_path("run_service", "compute", 3);
+    assert!(
+        path.is_some(),
+        "Call path from run_service to compute must be found"
+    );
+    let p = path.unwrap();
+    assert!(p.len() >= 2);
+    assert!(p[0].contains("run_service"));
+    assert!(p.last().unwrap().contains("compute"));
+
+    // Multi-hop path: initialize -> run_service -> compute
+    let multi_path = index.call_path("initialize", "compute", 4);
+    assert!(
+        multi_path.is_some(),
+        "Multi-hop call path from initialize to compute must be found"
+    );
+    let mp = multi_path.unwrap();
+    assert!(mp.len() >= 3);
+    assert!(mp[0].contains("initialize"));
+    assert!(mp.last().unwrap().contains("compute"));
+}
+
+#[test]
+fn test_symbol_identity_disambiguation() {
+    let ws = TestWorkspace::new("disambiguation");
+    let root = ws.path();
+
+    // Create a file with same name struct and impl, plus overload-like functions
+    fs::write(
+        root.join("src/shapes.rs"),
+        r#"pub struct Circle {
+    pub radius: f64,
+}
+
+impl Circle {
+    pub fn new(radius: f64) -> Self {
+        Self { radius }
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    sync_knowledge_graph(root, false).unwrap();
+
+    let conn = open_graph_db(root).unwrap();
+    let index = KnowledgeGraphIndex::load_from_db(&conn).unwrap();
+
+    // Both STRUCT Circle and IMPL Circle should exist without collision
+    let circle_nodes: Vec<_> = index
+        .nodes_by_id
+        .values()
+        .filter(|n| n.label == "Circle" && n.relative_path == "src/shapes.rs")
+        .collect();
+
+    assert!(
+        circle_nodes.len() >= 2,
+        "STRUCT and IMPL Circle must not collide: found {}",
+        circle_nodes.len()
+    );
 }

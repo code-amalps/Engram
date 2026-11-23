@@ -1,0 +1,21 @@
+{
+  "target": "file:src/math.rs",
+  "affected_files": [
+    "src/lib.rs",
+    "src/math.rs",
+    "src/service.rs",
+    "tests/math_test.rs"
+  ],
+  "affected_symbols": [
+    "Calculator",
+    "compute",
+    "initialize",
+    "new",
+    "run_service",
+    "test_compute"
+  ],
+  "exercised_tests": [
+    "tests/math_test.rs"
+  ],
+  "governing_contracts": []
+}

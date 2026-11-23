@@ -32,6 +32,14 @@ impl FrameworkRelationshipProvider for GenericPassThroughAdapter {
         true
     }
 
+    fn detect_confidence(
+        &self,
+        _workspace_root: &Path,
+        _files: &[String],
+    ) -> Option<super::AdapterConfidence> {
+        Some(super::AdapterConfidence::Candidate)
+    }
+
     fn expand_companions(
         &self,
         workspace_root: &Path,

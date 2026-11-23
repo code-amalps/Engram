@@ -40,6 +40,21 @@ The multi-platform CI matrix ran on commit `2cd8bd2e0ffe2e36ba36a696f3af7e7058cc
 
 **Matrix Result:** 6/6 jobs succeeded (100% green). Verified via GitHub REST API log capture.
 
+### 2.2 GitHub Actions CI Matrix Verification (Phase 8.1.1.3 Candidate Baseline)
+
+The multi-platform CI matrix ran on candidate commit `c2552a0646ef6e1e9167c8dd7fb0d95d0b63d4d1` under Workflow Run ID **`45161715786`** (`Cross-Platform CI & Verification`):
+
+| Job Name | Platform | Runner OS | Status | Conclusion | Run ID |
+|---|---|---|---|---|---|
+| Linux glibc (x86_64) | x86_64-unknown-linux-gnu | `ubuntu-latest` | completed | **success** | `45161715786` |
+| Linux musl (x86_64) | x86_64-unknown-linux-musl | `ubuntu-latest` | completed | **success** | `45161715786` |
+| macOS Intel (x86_64) | x86_64-apple-darwin | `macos-15-intel` | completed | **success** | `45161715786` |
+| macOS ARM64 (aarch64) | aarch64-apple-darwin | `macos-14` | completed | **success** | `45161715786` |
+| Windows MSVC (x86_64) | x86_64-pc-windows-msvc | `windows-latest` | completed | **success** | `45161715786` |
+| Rustfmt & Clippy | Lint & Static Analysis | `ubuntu-latest` | completed | **success** | `45161715786` |
+
+**Matrix Result:** 6/6 jobs succeeded (100% green). Verified via GitHub REST API.
+
 ---
 
 ## 3. Workstream A: Benchmark State-Reset Remediation

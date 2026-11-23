@@ -61,7 +61,11 @@
     "documented_limitations_count": 8
   },
   "ci_verification": {
-    "workflow_run_id": "45150284124",
+    "workflow_run_id": "45161715786",
+    "workflow_name": "Cross-Platform CI & Verification",
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "c2552a0646ef6e1e9167c8dd7fb0d95d0b63d4d1",
     "jobs_passed": [
       "x86_64-unknown-linux-gnu",
       "x86_64-unknown-linux-musl",

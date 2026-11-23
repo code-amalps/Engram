@@ -766,7 +766,44 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
             None => {
-                if policy.checks.contracts.required || options.enforce_contract {
+                // Check if this qualifies for zero-cost trivial bypass
+                let is_pure_docs = crate::storage::is_pure_documentation_change(&changed_files);
+                let bypass_marker = crate::storage::load_bypass_trivial(&resolved_root)
+                    .ok()
+                    .flatten();
+                let is_bypassed = if is_pure_docs {
+                    true
+                } else if let Some(ref record) = bypass_marker {
+                    // Marker exists: verify changed files match recorded target files
+                    if !record.target_files.is_empty() {
+                        changed_files.iter().all(|cf| {
+                            let norm = crate::contract::normalize_rel_path(cf);
+                            record
+                                .target_files
+                                .iter()
+                                .any(|tf| crate::contract::normalize_rel_path(tf) == norm)
+                        })
+                    } else {
+                        // Empty target files: must be a single non-sensitive leaf file
+                        changed_files.len() == 1
+                            && !crate::prompt::is_security_file_path(&changed_files[0])
+                            && !crate::prompt::is_manifest_file_path(&changed_files[0])
+                            && !crate::prompt::is_test_file_path(&changed_files[0])
+                    }
+                } else {
+                    false
+                };
+
+                if is_bypassed {
+                    checks_skipped.push(CheckExecutionRecord {
+                        name: "contracts".to_string(),
+                        status: "bypassed".to_string(),
+                        reason: Some(
+                            "Trivial leaf edit authorized under zero-cost bypass (0 model tokens consumed)"
+                                .to_string(),
+                        ),
+                    });
+                } else if policy.checks.contracts.required || options.enforce_contract {
                     findings.push(GuardFinding {
                         rule_id: "GUARD-CONTRACT-001".to_string(),
                         severity: FindingSeverity::Block,
@@ -774,7 +811,7 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                             .to_string(),
                         path: None,
                         remediation: Some(
-                            "Create an active contract using 'engram preflight \"<task>\"' or 'engram contract create \"<goal>\"'"
+                            "Create an active contract using 'engram preflight \"<task>\"', 'engram contract create \"<goal>\"', or invoke 'engram_engage'"
                                 .to_string(),
                         ),
                     });

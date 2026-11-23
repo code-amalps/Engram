@@ -708,6 +708,85 @@ pub fn git_changed(root: &Path) -> Vec<String> {
     changed
 }
 
+/// Record of an authorized trivial task bypass.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct BypassTrivialRecord {
+    pub task: String,
+    pub reason: String,
+    pub target_files: Vec<String>,
+    pub created_at: i64,
+}
+
+/// Saves a trivial task bypass marker into .engram/bypass_trivial.json.
+pub fn save_bypass_trivial(
+    root: &Path,
+    task: &str,
+    reason: &str,
+    target_files: &[String],
+) -> Result<()> {
+    let root = root_path(root)?;
+    let engram_dir = root.join(".engram");
+    if !engram_dir.exists() {
+        fs::create_dir_all(&engram_dir)?;
+    }
+    let record = BypassTrivialRecord {
+        task: task.to_string(),
+        reason: reason.to_string(),
+        target_files: target_files.to_vec(),
+        created_at: chrono::Utc::now().timestamp(),
+    };
+    let data = serde_json::to_string_pretty(&record)?;
+    fs::write(engram_dir.join("bypass_trivial.json"), data)?;
+    Ok(())
+}
+
+/// Loads a trivial task bypass marker from .engram/bypass_trivial.json if present.
+pub fn load_bypass_trivial(root: &Path) -> Result<Option<BypassTrivialRecord>> {
+    let root = root_path(root)?;
+    let file = root.join(".engram").join("bypass_trivial.json");
+    if !file.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&file)?;
+    let record: BypassTrivialRecord = serde_json::from_str(&content)?;
+    Ok(Some(record))
+}
+
+/// Removes any trivial task bypass marker from .engram/bypass_trivial.json.
+pub fn remove_bypass_trivial(root: &Path) -> Result<()> {
+    let root = root_path(root)?;
+    let file = root.join(".engram").join("bypass_trivial.json");
+    if file.exists() {
+        let _ = fs::remove_file(file);
+    }
+    Ok(())
+}
+
+/// Checks whether all staged changes consist exclusively of non-code documentation
+/// or project configuration files (e.g. .md, docs/*, .txt, .gitignore, LICENSE).
+pub fn is_pure_documentation_change(changed_files: &[String]) -> bool {
+    if changed_files.is_empty() {
+        return false;
+    }
+    changed_files.iter().all(|f| {
+        let lower = f.to_lowercase();
+        let path = Path::new(&lower);
+        lower.ends_with(".md")
+            || lower.ends_with(".txt")
+            || lower.ends_with(".rst")
+            || lower.ends_with(".adoc")
+            || lower.starts_with("docs/")
+            || lower.starts_with("docs\\")
+            || lower.contains("/docs/")
+            || lower.contains("\\docs\\")
+            || path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n == ".gitignore" || n == "license" || n == "readme" || n == "notice")
+                .unwrap_or(false)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

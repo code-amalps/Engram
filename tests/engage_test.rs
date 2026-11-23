@@ -138,15 +138,19 @@ fn test_engage_tool_definition_registered() {
     assert!(props.get("max_bytes").is_some());
     assert_eq!(schema["required"], json!(["task"]));
 
-    // Lean core tools baseline remains exactly 4 tools
+    // Lean core tools baseline contains 5 tools (including engram_engage per LIM-04)
     let core = core_tools_definitions();
     let core_tools = core
         .as_array()
         .expect("core_tools_definitions must be array");
     assert_eq!(
         core_tools.len(),
-        4,
-        "Core lean tools must be exactly 4 tools"
+        5,
+        "Core lean tools must be exactly 5 tools (including engram_engage per LIM-04)"
+    );
+    assert!(
+        core_tools.iter().any(|t| t["name"] == "engram_engage"),
+        "engram_engage must be exposed in core_tools_definitions"
     );
 }
 

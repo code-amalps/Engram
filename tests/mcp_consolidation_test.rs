@@ -673,13 +673,14 @@ fn test_tools_definitions_default_is_lean_core() {
     let tools = defs.as_array().expect("tools array");
     assert_eq!(
         tools.len(),
-        4,
-        "Default tool surface must be exactly 4 core tools"
+        5,
+        "Default tool surface must be exactly 5 core tools (including engram_engage per LIM-04)"
     );
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
         vec![
+            "engram_engage",
             "engram_get_context",
             "engram_inspect_symbol",
             "engram_preflight",

@@ -718,6 +718,13 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
             // Adaptive bypass evaluation for small/trivial leaf tasks
             let signals = crate::prompt::classify_task_complexity(&core_task);
             if signals.classification == crate::prompt::TaskComplexity::Trivial && !no_bypass {
+                let bypass_targets = effective_planned.clone().unwrap_or_default();
+                let _ = crate::storage::save_bypass_trivial(
+                    &root,
+                    &core_task,
+                    &signals.reason,
+                    &bypass_targets,
+                );
                 return Ok(json!({
                     "status": "BYPASS_TRIVIAL",
                     "task": core_task,
@@ -1691,6 +1698,27 @@ pub fn mcp_call(root: &Path, name: &str, args: &Value) -> Result<Value> {
 
 pub fn core_tools_definitions() -> Value {
     json!([
+        {
+            "name": "engram_engage",
+            "description": "Consolidated single-shot engagement: bind repository baseline, compile context, evaluate constitution, lock Change Contract, and receive execution guidance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal, user prompt, or intent" },
+                    "token_budget": { "type": "integer", "minimum": 100, "maximum": 32000, "description": "Context token budget limit (default 1200)" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Explicit list of relative workspace file paths the agent intends to edit" },
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Explicit forbidden boundary patterns beyond the Project Constitution" },
+                    "symbols": { "type": "array", "items": { "type": "string" }, "description": "Targeted symbol filter: prioritize excerpting these specific functions, classes, or types" },
+                    "subpath": { "type": "string", "description": "Optional repository subdirectory scope to restrict AST traversal" },
+                    "language": { "type": "string", "description": "Optional programming language filter" },
+                    "detail_level": { "type": "string", "enum": ["compact", "standard", "full"], "description": "Level of excerpt detail: compact, standard, or full (default standard)" },
+                    "no_bypass": { "type": "boolean", "description": "Force Change Contract locking and AST compilation even if task qualifies as trivial" },
+                    "inject_instructions": { "type": "boolean", "description": "Also inject Turn-0 context and directives into workspace agent instruction files" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
+                },
+                "required": ["task"]
+            }
+        },
         {
             "name": "engram_get_context",
             "description": "Compile focused context with durable memories and co-change alerts.",

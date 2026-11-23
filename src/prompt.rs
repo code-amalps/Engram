@@ -319,7 +319,7 @@ fn contains_keyword_phrase(normalized_text: &str, kw: &str) -> bool {
 }
 
 /// Checks if a path targets a test or specification file.
-fn is_test_file_path(path: &str) -> bool {
+pub(crate) fn is_test_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.contains(".spec.")
         || lower.contains(".test.")
@@ -334,7 +334,7 @@ fn is_test_file_path(path: &str) -> bool {
 }
 
 /// Checks if a path targets a security, crypto, or credential file.
-fn is_security_file_path(path: &str) -> bool {
+pub(crate) fn is_security_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.contains("/auth/")
         || lower.contains("\\auth\\")
@@ -351,7 +351,7 @@ fn is_security_file_path(path: &str) -> bool {
 }
 
 /// Checks if a path targets a manifest, lockfile, or deployment configuration.
-fn is_manifest_file_path(path: &str) -> bool {
+pub(crate) fn is_manifest_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.ends_with("package.json")
         || lower.ends_with("package-lock.json")
@@ -1027,7 +1027,8 @@ pub fn prepare_task_context_adaptive(
 
     if signals.classification == TaskComplexity::Trivial && !force_no_bypass {
         // Bypass path: no contract, no AST context, no preflight overhead
-        let (core_task, _) = parse_task_and_planned_files(task, None);
+        let (core_task, planned) = parse_task_and_planned_files(task, None);
+        let _ = crate::storage::save_bypass_trivial(root, &core_task, &signals.reason, &planned);
 
         let body = match format {
             PromptFormat::Markdown => {

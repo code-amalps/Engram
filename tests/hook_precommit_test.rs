@@ -533,3 +533,182 @@ fn test_12_custom_core_hooks_path_respected() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+// ---------------------------------------------------------------------------
+// 13. Trivial documentation changes pass under enforce_contract (Zero-cost bypass)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_13_trivial_documentation_bypass_under_enforce_contract() {
+    let root = setup_test_git_repo("doc_bypass");
+
+    // Stage a pure documentation file without creating any contract
+    let doc_file = root.join("docs").join("guide.md");
+    fs::create_dir_all(doc_file.parent().unwrap()).unwrap();
+    fs::write(&doc_file, "# Documentation Guide\n\nContent here.\n").unwrap();
+
+    Command::new("git")
+        .args(["add", "docs/guide.md"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Even with enforce_contract: true, pure doc edits qualify for zero-cost bypass
+    let code = run_hook(&root, false, true, None, None, false).unwrap();
+    assert_eq!(
+        code, 0,
+        "Documentation-only edits must pass with zero model tokens under enforce_contract"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Trivial task bypass marker authorizes single leaf code edit and cleans up
+// ---------------------------------------------------------------------------
+#[test]
+fn test_14_trivial_task_bypass_marker_authorizes_edit_and_cleans_up() {
+    let root = setup_test_git_repo("marker_bypass");
+
+    // Stage a single leaf file
+    let leaf_file = root.join("leaf.rs");
+    fs::write(&leaf_file, "// Trivial comment edit\n").unwrap();
+    Command::new("git")
+        .args(["add", "leaf.rs"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Without a bypass marker, code edit with enforce_contract: true blocks
+    let code_blocked = run_hook(&root, false, true, None, None, false).unwrap();
+    assert_eq!(
+        code_blocked, 1,
+        "Code edit without bypass marker or contract must block under enforce_contract"
+    );
+
+    // Save bypass marker (as engram_engage / prompt does for Trivial tasks)
+    engram::storage::save_bypass_trivial(
+        &root,
+        "fix comment in leaf.rs",
+        "Trivial comment edit in single file",
+        &["leaf.rs".to_string()],
+    )
+    .unwrap();
+
+    // Now pre-commit hook must authorize the bypass and clean up the marker
+    let code_passed = run_hook(&root, false, true, None, None, false).unwrap();
+    assert_eq!(
+        code_passed, 0,
+        "Trivial task with active bypass marker must exit 0 under zero-cost bypass"
+    );
+
+    // Verify marker was cleaned up
+    let marker = engram::storage::load_bypass_trivial(&root).unwrap();
+    assert!(
+        marker.is_none(),
+        "Bypass marker must be removed after successful commit verification"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// 15. Non-trivial code modification without contract is strictly blocked (Zero false bypasses)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_15_non_trivial_code_modification_without_contract_is_blocked() {
+    let root = setup_test_git_repo("zero_false_bypass");
+
+    // Stage two code files without any contract
+    let f1 = root.join("mod_a.rs");
+    let f2 = root.join("mod_b.rs");
+    fs::write(&f1, "pub fn a() {}\n").unwrap();
+    fs::write(&f2, "pub fn b() {}\n").unwrap();
+    Command::new("git")
+        .args(["add", "mod_a.rs", "mod_b.rs"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Under enforce_contract: true, multiple files must never be false-bypassed
+    let code = run_hook(&root, false, true, None, None, false).unwrap();
+    assert_eq!(
+        code, 1,
+        "Multi-file code edit must NEVER qualify for trivial bypass (0.0% false bypass guarantee)"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// 16. Local postflight verification resolves active recovery session (0 model tokens)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_16_local_postflight_resolves_recovery_session() {
+    let root = setup_test_git_repo("local_postflight_recovery");
+
+    let contract_id = "ctr_postflight_test_01";
+    let target_file = "src/lib.rs";
+
+    // Create target file and initial commit
+    let src_dir = root.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let file = src_dir.join("lib.rs");
+    fs::write(&file, "// initial\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Create active contract
+    let mut contract = create_contract(
+        &root,
+        "Implement lib features",
+        Some(vec!["src".to_string()]),
+        Some(vec![target_file.to_string()]),
+        Some(vec!["secrets/**".to_string()]),
+    )
+    .unwrap();
+    contract.contract_id = contract_id.to_string();
+    contract.status = ContractStatus::Active;
+    contract.baseline_revision = "WORKTREE".to_string();
+    save_contract(&root, &contract).unwrap();
+
+    // Create an in-progress recovery session
+    let mut session = engram::recovery::create_recovery_session(contract_id);
+    session.status = engram::recovery::RecoveryStatus::InProgress;
+    engram::recovery::save_session(&root, &session).unwrap();
+    assert_eq!(session.status, engram::recovery::RecoveryStatus::InProgress);
+
+    // Modify and stage the target file
+    fs::write(&file, "// modified\n").unwrap();
+    Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Run hook: pre-commit must verify contract and resolve the recovery session
+    let code = run_hook(&root, false, false, None, None, false).unwrap();
+    assert_eq!(
+        code, 0,
+        "Compliant contract commit must succeed in local postflight"
+    );
+
+    // Verify recovery session is now Resolved
+    let resolved_session = engram::recovery::load_session(&root, contract_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        resolved_session.status,
+        engram::recovery::RecoveryStatus::Resolved,
+        "Local postflight in pre-commit hook must resolve active recovery session"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

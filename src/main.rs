@@ -8,6 +8,7 @@ pub mod constitution;
 pub mod contract;
 pub mod doctor;
 pub mod drift;
+pub mod engage;
 pub mod flywheel;
 pub mod frameworks;
 pub mod gc;

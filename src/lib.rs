@@ -13,6 +13,7 @@ pub mod drift;
 pub mod empirical;
 pub mod empirical_live;
 pub mod empirical_runner;
+pub mod engage;
 pub mod flywheel;
 pub mod frameworks;
 pub mod gc;

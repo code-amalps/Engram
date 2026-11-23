@@ -289,6 +289,16 @@ pub fn enforce_mcp_envelope_boundary(
                 *g = json!("Use engram_inspect_symbol for omitted items.");
             }
         }
+        if let Some(ctx_obj) = obj.get_mut("context").and_then(|v| v.as_object_mut()) {
+            if let Some(man) = ctx_obj
+                .get_mut("omission_manifest")
+                .and_then(|v| v.as_object_mut())
+            {
+                if let Some(g) = man.get_mut("targeted_retrieval_guidance") {
+                    *g = json!("Use engram_inspect_symbol for omitted items.");
+                }
+            }
+        }
         if let Some(summary) = obj
             .get_mut("summary")
             .and_then(|v| v.as_str().map(str::to_string))
@@ -400,6 +410,37 @@ pub fn enforce_mcp_envelope_boundary(
                 }
             }
         }
+        if let Some(ctx_obj) = obj.get_mut("context").and_then(|v| v.as_object_mut()) {
+            if let Some(cw) = ctx_obj
+                .get_mut("cochange_warnings")
+                .and_then(|v| v.as_array_mut())
+            {
+                if cw.len() > 1 {
+                    cw.truncate(1);
+                }
+            }
+            if let Some(gr) = ctx_obj
+                .get_mut("governing_rules")
+                .and_then(|v| v.as_array_mut())
+            {
+                if gr.len() > 2 {
+                    gr.truncate(2);
+                }
+            }
+            if let Some(rd) = ctx_obj.get_mut("relevant_decisions") {
+                *rd = json!([]);
+            }
+            if let Some(files) = ctx_obj
+                .get_mut("target_files")
+                .and_then(|v| v.as_array_mut())
+            {
+                for f in files.iter_mut() {
+                    if let Some(fobj) = f.as_object_mut() {
+                        fobj.insert("provenance".to_string(), json!([]));
+                    }
+                }
+            }
+        }
     }
     if let Ok(compact_str) = serde_json::to_string(&payload) {
         let tool_res = json!({
@@ -461,6 +502,25 @@ pub fn enforce_mcp_envelope_boundary(
                 viols.truncate(1);
             }
         }
+        if let Some(ctx_obj) = obj.get_mut("context").and_then(|v| v.as_object_mut()) {
+            if let Some(man) = ctx_obj
+                .get_mut("omission_manifest")
+                .and_then(|v| v.as_object_mut())
+            {
+                man.insert("sample_omissions".to_string(), json!([]));
+                man.insert("omission_manifest".to_string(), json!([]));
+                man.insert("omission_reasons".to_string(), json!({}));
+                man.insert("manifest_truncated".to_string(), json!(true));
+            }
+            if let Some(gaps) = ctx_obj
+                .get_mut("ambiguity_gaps")
+                .and_then(|v| v.as_array_mut())
+            {
+                if gaps.len() > 1 {
+                    gaps.truncate(1);
+                }
+            }
+        }
     }
     if let Ok(compact_str) = serde_json::to_string(&payload) {
         let tool_res = json!({
@@ -485,6 +545,21 @@ pub fn enforce_mcp_envelope_boundary(
             }
             if files.len() > 2 {
                 files.truncate(2);
+            }
+        }
+        if let Some(ctx_obj) = obj.get_mut("context").and_then(|v| v.as_object_mut()) {
+            if let Some(files) = ctx_obj
+                .get_mut("target_files")
+                .and_then(|v| v.as_array_mut())
+            {
+                for f in files.iter_mut() {
+                    if let Some(fobj) = f.as_object_mut() {
+                        fobj.insert("content".to_string(), json!(""));
+                    }
+                }
+                if files.len() > 2 {
+                    files.truncate(2);
+                }
             }
         }
         obj.insert("explanation".to_string(), json!(""));
@@ -515,7 +590,13 @@ pub fn enforce_mcp_envelope_boundary(
         min_payload["target_file"] = tf.clone();
     }
     if let Some(t) = payload.get("task") {
-        let task_str = t.as_str().unwrap_or("");
+        let task_str = if let Some(s) = t.as_str() {
+            s
+        } else if let Some(s) = t.get("goal").and_then(|g| g.as_str()) {
+            s
+        } else {
+            ""
+        };
         let condensed_task = if task_str.len() > 60 {
             safe_truncate_str(task_str, 60)
         } else {
@@ -523,7 +604,10 @@ pub fn enforce_mcp_envelope_boundary(
         };
         min_payload["task"] = json!(condensed_task);
     }
-    if let Some(cid) = payload.get("contract_id") {
+    if let Some(cid) = payload
+        .get("contract_id")
+        .or_else(|| payload.get("contract").and_then(|c| c.get("contract_id")))
+    {
         min_payload["contract_id"] = cid.clone();
     }
 
@@ -573,6 +657,7 @@ pub fn enforce_mcp_envelope_boundary(
 pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
     let root = root_path(root)?;
     match name {
+        "engram_engage" => crate::engage::handle_engram_engage(&root, args),
         "engram_prepare_task" | "engram_prepare" => {
             let task = args["task"].as_str().unwrap_or("").trim();
             if task.is_empty() {
@@ -1671,6 +1756,27 @@ pub fn core_tools_definitions() -> Value {
 
 pub fn all_tools_definitions() -> Value {
     json!([
+        {
+            "name": "engram_engage",
+            "description": "Consolidated single-shot engagement: bind repository baseline, compile context, evaluate constitution, lock Change Contract, and receive execution guidance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The coding task goal, user prompt, or intent" },
+                    "token_budget": { "type": "integer", "minimum": 100, "maximum": 32000, "description": "Context token budget limit (default 1200)" },
+                    "planned_files": { "type": "array", "items": { "type": "string" }, "description": "Explicit list of relative workspace file paths the agent intends to edit" },
+                    "forbidden": { "type": "array", "items": { "type": "string" }, "description": "Explicit forbidden boundary patterns beyond the Project Constitution" },
+                    "symbols": { "type": "array", "items": { "type": "string" }, "description": "Targeted symbol filter: prioritize excerpting these specific functions, classes, or types" },
+                    "subpath": { "type": "string", "description": "Optional repository subdirectory scope to restrict AST traversal" },
+                    "language": { "type": "string", "description": "Optional programming language filter" },
+                    "detail_level": { "type": "string", "enum": ["compact", "standard", "full"], "description": "Level of excerpt detail: compact, standard, or full (default standard)" },
+                    "no_bypass": { "type": "boolean", "description": "Force Change Contract locking and AST compilation even if task qualifies as trivial" },
+                    "inject_instructions": { "type": "boolean", "description": "Also inject Turn-0 context and directives into workspace agent instruction files" },
+                    "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
+                },
+                "required": ["task"]
+            }
+        },
         {
             "name": "engram_prepare_task",
             "description": "Single-shot task preparation: compile focused context, discover governing rules, validate boundaries, and lock Change Contract in one atomic round-trip.",

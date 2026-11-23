@@ -1,8 +1,9 @@
-//! Phase 8.1.1: Engagement Endpoint Rigorous Benchmark Harness & Methodology
+//! Phase 8.1.1.2: Live Stdio JSON-RPC Benchmark Harness & Rigorous Methodology
 //!
 //! Evaluates `engram_engage` against the two-call baseline (`engram_get_context` + `engram_preflight`)
-//! using a strictly controlled experimental methodology:
+//! using actual OS-pipe stdio JSON-RPC 2.0 communication against a real spawned `engram mcp` server process.
 //!
+//! Experimental Protocol:
 //! 1. Category 1: Equivalent-Work Comparison (30 paired runs per workload, alternating order, state reset):
 //!    - EQ-01: Single-File Refactor ("Refactor token validation in src/auth.rs")
 //!    - EQ-02: Multi-File Feature ("Extend User model and update auth in src/auth.rs and src/user.rs")
@@ -12,14 +13,14 @@
 //! 2. Category 2: Trivial-Task Bypass (30 paired runs, measured separately as avoided work):
 //!    - BYPASS-01: Trivial Documentation Leaf ("Fix typo in README.md")
 //!
-//! Generates raw reproducible dataset at `docs/phases/phase_8_1_1_benchmark_raw_results.json`.
+//! Generates raw reproducible dataset at `docs/phases/phase_8_1_1_2_raw_results.json`.
 
-use engram::mcp::{enforce_mcp_envelope_boundary, mcp_call_raw};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,8 +53,8 @@ pub struct IterationRecord {
     pub engage_resp_bytes: usize,
     pub engage_wire_bytes: usize,
     pub engage_duration_ms: f64,
-    pub byte_savings_percent: f64,
-    pub latency_savings_percent: f64,
+    pub paired_wire_savings_percent: f64,
+    pub paired_latency_savings_percent: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,14 +80,17 @@ pub struct WorkloadSummary {
     pub engage_wire_bytes: MetricStats,
     pub baseline_duration_ms: MetricStats,
     pub engage_duration_ms: MetricStats,
-    pub wire_savings_percent_mean: f64,
-    pub latency_savings_percent_mean: f64,
+    pub mean_paired_wire_savings_percent: f64,
+    pub aggregate_mean_wire_change_percent: f64,
+    pub mean_paired_latency_savings_percent: f64,
+    pub aggregate_mean_latency_change_percent: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkDataset {
     pub methodology_version: String,
     pub platform: String,
+    pub transport: String,
     pub timestamp: String,
     pub total_iterations: usize,
     pub raw_records: Vec<IterationRecord>,
@@ -141,65 +145,153 @@ fn compute_stats(values: &[f64]) -> MetricStats {
     }
 }
 
-/// Executes an MCP call with exact JSON-RPC 2.0 wire framing measurement.
-fn execute_measured_mcp_wire_call(
-    root: &Path,
-    call_id: u64,
-    tool_name: &str,
-    arguments: &Value,
-) -> WireCallRecord {
-    let req_obj = json!({
-        "jsonrpc": "2.0",
-        "id": call_id,
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": arguments
-        }
-    });
+/// Live stdio JSON-RPC 2.0 client that communicates with a real spawned `engram mcp` child process over OS pipes.
+pub struct LiveMcpWireClient {
+    child: Child,
+    stdin: std::process::ChildStdin,
+    reader: BufReader<std::process::ChildStdout>,
+    next_id: u64,
+}
 
-    let req_wire_str = format!("{}\n", serde_json::to_string(&req_obj).unwrap());
-    let req_wire_bytes = req_wire_str.as_bytes().len();
-    let args_bytes = serde_json::to_string(arguments).unwrap().as_bytes().len();
+impl LiveMcpWireClient {
+    pub fn spawn(workspace_root: &Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_engram"))
+            .arg("-C")
+            .arg(workspace_root)
+            .arg("mcp")
+            .env("ENGRAM_SPECIALIST_TOOLS", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to spawn engram mcp server binary");
 
-    let t0 = Instant::now();
-    let raw_payload = mcp_call_raw(root, tool_name, arguments).unwrap();
-    let bounded_payload =
-        enforce_mcp_envelope_boundary(tool_name, raw_payload, 16384, &json!(call_id));
-    let duration_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let stdin = child.stdin.take().expect("Child stdin unavailable");
+        let reader = BufReader::new(child.stdout.take().expect("Child stdout unavailable"));
 
-    let resp_obj = json!({
-        "jsonrpc": "2.0",
-        "id": call_id,
-        "result": bounded_payload
-    });
+        let mut client = Self {
+            child,
+            stdin,
+            reader,
+            next_id: 1,
+        };
 
-    let resp_wire_str = format!("{}\n", serde_json::to_string(&resp_obj).unwrap());
-    let resp_wire_bytes = resp_wire_str.as_bytes().len();
-    let result_bytes = serde_json::to_string(&resp_obj["result"])
-        .unwrap()
-        .as_bytes()
-        .len();
+        // Initialize handshake
+        client.call_raw(
+            "initialize",
+            json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": { "name": "live-stdio-bench", "version": "1.6.0" }
+            }),
+        );
 
-    let status = if let Some(content_text) = bounded_payload["content"][0]["text"].as_str() {
-        if let Ok(v) = serde_json::from_str::<Value>(content_text) {
-            v["status"].as_str().map(str::to_string)
+        client
+    }
+
+    pub fn call_raw(&mut self, method: &str, params: Value) -> (usize, usize, Value, f64) {
+        assert!(
+            self.child.try_wait().unwrap().is_none(),
+            "MCP server process terminated unexpectedly before call"
+        );
+
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let req_obj = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        });
+
+        let serialized_req = serde_json::to_string(&req_obj).expect("Failed to serialize request");
+        let wire_req = format!("{}\n", serialized_req);
+        let req_bytes = wire_req.as_bytes().len();
+
+        let t0 = Instant::now();
+        self.stdin
+            .write_all(wire_req.as_bytes())
+            .expect("Failed to write to child stdin");
+        self.stdin.flush().expect("Failed to flush child stdin");
+
+        let mut line = String::new();
+        let resp_bytes = self
+            .reader
+            .read_line(&mut line)
+            .expect("Failed to read line from child stdout");
+        let duration_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        assert!(
+            resp_bytes > 0,
+            "MCP server closed stdout unexpectedly (EOF)"
+        );
+
+        let resp_val: Value =
+            serde_json::from_str(&line).expect("Invalid JSON-RPC response from MCP server");
+
+        // Validate JSON-RPC ID
+        assert_eq!(
+            resp_val.get("id").and_then(|v| v.as_u64()),
+            Some(id),
+            "Mismatched JSON-RPC response ID (expected {}, got {:?})",
+            id,
+            resp_val.get("id")
+        );
+
+        // Validate that server did not return a JSON-RPC error
+        assert!(
+            resp_val.get("error").is_none(),
+            "MCP server returned JSON-RPC error: {:?}",
+            resp_val.get("error")
+        );
+
+        (req_bytes, resp_bytes, resp_val, duration_ms)
+    }
+
+    pub fn call_tool(&mut self, tool_name: &str, arguments: &Value) -> WireCallRecord {
+        let args_bytes = serde_json::to_string(arguments).unwrap().as_bytes().len();
+
+        let (req_bytes, resp_bytes, resp_val, duration_ms) = self.call_raw(
+            "tools/call",
+            json!({
+                "name": tool_name,
+                "arguments": arguments
+            }),
+        );
+
+        let result_obj = resp_val
+            .get("result")
+            .expect("Missing result in JSON-RPC response");
+        let result_bytes = serde_json::to_string(result_obj).unwrap().as_bytes().len();
+
+        let status = if let Some(content_text) = result_obj["content"][0]["text"].as_str() {
+            if let Ok(v) = serde_json::from_str::<Value>(content_text) {
+                v["status"].as_str().map(str::to_string)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
-    WireCallRecord {
-        tool_name: tool_name.to_string(),
-        request_wire_bytes: req_wire_bytes,
-        response_wire_bytes: resp_wire_bytes,
-        total_wire_bytes: req_wire_bytes + resp_wire_bytes,
-        arguments_bytes: args_bytes,
-        result_bytes,
-        duration_ms,
-        status,
+        WireCallRecord {
+            tool_name: tool_name.to_string(),
+            request_wire_bytes: req_bytes,
+            response_wire_bytes: resp_bytes,
+            total_wire_bytes: req_bytes + resp_bytes,
+            arguments_bytes: args_bytes,
+            result_bytes,
+            duration_ms,
+            status,
+        }
+    }
+}
+
+impl Drop for LiveMcpWireClient {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -216,7 +308,7 @@ fn reset_workspace_contract_state(root: &Path) {
 
 fn setup_benchmark_fixture(name: &str) -> PathBuf {
     let tmp = std::env::temp_dir().join(format!(
-        "engram_p811_bench_{}_{}",
+        "engram_p8112_bench_{}_{}",
         name,
         uuid::Uuid::new_v4()
     ));
@@ -303,10 +395,10 @@ struct WorkloadDef {
 }
 
 #[test]
-fn test_rigorous_30_run_benchmark_methodology() {
-    let ws = setup_benchmark_fixture("methodology_harness");
+fn test_rigorous_30_run_live_stdio_benchmark() {
+    let ws = setup_benchmark_fixture("live_stdio_harness");
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let raw_results_file = manifest_dir.join("docs/phases/phase_8_1_1_benchmark_raw_results.json");
+    let raw_results_file = manifest_dir.join("docs/phases/phase_8_1_1_2_raw_results.json");
 
     let workloads = vec![
         // Category 1: Equivalent-Work Comparison
@@ -414,9 +506,7 @@ fn test_rigorous_30_run_benchmark_methodology() {
     println!(
         "\n=========================================================================================="
     );
-    println!(
-        "EXECUTING RIGOROUS 30-RUN BENCHMARK ACROSS 5 WORKLOADS (150 PAIRED RUNS / 300 EXECUTIONS)"
-    );
+    println!("EXECUTING LIVE STDIO OS-PIPE 30-RUN BENCHMARK (150 PAIRED RUNS / 300 EXECUTIONS)");
     println!(
         "=========================================================================================="
     );
@@ -426,12 +516,16 @@ fn test_rigorous_30_run_benchmark_methodology() {
             "\nExecuting Workload: {} [{}] - {}",
             w.id, w.category, w.description
         );
+
+        // Spawn a dedicated LiveMcpWireClient connected via stdio OS pipes to `engram mcp`
+        let mut client = LiveMcpWireClient::spawn(&ws);
+
         let mut baseline_wire_bytes_list = Vec::new();
         let mut engage_wire_bytes_list = Vec::new();
         let mut baseline_durations_list = Vec::new();
         let mut engage_durations_list = Vec::new();
-        let mut wire_savings_list = Vec::new();
-        let mut latency_savings_list = Vec::new();
+        let mut paired_wire_savings_list = Vec::new();
+        let mut paired_latency_savings_list = Vec::new();
 
         for i in 1..=num_iterations {
             let order = if i % 2 == 1 {
@@ -444,57 +538,27 @@ fn test_rigorous_30_run_benchmark_methodology() {
             let mut e_calls = Vec::new();
 
             if order == "baseline_then_engage" {
-                // 1. Run Baseline
+                // 1. Run Baseline Workflow over live stdio OS pipe
                 reset_workspace_contract_state(&ws);
-                let c1 = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 1) as u64,
-                    "engram_get_context",
-                    &w.baseline_get_context,
-                );
-                let c2 = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 2) as u64,
-                    "engram_preflight",
-                    &w.baseline_preflight,
-                );
+                let c1 = client.call_tool("engram_get_context", &w.baseline_get_context);
+                let c2 = client.call_tool("engram_preflight", &w.baseline_preflight);
                 b_calls.push(c1);
                 b_calls.push(c2);
 
-                // 2. Run Engage
+                // 2. Run Engage Workflow over live stdio OS pipe
                 reset_workspace_contract_state(&ws);
-                let ce = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 3) as u64,
-                    "engram_engage",
-                    &w.engage_args,
-                );
+                let ce = client.call_tool("engram_engage", &w.engage_args);
                 e_calls.push(ce);
             } else {
-                // 1. Run Engage
+                // 1. Run Engage Workflow over live stdio OS pipe
                 reset_workspace_contract_state(&ws);
-                let ce = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 3) as u64,
-                    "engram_engage",
-                    &w.engage_args,
-                );
+                let ce = client.call_tool("engram_engage", &w.engage_args);
                 e_calls.push(ce);
 
-                // 2. Run Baseline
+                // 2. Run Baseline Workflow over live stdio OS pipe
                 reset_workspace_contract_state(&ws);
-                let c1 = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 1) as u64,
-                    "engram_get_context",
-                    &w.baseline_get_context,
-                );
-                let c2 = execute_measured_mcp_wire_call(
-                    &ws,
-                    (i * 10 + 2) as u64,
-                    "engram_preflight",
-                    &w.baseline_preflight,
-                );
+                let c1 = client.call_tool("engram_get_context", &w.baseline_get_context);
+                let c2 = client.call_tool("engram_preflight", &w.baseline_preflight);
                 b_calls.push(c1);
                 b_calls.push(c2);
             }
@@ -509,13 +573,13 @@ fn test_rigorous_30_run_benchmark_methodology() {
             let e_wire: usize = e_req + e_resp;
             let e_dur: f64 = e_calls.iter().map(|c| c.duration_ms).sum();
 
-            let wire_savings = if b_wire > 0 {
-                (b_wire.saturating_sub(e_wire) as f64 / b_wire as f64) * 100.0
+            let paired_wire_savings = if b_wire > 0 {
+                ((b_wire as f64 - e_wire as f64) / b_wire as f64) * 100.0
             } else {
                 0.0
             };
 
-            let lat_savings = if b_dur > 0.0 {
+            let paired_lat_savings = if b_dur > 0.0 {
                 ((b_dur - e_dur) / b_dur) * 100.0
             } else {
                 0.0
@@ -525,8 +589,8 @@ fn test_rigorous_30_run_benchmark_methodology() {
             engage_wire_bytes_list.push(e_wire as f64);
             baseline_durations_list.push(b_dur);
             engage_durations_list.push(e_dur);
-            wire_savings_list.push(wire_savings);
-            latency_savings_list.push(lat_savings);
+            paired_wire_savings_list.push(paired_wire_savings);
+            paired_latency_savings_list.push(paired_lat_savings);
 
             all_iteration_records.push(IterationRecord {
                 workload_id: w.id.to_string(),
@@ -545,10 +609,30 @@ fn test_rigorous_30_run_benchmark_methodology() {
                 engage_resp_bytes: e_resp,
                 engage_wire_bytes: e_wire,
                 engage_duration_ms: e_dur,
-                byte_savings_percent: wire_savings,
-                latency_savings_percent: lat_savings,
+                paired_wire_savings_percent: (paired_wire_savings * 100.0).round() / 100.0,
+                paired_latency_savings_percent: (paired_lat_savings * 100.0).round() / 100.0,
             });
         }
+
+        let b_wire_stats = compute_stats(&baseline_wire_bytes_list);
+        let e_wire_stats = compute_stats(&engage_wire_bytes_list);
+        let b_dur_stats = compute_stats(&baseline_durations_list);
+        let e_dur_stats = compute_stats(&engage_durations_list);
+
+        let mean_p_wire =
+            (paired_wire_savings_list.iter().sum::<f64>() / num_iterations as f64 * 100.0).round()
+                / 100.0;
+        let agg_wire_change =
+            (((b_wire_stats.mean - e_wire_stats.mean) / b_wire_stats.mean) * 100.0 * 100.0).round()
+                / 100.0;
+
+        let mean_p_lat = (paired_latency_savings_list.iter().sum::<f64>() / num_iterations as f64
+            * 100.0)
+            .round()
+            / 100.0;
+        let agg_lat_change =
+            (((b_dur_stats.mean - e_dur_stats.mean) / b_dur_stats.mean) * 100.0 * 100.0).round()
+                / 100.0;
 
         let summary = WorkloadSummary {
             workload_id: w.id.to_string(),
@@ -557,38 +641,35 @@ fn test_rigorous_30_run_benchmark_methodology() {
             iterations: num_iterations,
             baseline_calls: 2,
             engage_calls: 1,
-            baseline_wire_bytes: compute_stats(&baseline_wire_bytes_list),
-            engage_wire_bytes: compute_stats(&engage_wire_bytes_list),
-            baseline_duration_ms: compute_stats(&baseline_durations_list),
-            engage_duration_ms: compute_stats(&engage_durations_list),
-            wire_savings_percent_mean: (wire_savings_list.iter().sum::<f64>()
-                / num_iterations as f64
-                * 100.0)
-                .round()
-                / 100.0,
-            latency_savings_percent_mean: (latency_savings_list.iter().sum::<f64>()
-                / num_iterations as f64
-                * 100.0)
-                .round()
-                / 100.0,
+            baseline_wire_bytes: b_wire_stats.clone(),
+            engage_wire_bytes: e_wire_stats.clone(),
+            baseline_duration_ms: b_dur_stats.clone(),
+            engage_duration_ms: e_dur_stats.clone(),
+            mean_paired_wire_savings_percent: mean_p_wire,
+            aggregate_mean_wire_change_percent: agg_wire_change,
+            mean_paired_latency_savings_percent: mean_p_lat,
+            aggregate_mean_latency_change_percent: agg_lat_change,
         };
 
         println!(
-            "  -> Completed: Baseline Wire: {:.1} B, Engage Wire: {:.1} B ({:.1}% savings) | Baseline Dur: {:.1} ms, Engage Dur: {:.1} ms ({:.1}% savings)",
+            "  -> Completed: Baseline Wire: {:.1} B, Engage Wire: {:.1} B (paired: {:.1}%, agg: {:.1}%) | Baseline Dur: {:.1} ms, Engage Dur: {:.1} ms (paired: {:.1}%, agg: {:.1}%)",
             summary.baseline_wire_bytes.mean,
             summary.engage_wire_bytes.mean,
-            summary.wire_savings_percent_mean,
+            summary.mean_paired_wire_savings_percent,
+            summary.aggregate_mean_wire_change_percent,
             summary.baseline_duration_ms.mean,
             summary.engage_duration_ms.mean,
-            summary.latency_savings_percent_mean
+            summary.mean_paired_latency_savings_percent,
+            summary.aggregate_mean_latency_change_percent,
         );
 
         workload_summaries.push(summary);
     }
 
     let dataset = BenchmarkDataset {
-        methodology_version: "8.1.1-rigorous-paired".to_string(),
+        methodology_version: "8.1.1.2-live-stdio-paired".to_string(),
         platform: std::env::consts::OS.to_string(),
+        transport: "live_os_stdio_pipes".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         total_iterations: all_iteration_records.len(),
         raw_records: all_iteration_records,
@@ -607,28 +688,28 @@ fn test_rigorous_30_run_benchmark_methodology() {
     );
 
     // Print Markdown Summary Table
-    println!("\n### Summary Benchmark Table");
+    println!("\n### Summary Live Stdio Benchmark Table");
     println!(
-        "| ID | Category | Baseline Calls | Engage Calls | Baseline Wire (Mean ± σ) | Engage Wire (Mean ± σ) | Wire Savings | Baseline Lat (Mean ± σ) | Engage Lat (Mean ± σ) | Latency Savings |"
+        "| ID | Category | Baseline Wire (Mean ± σ) | Engage Wire (Mean ± σ) | Paired Wire Savings | Agg Wire Change | Baseline Lat (Mean ± σ) | Engage Lat (Mean ± σ) | Paired Lat Savings | Agg Lat Change |"
     );
-    println!("|---|---|:---:|:---:|---|---|:---:|---|---|:---:|");
+    println!("|---|---|---|---|:---:|:---:|---|---|:---:|:---:|");
     for s in &workload_summaries {
         println!(
-            "| **{}** | `{}` | {} | {} | {:.1} ± {:.1} B | {:.1} ± {:.1} B | **{:.1}%** | {:.1} ± {:.1} ms | {:.1} ± {:.1} ms | **{:.1}%** |",
+            "| **{}** | `{}` | {:.1} ± {:.1} B | {:.1} ± {:.1} B | **{:.1}%** | **{:.1}%** | {:.1} ± {:.1} ms | {:.1} ± {:.1} ms | **{:.1}%** | **{:.1}%** |",
             s.workload_id,
             s.category,
-            s.baseline_calls,
-            s.engage_calls,
             s.baseline_wire_bytes.mean,
             s.baseline_wire_bytes.std_dev,
             s.engage_wire_bytes.mean,
             s.engage_wire_bytes.std_dev,
-            s.wire_savings_percent_mean,
+            s.mean_paired_wire_savings_percent,
+            s.aggregate_mean_wire_change_percent,
             s.baseline_duration_ms.mean,
             s.baseline_duration_ms.std_dev,
             s.engage_duration_ms.mean,
             s.engage_duration_ms.std_dev,
-            s.latency_savings_percent_mean
+            s.mean_paired_latency_savings_percent,
+            s.aggregate_mean_latency_change_percent
         );
     }
 
@@ -644,4 +725,196 @@ fn test_rigorous_30_run_benchmark_methodology() {
     }
 
     let _ = fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_validate_raw_results_integrity_and_statistics() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir.join("docs/phases/phase_8_1_1_2_raw_results.json");
+    if !path.exists() {
+        println!("Note: Raw results file not found yet (will be generated by live benchmark test)");
+        return;
+    }
+
+    let raw_text = fs::read_to_string(&path).expect("Failed to read raw results");
+    let dataset: BenchmarkDataset = serde_json::from_str(&raw_text).expect("Valid JSON dataset");
+
+    // 1. Exactly 150 records overall
+    assert_eq!(dataset.total_iterations, 150);
+    assert_eq!(dataset.raw_records.len(), 150);
+
+    // 2. Exactly 30 records per workload
+    let expected_workloads = ["EQ-01", "EQ-02", "EQ-03", "EQ-04", "BYPASS-01"];
+    for wid in &expected_workloads {
+        let count = dataset
+            .raw_records
+            .iter()
+            .filter(|r| r.workload_id == *wid)
+            .count();
+        assert_eq!(count, 30, "Workload {} must have exactly 30 records", wid);
+    }
+
+    // 3. No duplicate workload/iteration combinations
+    let mut seen = std::collections::HashSet::new();
+    for r in &dataset.raw_records {
+        assert!(
+            seen.insert((r.workload_id.clone(), r.iteration)),
+            "Duplicate record found: {} iter {}",
+            r.workload_id,
+            r.iteration
+        );
+    }
+
+    // 4. Alternating execution order
+    for r in &dataset.raw_records {
+        let expected_order = if r.iteration % 2 == 1 {
+            "baseline_then_engage"
+        } else {
+            "engage_then_baseline"
+        };
+        assert_eq!(r.execution_order, expected_order);
+    }
+
+    // 5. Expected tool-call counts
+    for r in &dataset.raw_records {
+        assert_eq!(r.baseline_total_calls, 2);
+        assert_eq!(r.baseline_calls.len(), 2);
+        assert_eq!(r.engage_total_calls, 1);
+        assert_eq!(r.engage_calls.len(), 1);
+    }
+
+    // 6. Wire-byte totals equal request bytes plus response bytes
+    for r in &dataset.raw_records {
+        assert_eq!(
+            r.baseline_wire_bytes,
+            r.baseline_req_bytes + r.baseline_resp_bytes
+        );
+        assert_eq!(
+            r.engage_wire_bytes,
+            r.engage_req_bytes + r.engage_resp_bytes
+        );
+        for c in &r.baseline_calls {
+            assert_eq!(
+                c.total_wire_bytes,
+                c.request_wire_bytes + c.response_wire_bytes
+            );
+        }
+        for c in &r.engage_calls {
+            assert_eq!(
+                c.total_wire_bytes,
+                c.request_wire_bytes + c.response_wire_bytes
+            );
+        }
+    }
+
+    // 7. All durations are finite and non-negative
+    for r in &dataset.raw_records {
+        assert!(
+            r.baseline_duration_ms > 0.0 && r.baseline_duration_ms.is_finite(),
+            "Baseline duration must be positive finite"
+        );
+        assert!(
+            r.engage_duration_ms > 0.0 && r.engage_duration_ms.is_finite(),
+            "Engage duration must be positive finite"
+        );
+        for c in &r.baseline_calls {
+            assert!(
+                c.duration_ms > 0.0 && c.duration_ms.is_finite(),
+                "Call duration must be positive finite"
+            );
+        }
+        for c in &r.engage_calls {
+            assert!(
+                c.duration_ms > 0.0 && c.duration_ms.is_finite(),
+                "Call duration must be positive finite"
+            );
+        }
+    }
+
+    // 8. All paired percentages can be independently recomputed
+    for r in &dataset.raw_records {
+        let expected_wire_savings = ((r.baseline_wire_bytes as f64 - r.engage_wire_bytes as f64)
+            / r.baseline_wire_bytes as f64)
+            * 100.0;
+        assert!(
+            (r.paired_wire_savings_percent - expected_wire_savings).abs() < 0.1,
+            "Paired wire savings mismatch in record {} iter {}",
+            r.workload_id,
+            r.iteration
+        );
+
+        let expected_lat_savings =
+            ((r.baseline_duration_ms - r.engage_duration_ms) / r.baseline_duration_ms) * 100.0;
+        assert!(
+            (r.paired_latency_savings_percent - expected_lat_savings).abs() < 0.1,
+            "Paired latency savings mismatch in record {} iter {}",
+            r.workload_id,
+            r.iteration
+        );
+    }
+
+    // 9. Summary statistics match raw records within documented rounding tolerance
+    for s in &dataset.workload_summaries {
+        let records: Vec<&IterationRecord> = dataset
+            .raw_records
+            .iter()
+            .filter(|r| r.workload_id == s.workload_id)
+            .collect();
+        assert_eq!(records.len(), 30);
+
+        let b_wires: Vec<f64> = records
+            .iter()
+            .map(|r| r.baseline_wire_bytes as f64)
+            .collect();
+        let e_wires: Vec<f64> = records.iter().map(|r| r.engage_wire_bytes as f64).collect();
+        let b_durs: Vec<f64> = records.iter().map(|r| r.baseline_duration_ms).collect();
+        let e_durs: Vec<f64> = records.iter().map(|r| r.engage_duration_ms).collect();
+        let p_wires: Vec<f64> = records
+            .iter()
+            .map(|r| r.paired_wire_savings_percent)
+            .collect();
+        let p_lats: Vec<f64> = records
+            .iter()
+            .map(|r| r.paired_latency_savings_percent)
+            .collect();
+
+        let expected_b_wire_mean = b_wires.iter().sum::<f64>() / 30.0;
+        let expected_e_wire_mean = e_wires.iter().sum::<f64>() / 30.0;
+        let expected_b_dur_mean = b_durs.iter().sum::<f64>() / 30.0;
+        let expected_e_dur_mean = e_durs.iter().sum::<f64>() / 30.0;
+        let expected_p_wire_mean = p_wires.iter().sum::<f64>() / 30.0;
+        let expected_p_lat_mean = p_lats.iter().sum::<f64>() / 30.0;
+
+        assert!(
+            (s.baseline_wire_bytes.mean - expected_b_wire_mean).abs() < 0.1,
+            "Baseline wire mean mismatch"
+        );
+        assert!(
+            (s.engage_wire_bytes.mean - expected_e_wire_mean).abs() < 0.1,
+            "Engage wire mean mismatch"
+        );
+        assert!(
+            (s.baseline_duration_ms.mean - expected_b_dur_mean).abs() < 0.1,
+            "Baseline duration mean mismatch"
+        );
+        assert!(
+            (s.engage_duration_ms.mean - expected_e_dur_mean).abs() < 0.1,
+            "Engage duration mean mismatch"
+        );
+        assert!(
+            (s.mean_paired_wire_savings_percent - expected_p_wire_mean).abs() < 0.1,
+            "Mean paired wire savings mismatch"
+        );
+        assert!(
+            (s.mean_paired_latency_savings_percent - expected_p_lat_mean).abs() < 0.1,
+            "Mean paired latency savings mismatch"
+        );
+
+        let expected_agg_lat =
+            ((expected_b_dur_mean - expected_e_dur_mean) / expected_b_dur_mean) * 100.0;
+        assert!(
+            (s.aggregate_mean_latency_change_percent - expected_agg_lat).abs() < 0.1,
+            "Aggregate latency change mismatch"
+        );
+    }
 }

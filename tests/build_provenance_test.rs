@@ -4,13 +4,13 @@ use engram::build_info;
 #[test]
 fn test_build_provenance_env_vars_present() {
     // 1. Package version must match Cargo.toml
-    assert_eq!(build_info::VERSION, "1.5.4");
+    assert_eq!(build_info::VERSION, env!("CARGO_PKG_VERSION"));
 
     // 2. Full version string must contain required fields
     let full_str = build_info::VERSION_FULL;
 
     assert!(
-        full_str.contains("1.5.4"),
+        full_str.contains(env!("CARGO_PKG_VERSION")),
         "Version must contain package version"
     );
     assert!(

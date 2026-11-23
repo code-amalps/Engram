@@ -3711,12 +3711,19 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
         // Rust / Cargo toolchain
         if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
             let cargo_bin = PathBuf::from(cargo_home).join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
-        } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        }
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
             let cargo_bin = PathBuf::from(userprofile).join(".cargo").join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
         }
@@ -3857,13 +3864,45 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
         // Rust / Cargo toolchain (mirrors Windows CARGO_HOME / USERPROFILE behavior)
         if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
             let cargo_bin = PathBuf::from(cargo_home).join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
-        } else if let Ok(home) = std::env::var("HOME") {
+        }
+        if let Ok(home) = std::env::var("HOME") {
             let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
+            }
+        }
+
+        // Rustup toolchain binary directories
+        let mut rustup_roots = Vec::new();
+        if let Ok(rustup_home) = std::env::var("RUSTUP_HOME") {
+            rustup_roots.push(PathBuf::from(rustup_home));
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            rustup_roots.push(PathBuf::from(home).join(".rustup"));
+        }
+        for rustup_root in rustup_roots {
+            let toolchains_dir = rustup_root.join("toolchains");
+            if toolchains_dir.is_dir() && !is_untrusted_directory(&toolchains_dir) {
+                if let Ok(entries) = std::fs::read_dir(&toolchains_dir) {
+                    for entry in entries.flatten() {
+                        let bin_dir = entry.path().join("bin");
+                        if bin_dir.is_dir()
+                            && !is_untrusted_directory(&bin_dir)
+                            && !paths.contains(&bin_dir)
+                        {
+                            paths.push(bin_dir);
+                        }
+                    }
+                }
             }
         }
 
@@ -3896,6 +3935,27 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Scan parent PATH for trusted directories containing standard compiler tools (cargo, rustc).
+    // Untrusted directories (temp, downloads, desktop, relative paths) are strictly rejected.
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            if dir.is_absolute()
+                && dir.is_dir()
+                && !is_untrusted_directory(&dir)
+                && !paths.contains(&dir)
+            {
+                #[cfg(windows)]
+                let has_tool = dir.join("cargo.exe").is_file() || dir.join("rustc.exe").is_file();
+                #[cfg(not(windows))]
+                let has_tool = dir.join("cargo").is_file() || dir.join("rustc").is_file();
+
+                if has_tool {
+                    paths.push(dir);
                 }
             }
         }

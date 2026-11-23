@@ -62,7 +62,7 @@ jobs:
             target: aarch64-apple-darwin
             run_tests: true
           - name: macOS Intel (x86_64)
-            os: macos-13
+            os: macos-latest
             target: x86_64-apple-darwin
             run_tests: true
 
@@ -75,6 +75,16 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+
+      - name: Configure Cargo PATH
+        shell: bash
+        run: |
+          if [ -d "$HOME/.cargo/bin" ]; then
+            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          fi
+          if [ -n "$CARGO_HOME" ] && [ -d "$CARGO_HOME/bin" ]; then
+            echo "$CARGO_HOME/bin" >> $GITHUB_PATH
+          fi
 
       - name: Cargo Cache
         uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0

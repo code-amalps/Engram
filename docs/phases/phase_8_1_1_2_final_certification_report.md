@@ -6,8 +6,9 @@
 **Starting HEAD:** `0751299655120a47a27e0fe8c82dd0abbf2e80a2`  
 **Phase 8.1.1 Implementation Baseline:** `2d074f4aeb62396c64b4321a06a40682dfc34b00`  
 **Phase 8.1.1.2 Implementation Commit:** `bd8f9372254017e0380e8f310e967f23a604d77e`  
-**Phase 8.1.1.2 Documentation Commit:** `b822a8b40779b7d2e74054e05f57c1e3a4909e8f` (or amended HEAD)  
+**Phase 8.1.1.2 Test Refinement Commit:** `2cd8bd2e0ffe2e36ba36a696f3af7e7058cc2593`  
 **Certified Release Baseline:** `v1.5.4-cand5` at commit `2df1cac683435314ffd7ad52369e6d20198fae0d`  
+**Verified Multi-Platform CI Run ID:** `45150284124` (100% Green across all 6 jobs)  
 **Milestone:** Phase 8.1.1.2 Re-Certification  
 **Date:** 23 November 2026  
 **Final Certification Verdict:** `PHASE_8_1_1_2_ACCEPTED`  
@@ -74,6 +75,18 @@ This report formally supersedes the benchmark execution claims of Phase 8.1.1 ([
 - Formally corrected claims regarding Phase 8.1.1 pipe measurements.
 - Retained and highlighted the local debug execution latency penalty for consolidated workflows (~50-70% penalty in local execution).
 - Disclaimed token billing savings and remote network latency inferences.
+
+### 3.5 Multi-Platform CI Matrix Verification
+- **GitHub Actions Run ID:** `45150284124`
+- **Trigger Commit:** `2cd8bd2e0ffe2e36ba36a696f3af7e7058cc2593`
+- **Workflow Result:** **100% Green across all 6 Matrix Jobs:**
+  1. `Lint & Format Check`: completed (success)
+  2. `Linux Musl Static Investigation`: completed (success)
+  3. `Build & Test (Linux x86_64 (glibc))`: completed (success)
+  4. `Build & Test (Windows x86_64 (MSVC))`: completed (success)
+  5. `Build & Test (macOS Intel (x86_64))`: completed (success)
+  6. `Build & Test (macOS Apple Silicon (ARM64))`: completed (success)
+- **CI URL:** `https://github.com/code-amalps/Engram/actions/runs/45150284124`
 
 ---
 

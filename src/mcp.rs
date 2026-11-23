@@ -658,6 +658,7 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
     let root = root_path(root)?;
     match name {
         "engram_engage" => crate::engage::handle_engram_engage(&root, args),
+        "engram_trace_feature" => crate::feature_trace::handle_engram_trace_feature(&root, args),
         "engram_prepare_task" | "engram_prepare" => {
             let task = args["task"].as_str().unwrap_or("").trim();
             if task.is_empty() {
@@ -2022,17 +2023,52 @@ pub fn all_tools_definitions() -> Value {
     ])
 }
 
+pub fn trace_feature_tool_definition() -> Value {
+    json!({
+        "name": "engram_trace_feature",
+        "description": "Trace vertical cross-layer architectural feature flows through repository entry points, routes, service handlers, and storage layers.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Feature intent, route path, or entry-point name to trace" },
+                "entry_point_kind": { "type": "string", "enum": ["HTTP_ROUTE", "CLI_COMMAND", "PUBLIC_API", "EVENT_HANDLER"], "description": "Optional entry point category filter" },
+                "scope": { "type": "string", "description": "Optional repository-relative subpath scope" },
+                "max_depth": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum architectural traversal depth (default 5)" },
+                "max_paths": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum number of candidate trace paths to return (default 3)" },
+                "confidence_threshold": { "type": "string", "enum": ["CANDIDATE", "PATTERN", "EXACT"], "description": "Minimum evidence confidence class" },
+                "include_unresolved": { "type": "boolean", "description": "Whether to report unresolved boundary transitions and dynamic dispatches" },
+                "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
+            },
+            "required": ["query"]
+        }
+    })
+}
+
 pub fn tools_definitions() -> Value {
     let show_all = std::env::var("ENGRAM_SPECIALIST_TOOLS")
         .or_else(|_| std::env::var("ENGRAM_ALL_TOOLS"))
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
-    if show_all {
+    let show_trace = std::env::var("ENGRAM_ENABLE_TRACE")
+        .or_else(|_| std::env::var("ENGRAM_TRACE_TOOL"))
+        .or_else(|_| std::env::var("ENGRAM_GRAPH_TOOLS"))
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    let mut defs = if show_all {
         all_tools_definitions()
     } else {
         core_tools_definitions()
+    };
+
+    if show_trace {
+        if let Some(arr) = defs.as_array_mut() {
+            arr.push(trace_feature_tool_definition());
+        }
     }
+
+    defs
 }
 
 pub fn resources_definitions() -> Value {

@@ -9,6 +9,7 @@ pub mod contract;
 pub mod doctor;
 pub mod drift;
 pub mod engage;
+pub mod feature_trace;
 pub mod flywheel;
 pub mod frameworks;
 pub mod gc;
@@ -402,6 +403,20 @@ pub enum GraphAction {
         target: String,
         #[arg(long, default_value_t = 4)]
         max_depth: usize,
+    },
+    /// Trace vertical cross-layer architectural feature flows
+    Trace {
+        query: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 3)]
+        max_paths: usize,
+        #[arg(long)]
+        confidence: Option<String>,
     },
     /// Inspect architectural subsystems and cross-module relationships
     Subsystems,
@@ -1960,6 +1975,70 @@ fn run() -> Result<()> {
                                 "No call path found between '{}' and '{}' within {} hops.",
                                 source, target, max_depth
                             );
+                        }
+                    }
+                }
+            }
+            GraphAction::Trace {
+                query,
+                kind,
+                scope,
+                max_depth,
+                max_paths,
+                confidence,
+            } => {
+                let req = feature_trace::TraceRequest {
+                    query,
+                    entry_point_kind: kind,
+                    scope,
+                    max_depth: Some(max_depth),
+                    max_paths: Some(max_paths),
+                    confidence_threshold: confidence,
+                    include_unresolved: Some(true),
+                    max_bytes: None,
+                };
+                let trace = feature_trace::trace_feature(root, &req)?;
+                if force_json {
+                    print_json(&trace)?;
+                } else {
+                    println!("Feature Trace: '{}'", trace.query);
+                    println!(
+                        "  Repository: {} (commit: {})",
+                        trace.repository_id, trace.snapshot_id
+                    );
+                    println!("  State: {}", trace.graph_lifecycle_state);
+                    println!("  Paths Discovered: {}", trace.paths.len());
+                    for path in &trace.paths {
+                        println!(
+                            "\n  Path {}: (complete: {})",
+                            path.path_id, path.is_complete
+                        );
+                        for (i, hop) in path.hops.iter().enumerate() {
+                            let rel = hop.relationship_from_previous.as_deref().unwrap_or("ENTRY");
+                            println!(
+                                "    [{}] {} (kind: {}, conf: {:?})",
+                                i, hop.display_name, hop.node_kind, hop.confidence
+                            );
+                            println!("        path: {}:{}", hop.source_path, hop.start_line);
+                            println!("        rel:  {}", rel);
+                        }
+                    }
+                    if !trace.unresolved_links.is_empty() {
+                        println!(
+                            "\n  Unresolved Transitions ({}):",
+                            trace.unresolved_links.len()
+                        );
+                        for u in &trace.unresolved_links {
+                            println!(
+                                "    - [{}] {}:{} -> {} ({})",
+                                u.link_type, u.source_path, u.source_line, u.target_hint, u.reason
+                            );
+                        }
+                    }
+                    if !trace.diagnostics.is_empty() {
+                        println!("\n  Diagnostics:");
+                        for d in &trace.diagnostics {
+                            println!("    - {}", d);
                         }
                     }
                 }

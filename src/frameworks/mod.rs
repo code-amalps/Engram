@@ -5,6 +5,7 @@
 
 pub mod angular;
 pub mod generic;
+pub mod python_api;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,18 @@ pub struct ArchitecturalCompanion {
     pub exists_on_disk: bool,
 }
 
+/// Discovered architectural entry point (e.g. HTTP route, CLI command, event handler).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredEntryPoint {
+    pub node_id: String,
+    pub kind: String,
+    pub display_name: String,
+    pub source_path: String,
+    pub line: u32,
+    pub route_or_command: Option<String>,
+    pub confidence: AdapterConfidence,
+}
+
 /// SPI for framework-specific architectural relationship discovery.
 pub trait FrameworkRelationshipProvider: Send + Sync {
     /// Identifier of the framework adapter (e.g. "angular_ngrx", "generic")
@@ -119,12 +132,23 @@ pub trait FrameworkRelationshipProvider: Send + Sync {
         conn: &Connection,
         task: &str,
     ) -> Vec<ArchitecturalCompanion>;
+
+    /// Discover framework-specific entry points (e.g. routes, commands, event handlers)
+    fn discover_entry_points(
+        &self,
+        _workspace_root: &Path,
+        _conn: &Connection,
+        _files: &[String],
+    ) -> Vec<DiscoveredEntryPoint> {
+        Vec::new()
+    }
 }
 
 /// Get all registered framework relationship providers.
 pub fn get_providers() -> Vec<Box<dyn FrameworkRelationshipProvider>> {
     vec![
         Box::new(angular::AngularNgRxAdapter::new()),
+        Box::new(python_api::PythonApiAdapter::new()),
         Box::new(generic::GenericPassThroughAdapter::new()),
     ]
 }
@@ -216,6 +240,26 @@ impl FrameworkRelationshipProvider for MultiFrameworkProvider {
                 comp.confidence *= conf.weight();
                 if seen.insert((comp.path.clone(), comp.kind)) {
                     results.push(comp);
+                }
+            }
+        }
+        results
+    }
+
+    fn discover_entry_points(
+        &self,
+        workspace_root: &Path,
+        conn: &Connection,
+        files: &[String],
+    ) -> Vec<DiscoveredEntryPoint> {
+        let mut results = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for (adapter, _conf) in &self.adapters {
+            let eps = adapter.discover_entry_points(workspace_root, conn, files);
+            for ep in eps {
+                if seen.insert(ep.node_id.clone()) {
+                    results.push(ep);
                 }
             }
         }

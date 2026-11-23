@@ -22,6 +22,7 @@ pub mod impact;
 pub mod incremental;
 pub mod instructions;
 pub mod java_parser;
+pub mod knowledge_graph;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
@@ -370,6 +371,42 @@ enum CommandLine {
         #[command(subcommand)]
         action: HookAction,
     },
+    /// Native Micro-Knowledge Graph and repository intelligence queries
+    Graph {
+        #[command(subcommand)]
+        action: GraphAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GraphAction {
+    /// Inspect knowledge graph status, node/edge counts, and index health
+    Status,
+    /// Query neighborhood around a file or symbol
+    Query {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Query change impact, callers, dependent files, tests, and governing contracts
+    Impact {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Query shortest call path between two symbols
+    CallPath {
+        source: String,
+        target: String,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+    },
+    /// Inspect architectural subsystems and cross-module relationships
+    Subsystems,
+    /// Force a full re-index of the native micro-knowledge graph
+    Reindex,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1803,6 +1840,149 @@ fn run() -> Result<()> {
                 std::process::exit(res.exit_code);
             }
         }
+        Some(CommandLine::Graph { action }) => match action {
+            GraphAction::Status => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                if force_json {
+                    print_json(&status)?;
+                } else {
+                    println!("Engram Micro-Knowledge Graph Status:");
+                    println!("  State: {:?}", status.state);
+                    println!("  Schema Version: {}", status.schema_version);
+                    println!("  Total Nodes: {}", status.node_count);
+                    println!("  Total Edges: {}", status.edge_count);
+                    println!("  Indexed Files: {}", status.indexed_files_count);
+                    println!(
+                        "  Last Indexed Commit: {}",
+                        status
+                            .last_indexed_commit
+                            .unwrap_or_else(|| "none".to_string())
+                    );
+                }
+            }
+            GraphAction::Query {
+                target,
+                depth,
+                limit,
+            } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.neighborhood(&target, depth, limit);
+                if force_json {
+                    print_json(&edges)?;
+                } else {
+                    println!(
+                        "Neighborhood for '{}' (depth {}, limit {}):",
+                        target, depth, limit
+                    );
+                    if edges.is_empty() {
+                        println!("  No connected edges found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{}]--> {} (conf: {:.2}, tier: {:?})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.target_id,
+                                e.provenance.confidence,
+                                e.provenance.classification
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Impact { target, depth } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let report = index.impact(&target, depth);
+                if force_json {
+                    print_json(&report)?;
+                } else {
+                    println!(
+                        "Change Impact Analysis for '{}' (depth {}):",
+                        report.target, depth
+                    );
+                    println!("  Affected Files ({}):", report.affected_files.len());
+                    for f in &report.affected_files {
+                        println!("    - {f}");
+                    }
+                    println!("  Affected Symbols ({}):", report.affected_symbols.len());
+                    for s in &report.affected_symbols {
+                        println!("    - {s}");
+                    }
+                    if !report.exercised_tests.is_empty() {
+                        println!("  Exercised Tests ({}):", report.exercised_tests.len());
+                        for t in &report.exercised_tests {
+                            println!("    - {t}");
+                        }
+                    }
+                    if !report.governing_contracts.is_empty() {
+                        println!(
+                            "  Governing Contracts ({}):",
+                            report.governing_contracts.len()
+                        );
+                        for c in &report.governing_contracts {
+                            println!("    - {c}");
+                        }
+                    }
+                }
+            }
+            GraphAction::CallPath {
+                source,
+                target,
+                max_depth,
+            } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let path_opt = index.call_path(&source, &target, max_depth);
+                if force_json {
+                    print_json(&path_opt)?;
+                } else {
+                    match path_opt {
+                        Some(path) => {
+                            println!(
+                                "Call Path ({} hops):\n  {}",
+                                path.len() - 1,
+                                path.join(" -> ")
+                            );
+                        }
+                        None => {
+                            println!(
+                                "No call path found between '{}' and '{}' within {} hops.",
+                                source, target, max_depth
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Subsystems => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let subs = index.subsystems();
+                if force_json {
+                    print_json(&subs)?;
+                } else {
+                    println!("Repository Subsystems ({} modules):", subs.len());
+                    for s in &subs {
+                        println!(
+                            "  - {} ({} files, {} symbols, {} external deps, {} tests)",
+                            s.module_name,
+                            s.file_count,
+                            s.symbol_count,
+                            s.external_dependencies_count,
+                            s.test_count
+                        );
+                    }
+                }
+            }
+            GraphAction::Reindex => {
+                let status = knowledge_graph::sync_knowledge_graph(root, true)?;
+                println!(
+                    "✓ Full Knowledge Graph Reindex Complete: {} nodes, {} edges across {} files.",
+                    status.node_count, status.edge_count, status.indexed_files_count
+                );
+            }
+        },
     }
     Ok(())
 }

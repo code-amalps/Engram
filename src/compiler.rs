@@ -498,6 +498,12 @@ pub fn context_scoped_optimized(
         }
     }
 
+    let kg_index_opt = crate::knowledge_graph::open_graph_db(&root)
+        .ok()
+        .and_then(|kg_conn| {
+            crate::knowledge_graph::KnowledgeGraphIndex::load_from_db(&kg_conn).ok()
+        });
+
     for seed_path in &expansion_seeds {
         // A. Framework SPI Companion Expansion
         let companions = framework_provider.expand_companions(&root, &conn, seed_path);
@@ -628,6 +634,42 @@ pub fn context_scoped_optimized(
                         let list = provenance_map.entry(clean_neighbor).or_default();
                         if !list.contains(&prov) {
                             list.push(prov);
+                        }
+                    }
+                }
+            }
+        }
+
+        // D. Native Micro-Knowledge Graph multi-hop expansion (CALLS, IMPORTS, DEPENDS_ON, TESTS)
+        if !is_container_module(seed_path) {
+            if let Some(ref kg_index) = kg_index_opt {
+                let file_id = format!("file:{seed_path}");
+                let kg_edges = kg_index.neighborhood(&file_id, 2, 20);
+                for edge in kg_edges {
+                    let target_file =
+                        if edge.target_id.starts_with("file:") && edge.target_id != file_id {
+                            Some(edge.target_id.trim_start_matches("file:").to_string())
+                        } else if edge.source_id.starts_with("file:") && edge.source_id != file_id {
+                            Some(edge.source_id.trim_start_matches("file:").to_string())
+                        } else {
+                            None
+                        };
+
+                    if let Some(clean_tf) = target_file {
+                        let clean_tf = clean_tf.replace('\\', "/");
+                        if doc_map.contains_key(&clean_tf) && clean_tf != *seed_path {
+                            let boost = 4.0 * edge.provenance.confidence;
+                            *composite_scores.entry(clean_tf.clone()).or_insert(0.0) += boost;
+                            let prov = format!(
+                                "Native KG {} edge via {} (confidence: {:.2})",
+                                edge.category.as_str(),
+                                seed_path,
+                                edge.provenance.confidence
+                            );
+                            let list = provenance_map.entry(clean_tf).or_default();
+                            if !list.contains(&prov) {
+                                list.push(prov);
+                            }
                         }
                     }
                 }

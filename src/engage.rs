@@ -262,9 +262,30 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
         "Change Contract locked. Proceed directly to implement changes in authorized files. Call engram_postflight when finished."
     };
 
-    // 9. Format structured context components
-    let target_files: Vec<Value> = ctx
-        .files
+    // 9. Format structured context components & evaluate graph ranking
+    let candidate_file_paths: Vec<String> = ctx.files.iter().map(|f| f.path.clone()).collect();
+    let graph_pruning_report = crate::knowledge_graph::rank_context_with_graph(
+        &root,
+        &core_task,
+        &candidate_file_paths,
+        budget,
+    )
+    .ok();
+
+    let mut files_to_show = ctx.files.clone();
+    if let Some(ref report) = graph_pruning_report {
+        if !report.prioritized_files.is_empty() {
+            files_to_show.sort_by_key(|f| {
+                if let Some(pos) = report.prioritized_files.iter().position(|p| p == &f.path) {
+                    pos
+                } else {
+                    1000
+                }
+            });
+        }
+    }
+
+    let target_files: Vec<Value> = files_to_show
         .iter()
         .take(8)
         .map(|f| {
@@ -416,6 +437,11 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
             "token_budget": ctx.token_budget,
             "estimated_tokens": ctx.estimated_tokens,
             "omission_manifest": bounded_omission_manifest,
+            "graph_intelligence": graph_pruning_report.as_ref().map(|r| json!({
+                "token_reduction_pct": (r.token_reduction_percentage * 10.0).round() / 10.0,
+                "prioritized_files_count": r.prioritized_files.len(),
+                "related_tests": r.related_tests,
+            })),
         },
         "instructions": {
             "injected_files": injected_files,

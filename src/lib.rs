@@ -27,6 +27,7 @@ pub mod impact;
 pub mod incremental;
 pub mod instructions;
 pub mod java_parser;
+pub mod knowledge_graph;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;

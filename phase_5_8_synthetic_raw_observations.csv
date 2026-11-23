@@ -1,7 +1,0 @@
-Scenario_ID,Scenario_Name,Optimization_Type,Baseline_Bytes,Baseline_Tokens,Optimized_Bytes,Optimized_Tokens,Reduction_Pct,Measurement_Method,Weight
-SCEN-01,Progressive Disclosure Compact,DetailLevel::Compact,2044,538,472,124,76.95,Estimated_Bytes_Div_3_8,0.30
-SCEN-02,Targeted Symbol Filtering,Symbol Scoring Ranking,1645,433,566,149,65.59,Estimated_Bytes_Div_3_8,0.25
-SCEN-03,Context Deduplication,Signature Hash Cache,1140,300,570,150,50.00,Estimated_Bytes_Div_3_8,0.20
-SCEN-04,Adaptive Leaf Bypass,classify_task_complexity,2044,538,0,0,100.00,Zero_Bypass,0.25
-SCEN-05,Tool Wrapper Overhead,JSON-RPC Framing,0,0,578,152,-152.00,Measured_Serialization,Additive
-TOTAL,Workflow Aggregate,Combined Candidate 5,6873,1809,2186,575,68.21,Reconstructed_Aggregate,1.00

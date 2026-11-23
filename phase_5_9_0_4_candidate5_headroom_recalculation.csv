@@ -1,8 +1,0 @@
-scenario_id,scenario_name,task_a_cumulative_usage,task_b_dynamic_ceiling,task_b_prior_arm_usage,gross_remaining_before_cand5,protected_reserve,usable_headroom,cand5_assigned_ceiling,actual_dispatch_eligibility,rationale
-SC-01,Nominal Saturation (Exact Ceilings),1000000,1500000,1000000,500000,45000,455000,455000,GUARANTEED,Standard nominal execution with exact 500k arm spending
-SC-02,One Preceding Arm Empirical Overshoot,1000000,1500000,1020000,480000,45000,435000,435000,GUARANTEED,Slot 2 overshoots by demonstrated 20k tokens
-SC-03,Both Preceding Arms Max Empirical Usage,1000000,1500000,1040000,460000,45000,415000,415000,GUARANTEED,Slots 1 and 2 each consume 520k tokens
-SC-04A,Theoretical Max Overshoot (Task A Nominal),1000000,1500000,1062768,437232,45000,392232,392232,GUARANTEED,Corrected SC-04 model with 1.5M ceiling and 1062768 prior spending
-SC-04B,Theoretical Max Overshoot (Task A Max Overshoot),1031384,1468616,1062768,405848,45000,360848,360848,GUARANTEED,Corrected multi-overshoot model with Task A dynamic clamp to 1468616
-SC-05,Early Arm Starvation / Low Usage,800000,1500000,400000,1100000,45000,500000,500000,GUARANTEED,Low prior usage caps Candidate 5 ceiling at standard 500k limit
-SC-06,Telemetry Incomplete or Corrupted,UNCERTAIN,HALTED,UNCERTAIN,UNCERTAIN,45000,0,0,REFUSE_DISPATCH,Fail-closed halt on missing or uncertain budget telemetry

@@ -1,6 +1,0 @@
-Arm_ID,Arm_Name,Candidate_Version,Binary_Path,Expected_SHA256,Ledger_Registered,Binary_Present,Hash_Verified,Harness_Ready,Acceptance_Status
-Arm A,Native Codex (Baseline),native,N/A,NONE,TRUE,TRUE,TRUE,TRUE,ACCEPTED
-Arm B,Candidate 3 Always-On,cand3,benchmarks/matched-pair-harness/bin/candidate-phase3/engram.exe,97C5EC47E3704E16F9046623C2034057708005C35460DEAA6829EA045A96A777,TRUE,TRUE,TRUE,TRUE,ACCEPTED
-Arm C,Candidate 4.2 Always-On,cand4_2,benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe,78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2,TRUE,TRUE,TRUE,TRUE,ACCEPTED
-Arm D,Candidate 4.2 Adaptive,cand4_2,benchmarks/matched-pair-harness/bin/candidate-phase4.2/engram.exe,78B84880AB5E7124593FD21669F8A1EB46DC223686601F2142EF6125BA559DD2,TRUE,TRUE,TRUE,TRUE,ACCEPTED
-Arm E,Candidate 5 Optimized,cand5,benchmarks/matched-pair-harness/bin/candidate-phase5/engram.exe,76D58971E1C598C874C8B0D707EC6B8DEDCCAE98357BAFF889B99516668746F9,FALSE,FALSE,FALSE,FALSE,REJECTED_UNREGISTERED

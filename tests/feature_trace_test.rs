@@ -8,11 +8,11 @@
 //! 5. Depth and path limits enforcement (`max_depth`, `max_paths`).
 //! 6. Security boundary enforcement (scope traversal rejection, empty query rejection).
 //! 7. Output payload bounding (`max_bytes`).
-//! 8. Real-world 5-task vertical slice validation against AMstraLift repository.
+//! 8. Multi-service vertical slice validation against isolated test workspace.
 
 use serde_json::json;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use engram::feature_trace::{
@@ -422,20 +422,78 @@ def call_c():
 }
 
 #[test]
-fn test_real_repo_amstralift_5_ground_truth_traces() {
-    let amstralift_path = Path::new(r"C:\Users\Amal P S\OneDrive\Projects\AMstraLift");
-    if !amstralift_path.exists() {
-        eprintln!("AMstraLift repo not found on disk; skipping live repo integration test.");
-        return;
-    }
+fn test_multi_service_ground_truth_traces() {
+    let ws = TestWorkspace::new("multi_service");
 
-    // Verify KG exists or can be synced
-    sync_knowledge_graph(amstralift_path, false)
-        .expect("Knowledge graph sync on AMstraLift failed");
+    fs::write(
+        ws.root.join("api/app.py"),
+        r#"
+@app.post("/api/v1/audit")
+def run_security_audit():
+    run_remediation()
 
-    // 1. Audit slice: POST /api/v1/audit -> run_security_audit() -> run_remediation() -> get()
+@app.get("/api/v1/policy")
+def get_policy():
+    load_policy()
+
+@app.get("/api/v1/doctor")
+def get_system_diagnostics():
+    to_dict()
+    urlopen(Request("https://api.example.com/health"))
+
+def to_dict():
+    pass
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        ws.root.join("services/security.py"),
+        r#"
+def run_remediation():
+    query_repository()
+
+def load_policy():
+    save_storage()
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        ws.root.join("db/storage.py"),
+        r#"
+def query_repository():
+    pass
+
+def save_storage():
+    pass
+
+def list_campaigns():
+    pass
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        ws.root.join("cli.py"),
+        r#"
+@app.command("checkpoints")
+def checkpoints_cmd():
+    query_repository()
+
+@app.command("campaign")
+def campaign_cmd():
+    list_campaigns()
+"#,
+    )
+    .unwrap();
+
+    ws.commit("multi service endpoints");
+    sync_knowledge_graph(&ws.root, false).expect("Knowledge graph sync failed");
+
+    // 1. Audit slice: POST /api/v1/audit -> run_security_audit() -> run_remediation() -> query_repository()
     let trace_audit = trace_feature(
-        amstralift_path,
+        &ws.root,
         &TraceRequest {
             query: "audit".to_string(),
             entry_point_kind: Some("HTTP_ROUTE".to_string()),
@@ -462,9 +520,9 @@ fn test_real_repo_amstralift_5_ground_truth_traces() {
         TraceConfidence::Exact
     );
 
-    // 2. Policy slice: GET /api/v1/policy -> get_policy() -> load_policy()
+    // 2. Policy slice: GET /api/v1/policy -> get_policy() -> load_policy() -> save_storage()
     let trace_policy = trace_feature(
-        amstralift_path,
+        &ws.root,
         &TraceRequest {
             query: "policy".to_string(),
             entry_point_kind: Some("HTTP_ROUTE".to_string()),
@@ -494,9 +552,9 @@ fn test_real_repo_amstralift_5_ground_truth_traces() {
             .any(|h| h.display_name.contains("load_policy"))
     );
 
-    // 3. Checkpoints slice: CLI command: checkpoints -> checkpoints_cmd()
+    // 3. Checkpoints slice: CLI command: checkpoints -> checkpoints_cmd() -> query_repository()
     let trace_checkpoints = trace_feature(
-        amstralift_path,
+        &ws.root,
         &TraceRequest {
             query: "checkpoints".to_string(),
             entry_point_kind: Some("CLI_COMMAND".to_string()),
@@ -520,7 +578,7 @@ fn test_real_repo_amstralift_5_ground_truth_traces() {
 
     // 4. Doctor slice: GET /api/v1/doctor -> get_system_diagnostics() -> Request/urlopen ExternalBoundary
     let trace_doctor = trace_feature(
-        amstralift_path,
+        &ws.root,
         &TraceRequest {
             query: "doctor".to_string(),
             entry_point_kind: Some("HTTP_ROUTE".to_string()),
@@ -549,9 +607,9 @@ fn test_real_repo_amstralift_5_ground_truth_traces() {
         "Doctor trace should capture external network boundary (urlopen/Request)"
     );
 
-    // 5. Campaign slice: CLI command: init/report -> campaign_init_cmd()/campaign_report_cmd() -> save()/list_campaigns()
+    // 5. Campaign slice: CLI command: campaign -> campaign_cmd() -> list_campaigns()
     let trace_campaign = trace_feature(
-        amstralift_path,
+        &ws.root,
         &TraceRequest {
             query: "campaign".to_string(),
             entry_point_kind: Some("CLI_COMMAND".to_string()),

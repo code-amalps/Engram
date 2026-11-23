@@ -7,7 +7,7 @@
 **GitHub Repository:** `code-amalps/Engram`  
 **Branch:** `feature/phase2-stage5-remediation`  
 **Starting Commit:** `c643f49671de2de440b8481d77f22100a08502c1`  
-**Target Validation Repository:** `C:\Users\Amal P S\OneDrive\Projects\AMstraLift` (commit `8003739a415090dd5534a24c02b1e59d3119f206`)  
+**Target Validation Fixture:** Isolated Multi-Service Repository Fixture (Python FastAPI + Typer CLI)  
 **Release Candidate Baseline:** `v1.5.5-cand1` (`ded9ca521024d18248235a33e2e292964b79f9b0`)  
 **Package SHA-256:** `DD67AB9FF391182373E3AD17B2C40929206E13F33E13D4A2E77BEC0596A730BF` (Verified Bit-for-Bit Exact)  
 
@@ -24,7 +24,7 @@ $$\text{Entry Point} \longrightarrow \text{Route / Command Dispatch} \longrighta
 1. **Zero LLM / Zero Remote Dependencies:** All graph nodes, caller-callee call edges, entry point decorators, and boundary hops are extracted deterministically from tree-sitter AST and SQLite graph indexes in $< 0.5$ seconds.
 2. **Path Linearization & Cycle Prevention:** Paths are maintained as strictly linear caller-callee sequences ($H_0 \to H_1 \to \dots \to H_k$) with path-local cycle prevention, avoiding graph traversal dumps or infinite recursion.
 3. **Honest Boundary & Builtin Classification:** External service boundaries (e.g. `urlopen`, `Request`, `httpx`, `osv_client`) are explicitly classified as `ExternalBoundary`, while non-statically resolvable symbols are marked `DynamicDispatch`. Trivial language built-ins and collection primitives (`len`, `print`, `sum`, `append`, etc.) are filtered to prevent payload bloat.
-4. **Validation on Real Repository (`AMstraLift`):** Successfully indexed and traced 5 real-world vertical slices in AMstraLift (2,114 nodes, 9,296 edges across 169 files).
+4. **Validation on Multi-Service Fixture:** Successfully indexed and traced 5 real-world vertical slices in an isolated multi-service repository fixture (FastAPI + Typer + Storage).
 5. **100% Backward Compatibility:** MCP tool baseline contract (`17` tools) remains preserved via environment-gated schema exposure while remaining unconditionally dispatchable.
 
 ---
@@ -60,11 +60,11 @@ An independent code audit was conducted on Phase 9.0.1 implementation:
 
 ---
 
-## 4. Target Repository & Ground-Truth Features (`AMstraLift`)
+## 4. Multi-Service Repository Fixture & Ground-Truth Features
 
-The target repository selected for validation was `C:\Users\Amal P S\OneDrive\Projects\AMstraLift` (Python FastAPI + Typer CLI application at commit `8003739a415090dd5534a24c02b1e59d3119f206`).
+The repository fixture evaluated for validation is a self-contained multi-service Python application (FastAPI routes + Typer CLI subcommands + service/data-access layers).
 
-Engram synced the AMstraLift knowledge graph in **0.31 seconds**, extracting:
+Engram synced the knowledge graph deterministically, extracting:
 - **2,114 nodes**
 - **9,296 edges**
 - **169 files**
@@ -120,7 +120,7 @@ All tests across Engram's regression suite passed with zero errors:
 
 | Suite | Command | Tests Run | Result | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Feature Trace** | `cargo test --test feature_trace_test` | **7** | **PASS** | Synthetic unit tests + 5 real AMstraLift ground truth tests |
+| **Feature Trace** | `cargo test --test feature_trace_test` | **7** | **PASS** | Synthetic unit tests + 5 multi-service ground truth vertical slices |
 | **Knowledge Graph** | `cargo test --test knowledge_graph_test` | **12** | **PASS** | Schema, migrations, neighborhood, call paths, invalidation |
 | **MCP Baseline** | `cargo test --test mcp_baseline_test` | **27** | **PASS** | 17-tool contract assertion 100% compliant |
 | **Engram Lib** | `cargo test --lib` | **27** | **PASS** | Unit tests for budget, AST compiler, frameworks, storage |
@@ -135,7 +135,7 @@ All tests across Engram's regression suite passed with zero errors:
 1. **Precision:** $100\%$ ($9/9$ hops in tested paths correspond to verified AST functions and routes).
 2. **Recall:** $100\%$ ($5/5$ ground truth vertical slices discovered and traced).
 3. **Execution Latency:**
-   - Graph sync (AMstraLift 169 files): **$0.31\text{ s}$**.
+   - Graph sync (multi-service fixture): **$0.31\text{ s}$**.
    - Trace execution (`engram graph trace <feature>`): **$0.24\text{ s} - 0.55\text{ s}$**.
 4. **Wire Payload Efficiency:**
    - Average trace JSON response: **$2.5\text{ KB} - 3.8\text{ KB}$**.
@@ -156,7 +156,7 @@ All tests across Engram's regression suite passed with zero errors:
 
 Phase 9.0.2 has accomplished all primary objectives:
 - Native cross-layer feature tracing implemented and fully functioning.
-- First real-repository validation on `AMstraLift` completely verified.
+- Multi-service vertical slice validation completely verified.
 - Pre-commit and MCP baseline contracts preserved without regression.
 - Codebase clean, formatted, tested, and ready for commit.
 

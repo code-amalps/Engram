@@ -14,7 +14,7 @@ import { ContextReport, DurableMemory } from '../src/types';
 describe('Context Compiler Tests', () => {
   const sampleReport: ContextReport = {
     task: 'Add exponential backoff retry to payment service',
-    project: 'AMstraLift',
+    project: 'EngramClientTest',
     revision: 'git-rev-abc',
     indexed_files: 42,
     token_budget: 1500,
@@ -73,7 +73,7 @@ describe('Context Compiler Tests', () => {
 
       assert.match(md, /# Engram Context Compilation/);
       assert.match(md, /> \*\*Task:\*\* Add exponential backoff retry to payment service/);
-      assert.match(md, /\| \*\*Project\*\* \| `AMstraLift` \|/);
+      assert.match(md, /\| \*\*Project\*\* \| `EngramClientTest` \|/);
       assert.match(md, /\| \*\*Confidence\*\* \| \*\*HIGH\*\* \|/);
       assert.match(md, /\| \*\*Estimated Tokens\*\* \| `380` tokens \|/);
       assert.match(md, /## Relevant Architectural Decisions/);

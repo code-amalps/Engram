@@ -238,7 +238,7 @@ fn test_unresolved_dependency_evidence_integrity() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// 5. Invariant: AMstraLift/Engram must never report an external dependency as local merely because a matching-looking directory exists.
+/// 5. Invariant: Engram must never report an external dependency as local merely because a matching-looking directory exists.
 #[test]
 fn test_external_not_confused_with_local_subpath() {
     let root = temp_repo_dir("external_vs_local");

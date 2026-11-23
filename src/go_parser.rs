@@ -342,7 +342,7 @@ pub fn is_go_stdlib(import_path: &str) -> bool {
 }
 
 /// Classify and resolve dependency import path with strict Go module semantics.
-/// Invariant 1: AMstraLift/Engram must never report an external dependency as local merely because a matching-looking directory exists.
+/// Invariant 1: Engram must never report an external dependency as local merely because a matching-looking directory exists.
 /// Invariant 2: An unresolved dependency must remain UNRESOLVED and must never silently degrade into an inferred relationship.
 pub fn resolve_go_dependency_origin(
     root: &Path,

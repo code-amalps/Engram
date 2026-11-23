@@ -168,7 +168,7 @@ describe('EngramClient Tests', () => {
       it('should validate and parse context report response correctly', () => {
         const raw = {
           task: 'Fix race condition in session manager',
-          project: 'AMstraLift',
+          project: 'EngramClientTest',
           revision: 'abc987',
           indexed_files: 50,
           token_budget: 2000,
@@ -193,7 +193,7 @@ describe('EngramClient Tests', () => {
 
         const res = client.validateContextReport(raw);
         assert.strictEqual(res.task, 'Fix race condition in session manager');
-        assert.strictEqual(res.project, 'AMstraLift');
+        assert.strictEqual(res.project, 'EngramClientTest');
         assert.strictEqual(res.confidence, 'HIGH');
         assert.strictEqual(res.files.length, 1);
         assert.strictEqual(res.files[0].path, 'src/session.rs');

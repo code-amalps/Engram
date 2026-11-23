@@ -447,11 +447,28 @@ pub fn run_hook(
                 );
                 let _ = crate::storage::remove_bypass_trivial(&resolved_root);
             } else if let Some(ref cid) = guard_res.context.contract_id {
+                let contract_status_str = match crate::contract::get_contract(&resolved_root, cid) {
+                    Ok(c) => format!("{:?}", c.status),
+                    Err(_) => "Active".to_string(),
+                };
                 println!(
-                    "✓ Engram Pre-Commit Guard: Staged changes authorized (postflight verified, 0 model tokens consumed)."
+                    "✓ Engram Pre-Commit Guard: Staged changes authorized; local postflight checks passed (0 model tokens consumed)."
                 );
-                println!("  Active Contract: {cid} (Status: Validated)");
-                let _ = crate::recovery::resolve_session(&resolved_root, cid);
+                println!(
+                    "  Active Contract: {cid} (Status: {contract_status_str}; Verification: Passed)"
+                );
+                match crate::recovery::resolve_session(&resolved_root, cid) {
+                    Ok(Some(_)) => {
+                        println!("  Recovery Session: Resolved");
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!(
+                            "\n❌ Engram Pre-Commit Guard: Failed resolving recovery session for contract '{cid}': {e}"
+                        );
+                        return Ok(2);
+                    }
+                }
             } else {
                 println!(
                     "✓ Engram Pre-Commit Guard: Staged changes authorized ({} file(s) evaluated).",
@@ -469,7 +486,12 @@ pub fn run_hook(
             if is_bypassed {
                 let _ = crate::storage::remove_bypass_trivial(&resolved_root);
             } else if let Some(ref cid) = guard_res.context.contract_id {
-                let _ = crate::recovery::resolve_session(&resolved_root, cid);
+                if let Err(e) = crate::recovery::resolve_session(&resolved_root, cid) {
+                    eprintln!(
+                        "\n❌ Engram Pre-Commit Guard: Failed resolving recovery session for contract '{cid}': {e}"
+                    );
+                    return Ok(2);
+                }
             }
 
             println!(

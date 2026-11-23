@@ -766,70 +766,111 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
             None => {
-                // Check if this qualifies for zero-cost trivial bypass
+                // Check if this qualifies for zero-cost trivial bypass or pure documentation change
                 let is_pure_docs = crate::storage::is_pure_documentation_change(&changed_files);
-                let bypass_marker = crate::storage::load_bypass_trivial(&resolved_root)
-                    .ok()
-                    .flatten();
-                let is_bypassed = if is_pure_docs {
-                    true
-                } else if let Some(ref record) = bypass_marker {
-                    // Marker exists: verify changed files match recorded target files
-                    if !record.target_files.is_empty() {
-                        changed_files.iter().all(|cf| {
-                            let norm = crate::contract::normalize_rel_path(cf);
-                            record
-                                .target_files
-                                .iter()
-                                .any(|tf| crate::contract::normalize_rel_path(tf) == norm)
-                        })
-                    } else {
-                        // Empty target files: must be a single non-sensitive leaf file
-                        changed_files.len() == 1
-                            && !crate::prompt::is_security_file_path(&changed_files[0])
-                            && !crate::prompt::is_manifest_file_path(&changed_files[0])
-                            && !crate::prompt::is_test_file_path(&changed_files[0])
-                    }
-                } else {
-                    false
-                };
-
-                if is_bypassed {
+                if is_pure_docs {
                     checks_skipped.push(CheckExecutionRecord {
                         name: "contracts".to_string(),
                         status: "bypassed".to_string(),
                         reason: Some(
-                            "Trivial leaf edit authorized under zero-cost bypass (0 model tokens consumed)"
+                            "Documentation-only changes authorized under zero-cost bypass (0 model tokens consumed)"
                                 .to_string(),
                         ),
                     });
-                } else if policy.checks.contracts.required || options.enforce_contract {
-                    findings.push(GuardFinding {
-                        rule_id: "GUARD-CONTRACT-001".to_string(),
-                        severity: FindingSeverity::Block,
-                        message: "No active Change Contract found and contract enforcement is enabled"
-                            .to_string(),
-                        path: None,
-                        remediation: Some(
-                            "Create an active contract using 'engram preflight \"<task>\"', 'engram contract create \"<goal>\"', or invoke 'engram_engage'"
-                                .to_string(),
-                        ),
-                    });
-                    checks_executed.push("contracts".to_string());
                 } else {
-                    checks_skipped.push(CheckExecutionRecord {
-                        name: "contracts".to_string(),
-                        status: "not_applicable".to_string(),
-                        reason: Some(
-                            "No active Change Contract present (optional in policy: permissive mode permitted)".to_string(),
-                        ),
-                    });
+                    match crate::storage::validate_and_consume_bypass(
+                        &resolved_root,
+                        &changed_files,
+                    ) {
+                        Ok(crate::storage::BypassValidationResult::Authorized(record)) => {
+                            checks_skipped.push(CheckExecutionRecord {
+                                name: "contracts".to_string(),
+                                status: "bypassed".to_string(),
+                                reason: Some(format!(
+                                    "Trivial leaf edit authorized under zero-cost bypass (record {}, 0 model tokens consumed)",
+                                    record.record_id
+                                )),
+                            });
+                        }
+                        Ok(crate::storage::BypassValidationResult::Rejected(reason)) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-BYPASS-001".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!("Trivial task bypass rejected: {reason}"),
+                                path: None,
+                                remediation: Some(
+                                    "Create an active contract using 'engram preflight \"<task>\"' or 'engram contract create \"<goal>\"'"
+                                        .to_string(),
+                                ),
+                            });
+                            checks_executed.push("contracts".to_string());
+                        }
+                        Ok(crate::storage::BypassValidationResult::NoRecord) => {
+                            if policy.checks.contracts.required || options.enforce_contract {
+                                findings.push(GuardFinding {
+                                    rule_id: "GUARD-CONTRACT-001".to_string(),
+                                    severity: FindingSeverity::Block,
+                                    message: "No active Change Contract found and contract enforcement is enabled"
+                                        .to_string(),
+                                    path: None,
+                                    remediation: Some(
+                                        "Create an active contract using 'engram preflight \"<task>\"', 'engram contract create \"<goal>\"', or invoke 'engram_engage'"
+                                            .to_string(),
+                                    ),
+                                });
+                                checks_executed.push("contracts".to_string());
+                            } else {
+                                checks_skipped.push(CheckExecutionRecord {
+                                    name: "contracts".to_string(),
+                                    status: "not_applicable".to_string(),
+                                    reason: Some(
+                                        "No active Change Contract present (optional in policy: permissive mode permitted)".to_string(),
+                                    ),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-BYPASS-001".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!("Bypass authorization failed: unreadable or corrupt bypass record: {e}"),
+                                path: None,
+                                remediation: Some(
+                                    "Remove corrupt .engram/bypass_trivial.json and initialize an active contract with 'engram preflight \"<task>\"'"
+                                        .to_string(),
+                                ),
+                            });
+                            checks_executed.push("contracts".to_string());
+                        }
+                    }
                 }
             }
         }
     }
 
-    // 5. Sovereign Constitution Check
+    // 5. Sovereign Constitution Check & Mandatory Policy Invariants
+    // In PR mode, protect sovereign policy files from unratified mutation unconditionally
+    if options.base_commit.is_some() {
+        for file in &changed_files {
+            let norm = normalize_rel_path(file);
+            if is_policy_file(&norm) {
+                findings.push(GuardFinding {
+                    rule_id: "GUARD-CONST-001".to_string(),
+                    severity: FindingSeverity::Block,
+                    message: format!(
+                        "Sovereign policy file '{}' cannot be modified in PR without human ratification",
+                        file
+                    ),
+                    path: Some(file.clone()),
+                    remediation: Some(
+                        "Submit policy modifications through a separate approved governance PR"
+                            .to_string(),
+                    ),
+                });
+            }
+        }
+    }
+
     if !policy.checks.constitution.enabled {
         checks_skipped.push(CheckExecutionRecord {
             name: "constitution".to_string(),
@@ -839,53 +880,46 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
     } else {
         checks_executed.push("constitution".to_string());
 
-        // In PR mode, protect sovereign policy files from unratified mutation
-        if options.base_commit.is_some() {
-            for file in &changed_files {
-                let norm = normalize_rel_path(file);
-                if is_policy_file(&norm) {
-                    findings.push(GuardFinding {
-                        rule_id: "GUARD-CONST-001".to_string(),
-                        severity: FindingSeverity::Block,
-                        message: format!(
-                            "Sovereign policy file '{}' cannot be modified in PR without human ratification",
-                            file
-                        ),
-                        path: Some(file.clone()),
-                        remediation: Some(
-                            "Submit policy modifications through a separate approved governance PR"
-                                .to_string(),
-                        ),
-                    });
+        // Evaluate loaded Project Constitution rules
+        match load_constitution(&resolved_root) {
+            Ok(rules) => {
+                for file in &changed_files {
+                    let norm = normalize_rel_path(file);
+                    for rule in &rules {
+                        let violated = if let Some(ref forbidden) = rule.forbidden {
+                            matches_boundary(&norm, forbidden)
+                        } else {
+                            false
+                        };
+                        if violated {
+                            findings.push(GuardFinding {
+                                rule_id: format!("GUARD-CONST-{}", rule.id),
+                                severity: policy.checks.constitution.severity,
+                                message: format!(
+                                    "Constitution rule '{}' ({}) strictly forbids modifying '{}'",
+                                    rule.name, rule.id, file
+                                ),
+                                path: Some(file.clone()),
+                                remediation: Some(
+                                    "Do not modify files within this forbidden constitutional boundary"
+                                        .to_string(),
+                                ),
+                            });
+                        }
+                    }
                 }
             }
-        }
-
-        // Evaluate loaded Project Constitution rules
-        let rules = load_constitution(&resolved_root).unwrap_or_default();
-        for file in &changed_files {
-            let norm = normalize_rel_path(file);
-            for rule in &rules {
-                let violated = if let Some(ref forbidden) = rule.forbidden {
-                    matches_boundary(&norm, forbidden)
-                } else {
-                    false
-                };
-                if violated {
-                    findings.push(GuardFinding {
-                        rule_id: format!("GUARD-CONST-{}", rule.id),
-                        severity: policy.checks.constitution.severity,
-                        message: format!(
-                            "Constitution rule '{}' ({}) strictly forbids modifying '{}'",
-                            rule.name, rule.id, file
-                        ),
-                        path: Some(file.clone()),
-                        remediation: Some(
-                            "Do not modify files within this forbidden constitutional boundary"
-                                .to_string(),
-                        ),
-                    });
-                }
+            Err(e) => {
+                findings.push(GuardFinding {
+                    rule_id: "GUARD-CONST-000".to_string(),
+                    severity: FindingSeverity::Block,
+                    message: format!("Failed to load or parse Project Constitution: {e}"),
+                    path: None,
+                    remediation: Some(
+                        "Ensure .engram/constitution.yaml exists, is readable, and contains valid YAML"
+                            .to_string(),
+                    ),
+                });
             }
         }
 

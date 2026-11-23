@@ -1,6 +1,6 @@
 //! Project Constitution and Rules Engine: machine-evaluable prescriptions, multi-type rules, and overrides.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path};
@@ -34,8 +34,18 @@ pub fn load_constitution(root: &Path) -> Result<Vec<ConstitutionRule>> {
     ];
     for path in &candidates {
         if path.exists() {
-            let content = fs::read_to_string(path)?;
-            let parsed: ConstitutionFile = serde_yaml::from_str(&content).unwrap_or_default();
+            let content = fs::read_to_string(path).with_context(|| {
+                format!(
+                    "Failed to read Project Constitution at '{}'",
+                    path.display()
+                )
+            })?;
+            let parsed: ConstitutionFile = serde_yaml::from_str(&content).with_context(|| {
+                format!(
+                    "Failed to parse Project Constitution YAML at '{}'",
+                    path.display()
+                )
+            })?;
             return Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect());
         }
     }
@@ -59,9 +69,14 @@ pub fn load_constitution_at_revision(root: &Path, rev: &str) -> Result<Vec<Const
         if let Ok(out) = output {
             if out.status.success() {
                 let content = String::from_utf8_lossy(&out.stdout);
-                if let Ok(parsed) = serde_yaml::from_str::<ConstitutionFile>(&content) {
-                    return Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect());
-                }
+                let parsed: ConstitutionFile = serde_yaml::from_str::<ConstitutionFile>(&content)
+                    .with_context(|| {
+                    format!(
+                        "Failed to parse Project Constitution YAML at revision {}:{}",
+                        trimmed, cand
+                    )
+                })?;
+                return Ok(parsed.rules.into_iter().filter(|r| r.enabled).collect());
             }
         }
     }

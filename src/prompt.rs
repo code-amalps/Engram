@@ -508,7 +508,7 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
 
 /// Collects distinct file-like references from the task text.
 /// Looks for patterns like `path/to/file.ext` or standalone files like `README.md` that weren't captured by planned-file parsing.
-fn collect_inline_file_references(raw_task: &str) -> Vec<String> {
+pub(crate) fn collect_inline_file_references(raw_task: &str) -> Vec<String> {
     let mut files = Vec::new();
     // Split on whitespace, commas, backticks, and quotes
     for token in
@@ -1027,57 +1027,67 @@ pub fn prepare_task_context_adaptive(
 
     if signals.classification == TaskComplexity::Trivial && !force_no_bypass {
         // Bypass path: no contract, no AST context, no preflight overhead
-        let (core_task, planned) = parse_task_and_planned_files(task, None);
-        let _ = crate::storage::save_bypass_trivial(root, &core_task, &signals.reason, &planned);
-
-        let body = match format {
-            PromptFormat::Markdown => {
-                format!(
-                    "# Task\n{}\n\n## Engram Bypass Notice\n\
-                     This task was classified as **trivial** by Engram's deterministic classifier.\n\
-                     - **Reason:** {}\n\
-                     - No Change Contract was created.\n\
-                     - No preflight or context compilation was performed.\n\
-                     - Proceed directly with the edit. Call `engram_postflight` only if you want compliance auditing.\n",
-                    core_task, signals.reason
-                )
+        let (core_task, mut planned) = parse_task_and_planned_files(task, None);
+        if planned.is_empty() {
+            for inline in collect_inline_file_references(task) {
+                if !planned.contains(&inline) {
+                    planned.push(inline);
+                }
             }
-            PromptFormat::Text => {
-                format!(
-                    "=== TASK ===\n{}\n\n=== ENGRAM BYPASS ===\n\
-                     Classification: TRIVIAL\n\
-                     Reason: {}\n\
-                     No contract or preflight was generated. Proceed directly.\n",
-                    core_task, signals.reason
-                )
-            }
-        };
-
-        let mut clipboard_copied = false;
-        if copy_clipboard {
-            clipboard_copied = try_copy_to_clipboard(&body).is_ok();
         }
+        if planned.len() == 1
+            && crate::storage::save_bypass_trivial(root, &core_task, &signals.reason, &planned)
+                .is_ok()
+        {
+            let body = match format {
+                PromptFormat::Markdown => {
+                    format!(
+                        "# Task\n{}\n\n## Engram Bypass Notice\n\
+                         This task was classified as **trivial** by Engram's deterministic classifier.\n\
+                         - **Reason:** {}\n\
+                         - No Change Contract was created.\n\
+                         - No preflight or context compilation was performed.\n\
+                         - Proceed directly with the edit. Call `engram_postflight` only if you want compliance auditing.\n",
+                        core_task, signals.reason
+                    )
+                }
+                PromptFormat::Text => {
+                    format!(
+                        "=== TASK ===\n{}\n\n=== ENGRAM BYPASS ===\n\
+                         Classification: TRIVIAL\n\
+                         Reason: {}\n\
+                         No contract or preflight was generated. Proceed directly.\n",
+                        core_task, signals.reason
+                    )
+                }
+            };
 
-        return Ok(PreparedTaskOutput {
-            task: core_task,
-            contract_id: String::new(),
-            contract_version: 0,
-            baseline_commit: String::new(),
-            status: "Bypassed".to_string(),
-            expected_files: vec![],
-            forbidden_boundaries: vec![],
-            content: body,
-            estimated_tokens: 0,
-            token_budget: budget,
-            files_included: 0,
-            files_omitted: 0,
-            completeness_status: "BYPASSED_TRIVIAL".to_string(),
-            clipboard_copied,
-            active_file_path: None,
-            bypass_active: true,
-            classification_signals: Some(signals),
-            injected_files: vec![],
-        });
+            let mut clipboard_copied = false;
+            if copy_clipboard {
+                clipboard_copied = try_copy_to_clipboard(&body).is_ok();
+            }
+
+            return Ok(PreparedTaskOutput {
+                task: core_task,
+                contract_id: String::new(),
+                contract_version: 0,
+                baseline_commit: String::new(),
+                status: "Bypassed".to_string(),
+                expected_files: vec![],
+                forbidden_boundaries: vec![],
+                content: body,
+                estimated_tokens: 0,
+                token_budget: budget,
+                files_included: 0,
+                files_omitted: 0,
+                completeness_status: "BYPASSED_TRIVIAL".to_string(),
+                clipboard_copied,
+                active_file_path: None,
+                bypass_active: true,
+                classification_signals: Some(signals),
+                injected_files: vec![],
+            });
+        }
     }
 
     // Standard path: delegate to full preparation

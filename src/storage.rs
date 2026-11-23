@@ -708,13 +708,80 @@ pub fn git_changed(root: &Path) -> Vec<String> {
     changed
 }
 
+// ---------------------------------------------------------------------------
+// Trivial Task Bypass Records and Evaluation (Phase 8.2 & 8.2.1)
+// ---------------------------------------------------------------------------
+
+pub const BYPASS_SCHEMA_VERSION: u32 = 1;
+pub const BYPASS_DEFAULT_TTL_SECS: i64 = 900; // 15 minutes
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BypassLifecycleState {
+    Created,
+    Validated,
+    Consumed,
+}
+
+impl BypassLifecycleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BypassLifecycleState::Created => "Created",
+            BypassLifecycleState::Validated => "Validated",
+            BypassLifecycleState::Consumed => "Consumed",
+        }
+    }
+}
+
 /// Record of an authorized trivial task bypass.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BypassTrivialRecord {
+    pub schema_version: u32,
+    pub record_id: String,
     pub task: String,
+    pub task_hash: String,
     pub reason: String,
     pub target_files: Vec<String>,
+    pub baseline_commit: String,
+    pub repo_root_hash: String,
     pub created_at: i64,
+    pub expires_at: i64,
+    pub state: BypassLifecycleState,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BypassValidationResult {
+    Authorized(BypassTrivialRecord),
+    NoRecord,
+    Rejected(String),
+}
+
+fn uuid_simple() -> String {
+    let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let mut hasher = Sha256::new();
+    hasher.update(now.to_le_bytes());
+    format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+pub fn compute_repo_root_hash(root: &Path) -> String {
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let path_str = canonical.to_string_lossy().replace('\\', "/");
+    let mut hasher = Sha256::new();
+    hasher.update(path_str.as_bytes());
+    format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+pub fn compute_task_hash(task: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(task.trim().as_bytes());
+    format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+pub fn get_head_commit(root: &Path) -> Result<String> {
+    match crate::git::resolve_baseline(root, "HEAD") {
+        Ok(Ok(sha)) => Ok(sha),
+        Ok(Err(_)) => Ok("EMPTY".to_string()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Saves a trivial task bypass marker into .engram/bypass_trivial.json.
@@ -723,21 +790,69 @@ pub fn save_bypass_trivial(
     task: &str,
     reason: &str,
     target_files: &[String],
-) -> Result<()> {
+) -> Result<BypassTrivialRecord> {
     let root = root_path(root)?;
+    if target_files.len() != 1 {
+        anyhow::bail!(
+            "Trivial bypass authorization requires exactly one explicit target file; found {}",
+            target_files.len()
+        );
+    }
+    let target = &target_files[0];
+    let norm_target = target.replace('\\', "/");
+    if crate::prompt::is_security_file_path(target)
+        || crate::prompt::is_manifest_file_path(target)
+        || crate::prompt::is_test_file_path(target)
+        || crate::constitution::is_policy_file(&norm_target)
+    {
+        anyhow::bail!(
+            "Trivial bypass cannot authorize sensitive or protected path '{}'",
+            target
+        );
+    }
+
     let engram_dir = root.join(".engram");
     if !engram_dir.exists() {
         fs::create_dir_all(&engram_dir)?;
     }
+
+    let baseline_commit = get_head_commit(&root).unwrap_or_else(|_| "HEAD".to_string());
+    let repo_root_hash = compute_repo_root_hash(&root);
+    let task_hash = compute_task_hash(task);
+    let now_ts = Utc::now().timestamp();
+    let expires_at = now_ts + BYPASS_DEFAULT_TTL_SECS;
+    let record_id = format!(
+        "{:x}",
+        Sha256::digest(format!("{}:{}:{}", task_hash, target, uuid_simple()).as_bytes())
+    )[..16]
+        .to_string();
+
     let record = BypassTrivialRecord {
+        schema_version: BYPASS_SCHEMA_VERSION,
+        record_id,
         task: task.to_string(),
+        task_hash,
         reason: reason.to_string(),
-        target_files: target_files.to_vec(),
-        created_at: chrono::Utc::now().timestamp(),
+        target_files: vec![crate::contract::normalize_rel_path(target)],
+        baseline_commit,
+        repo_root_hash,
+        created_at: now_ts,
+        expires_at,
+        state: BypassLifecycleState::Created,
     };
+
+    let target_file = engram_dir.join("bypass_trivial.json");
+    let temp_file = engram_dir.join(format!("bypass_trivial.tmp.{}", uuid_simple()));
     let data = serde_json::to_string_pretty(&record)?;
-    fs::write(engram_dir.join("bypass_trivial.json"), data)?;
-    Ok(())
+    fs::write(&temp_file, data)?;
+    if let Err(e) = fs::rename(&temp_file, &target_file) {
+        // Fallback for Windows if target exists
+        let _ = fs::remove_file(&target_file);
+        fs::rename(&temp_file, &target_file)
+            .with_context(|| format!("Failed to atomically write bypass record: {e}"))?;
+    }
+
+    Ok(record)
 }
 
 /// Loads a trivial task bypass marker from .engram/bypass_trivial.json if present.
@@ -747,8 +862,21 @@ pub fn load_bypass_trivial(root: &Path) -> Result<Option<BypassTrivialRecord>> {
     if !file.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(&file)?;
-    let record: BypassTrivialRecord = serde_json::from_str(&content)?;
+    let content = fs::read_to_string(&file)
+        .with_context(|| format!("Failed to read bypass record at '{}'", file.display()))?;
+    let record: BypassTrivialRecord = serde_json::from_str(&content).with_context(|| {
+        format!(
+            "Failed to parse bypass record at '{}': malformed JSON or invalid schema",
+            file.display()
+        )
+    })?;
+    if record.schema_version != BYPASS_SCHEMA_VERSION {
+        anyhow::bail!(
+            "Unsupported bypass record schema_version {} (expected {})",
+            record.schema_version,
+            BYPASS_SCHEMA_VERSION
+        );
+    }
     Ok(Some(record))
 }
 
@@ -762,12 +890,148 @@ pub fn remove_bypass_trivial(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Validates an on-disk trivial bypass record against staged changed files and repository context.
+pub fn validate_bypass_record(
+    root: &Path,
+    changed_files: &[String],
+) -> Result<BypassValidationResult> {
+    let root = root_path(root)?;
+    let record = match load_bypass_trivial(&root) {
+        Ok(Some(rec)) => rec,
+        Ok(None) => return Ok(BypassValidationResult::NoRecord),
+        Err(e) => {
+            return Ok(BypassValidationResult::Rejected(format!(
+                "Malformed or unreadable bypass record: {e}"
+            )));
+        }
+    };
+
+    if record.state != BypassLifecycleState::Created {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Bypass record is already in state '{:?}' (cannot be reused)",
+            record.state
+        )));
+    }
+
+    let now = Utc::now().timestamp();
+    if now > record.expires_at {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Bypass record expired at {} (current time: {})",
+            record.expires_at, now
+        )));
+    }
+
+    let current_repo_hash = compute_repo_root_hash(&root);
+    if record.repo_root_hash != current_repo_hash {
+        return Ok(BypassValidationResult::Rejected(
+            "Bypass record repository binding mismatch".to_string(),
+        ));
+    }
+
+    let current_head = get_head_commit(&root).unwrap_or_else(|_| "HEAD".to_string());
+    if record.baseline_commit != "HEAD"
+        && record.baseline_commit != "WORKTREE"
+        && record.baseline_commit != "EMPTY"
+        && current_head != "EMPTY"
+        && record.baseline_commit != current_head
+    {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Bypass record baseline commit '{}' does not match current HEAD '{}'",
+            record.baseline_commit, current_head
+        )));
+    }
+
+    if changed_files.is_empty() {
+        return Ok(BypassValidationResult::Rejected(
+            "No changed files to authorize".to_string(),
+        ));
+    }
+
+    if changed_files.len() != 1 {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Bypass only authorizes a single file; found {} changed files",
+            changed_files.len()
+        )));
+    }
+
+    let changed = &changed_files[0];
+    let norm_changed = changed.replace('\\', "/");
+    if crate::prompt::is_security_file_path(changed)
+        || crate::prompt::is_manifest_file_path(changed)
+        || crate::prompt::is_test_file_path(changed)
+        || crate::constitution::is_policy_file(&norm_changed)
+    {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Bypass cannot authorize sensitive or protected file '{}'",
+            changed
+        )));
+    }
+
+    let norm_target = crate::contract::normalize_rel_path(changed);
+    if !record
+        .target_files
+        .iter()
+        .any(|tf| crate::contract::normalize_rel_path(tf) == norm_target)
+    {
+        return Ok(BypassValidationResult::Rejected(format!(
+            "Staged change '{}' does not match authorized bypass target '{:?}'",
+            norm_target, record.target_files
+        )));
+    }
+
+    Ok(BypassValidationResult::Authorized(record))
+}
+
+/// Atomically validates and consumes the on-disk trivial bypass record.
+///
+/// If valid, the record is atomically renamed to prevent concurrent reuse or race conditions,
+/// marked consumed, and removed.
+pub fn validate_and_consume_bypass(
+    root: &Path,
+    changed_files: &[String],
+) -> Result<BypassValidationResult> {
+    let root = root_path(root)?;
+    match validate_bypass_record(&root, changed_files)? {
+        BypassValidationResult::Authorized(mut record) => {
+            let engram_dir = root.join(".engram");
+            let file = engram_dir.join("bypass_trivial.json");
+            let consuming_file =
+                engram_dir.join(format!("bypass_trivial.consuming.{}", uuid_simple()));
+
+            if let Err(_) = fs::rename(&file, &consuming_file) {
+                // If rename failed, another process consumed it concurrently
+                return Ok(BypassValidationResult::Rejected(
+                    "Bypass record was already consumed concurrently".to_string(),
+                ));
+            }
+
+            record.state = BypassLifecycleState::Consumed;
+            let _ = fs::remove_file(&consuming_file);
+            Ok(BypassValidationResult::Authorized(record))
+        }
+        other => Ok(other),
+    }
+}
+
 /// Checks whether all staged changes consist exclusively of non-code documentation
 /// or project configuration files (e.g. .md, docs/*, .txt, .gitignore, LICENSE).
 pub fn is_pure_documentation_change(changed_files: &[String]) -> bool {
     if changed_files.is_empty() {
         return false;
     }
+
+    // Negative guards: reject immediately if ANY file is sensitive, manifest, test, or sovereign policy
+    for f in changed_files {
+        let norm = f.replace('\\', "/");
+        if crate::prompt::is_security_file_path(f)
+            || crate::prompt::is_manifest_file_path(f)
+            || crate::prompt::is_test_file_path(f)
+            || crate::constitution::is_policy_file(&norm)
+        {
+            return false;
+        }
+    }
+
     changed_files.iter().all(|f| {
         let lower = f.to_lowercase();
         let path = Path::new(&lower);

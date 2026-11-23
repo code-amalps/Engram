@@ -52,16 +52,18 @@ flowchart TD
 
 ### 2. Task 8.2-P1-02: Local Postflight Git Pre-Commit Hook Integration
 - Updated `src/hook.rs` (`run_hook`) to perform postflight verification locally when staged changes are evaluated against an active Change Contract.
-- Staged changes authorized by the contract and Project Constitution transition the contract state to Validated and automatically resolve any active recovery session (`crate::recovery::resolve_session`).
+- Staged changes authorized by the contract and Project Constitution verify compliance and automatically resolve any active recovery session (`crate::recovery::resolve_session`).
 - Eliminates the need for remote model postflight MCP roundtrips, reducing postflight model token consumption to **0 tokens**.
+- *(Amended in Phase 8.2.1)*: Pre-commit hook reports actual contract status (e.g. `Active`) from storage and reports check status separately (`Verification: Passed`), eliminating invented status states. Session resolution errors fail closed with exit code 2.
 
 ### 3. Task 8.2-P1-03: Zero-Cost Bypass Protocol & Deterministic Recovery Fallback
-- Added `BypassTrivialRecord` persistence and helpers in `src/storage.rs` (`save_bypass_trivial`, `load_bypass_trivial`, `remove_bypass_trivial`, `is_pure_documentation_change`).
+- Added `BypassTrivialRecord` persistence and helpers in `src/storage.rs` (`save_bypass_trivial`, `load_bypass_trivial`, `remove_bypass_trivial`, `is_pure_documentation_change`, `validate_and_consume_bypass`).
+- *(Amended in Phase 8.2.1)*: Bypass lifecycle hardened to `Created -> Validated -> Consumed` with atomic one-time consumption (`fs::rename`), Git HEAD baseline commit binding, repo-root path hash binding, 15-minute TTL expiration, schema versioning (v1), and strict rejection of multi-file, security, test, manifest, or sovereign policy files.
 - Integrated bypass recording in `src/mcp.rs` (`engram_engage`) and `src/prompt.rs` (`prepare_task_context_scoped`) on `Trivial` task complexity classification.
 - Updated `src/ci_guard.rs` (`run_guard`) to authorize zero-cost bypass for pure documentation changes (`docs/*`, `*.md`, `*.txt`, `.gitignore`, `LICENSE`) or when an active bypass marker matches the staged leaf file.
 - **Fail-Closed Security Guarantee:** Multi-file code edits, security files, test files, and manifest changes without an active contract are strictly blocked (`GUARD-CONTRACT-001`), guaranteeing a **0.0% false bypass rate** (Metric 6).
-- Project Constitution rules (Check 5) and Blast Radius Impact checks (Check 6) execute unconditionally on all staged changes, guaranteeing that no security or architectural boundary can be bypassed.
-- Added comprehensive test coverage in `tests/hook_precommit_test.rs` (Tests 13, 14, 15, and 16).
+- Project Constitution rules (Check 5) and Blast Radius Impact checks (Check 6) execute unconditionally on all staged changes, guaranteeing that no security or architectural boundary can be bypassed. Malformed or unreadable constitution files fail closed with `GUARD-CONST-000`, and modifying sovereign policy files in PR mode unconditionally emits `GUARD-CONST-001`.
+- Added comprehensive test coverage in `tests/hook_precommit_test.rs` (expanded to 25 tests in Phase 8.2.1).
 
 ### 4. Task 8.2-P2-01 & Task 8.2-P2-02: Reproducibility & Lint Cleanliness
 - Assessed compiler path invariance (`--remap-path-prefix`). Documented path-dependent reproducibility findings; confirmed that release-time prefix remapping will be handled via release build automation scripts in Phase 10.0 to avoid cross-platform configuration breakage.

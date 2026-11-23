@@ -718,40 +718,57 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
             // Adaptive bypass evaluation for small/trivial leaf tasks
             let signals = crate::prompt::classify_task_complexity(&core_task);
             if signals.classification == crate::prompt::TaskComplexity::Trivial && !no_bypass {
-                let bypass_targets = effective_planned.clone().unwrap_or_default();
-                let _ = crate::storage::save_bypass_trivial(
-                    &root,
-                    &core_task,
-                    &signals.reason,
-                    &bypass_targets,
-                );
-                return Ok(json!({
-                    "status": "BYPASS_TRIVIAL",
-                    "task": core_task,
-                    "classification": "TRIVIAL",
-                    "reason": signals.reason,
-                    "contract_id": Value::Null,
-                    "contract_version": Value::Null,
-                    "baseline_commit": Value::Null,
-                    "boundaries": {
-                        "expected_files": Value::Array(Vec::new()),
-                        "expected_modules": Value::Array(Vec::new()),
-                        "forbidden_boundaries": Value::Array(Vec::new()),
-                    },
-                    "context": {
-                        "target_files": Value::Array(Vec::new()),
-                        "governing_rules": Value::Array(Vec::new()),
-                        "cochange_warnings": Value::Array(Vec::new()),
-                        "relevant_decisions": Value::Array(Vec::new()),
-                        "ambiguity_gaps": Value::Array(Vec::new()),
-                        "token_budget": budget,
-                        "estimated_tokens": 0,
-                    },
-                    "blocking_violations": Value::Array(Vec::new()),
-                    "is_reused_contract": false,
-                    "reused_reason": Value::Null,
-                    "next_action": "Task classified as trivial leaf edit. Proceed directly to implementation without Change Contract overhead. Call engram_postflight only if compliance audit is desired."
-                }));
+                let mut bypass_targets = effective_planned.clone().unwrap_or_default();
+                if bypass_targets.is_empty() {
+                    let (_, mut task_planned) =
+                        crate::flywheel::parse_task_and_planned_files(&core_task, None);
+                    if task_planned.is_empty() {
+                        for inline in crate::prompt::collect_inline_file_references(&core_task) {
+                            if !task_planned.contains(&inline) {
+                                task_planned.push(inline);
+                            }
+                        }
+                    }
+                    bypass_targets = task_planned;
+                }
+
+                if bypass_targets.len() == 1
+                    && crate::storage::save_bypass_trivial(
+                        &root,
+                        &core_task,
+                        &signals.reason,
+                        &bypass_targets,
+                    )
+                    .is_ok()
+                {
+                    return Ok(json!({
+                        "status": "BYPASS_TRIVIAL",
+                        "task": core_task,
+                        "classification": "TRIVIAL",
+                        "reason": signals.reason,
+                        "contract_id": Value::Null,
+                        "contract_version": Value::Null,
+                        "baseline_commit": Value::Null,
+                        "boundaries": {
+                            "expected_files": Value::Array(Vec::new()),
+                            "expected_modules": Value::Array(Vec::new()),
+                            "forbidden_boundaries": Value::Array(Vec::new()),
+                        },
+                        "context": {
+                            "target_files": Value::Array(Vec::new()),
+                            "governing_rules": Value::Array(Vec::new()),
+                            "cochange_warnings": Value::Array(Vec::new()),
+                            "relevant_decisions": Value::Array(Vec::new()),
+                            "ambiguity_gaps": Value::Array(Vec::new()),
+                            "token_budget": budget,
+                            "estimated_tokens": 0,
+                        },
+                        "blocking_violations": Value::Array(Vec::new()),
+                        "is_reused_contract": false,
+                        "reused_reason": Value::Null,
+                        "next_action": "Task classified as trivial leaf edit. Proceed directly to implementation without Change Contract overhead. Call engram_postflight only if compliance audit is desired."
+                    }));
+                }
             }
 
             // 2. Context compilation

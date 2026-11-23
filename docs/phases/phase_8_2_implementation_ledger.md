@@ -42,41 +42,39 @@ All implementations strictly adhere to:
 - **Implementation Changes:**
   1. In `src/hook.rs` (`run_hook`): When `guard_res.status == GuardStatus::Pass`:
      - Checks if an active Change Contract was verified (`guard_res.context.contract_id`).
-     - Automatically resolves any in-progress recovery session via `crate::recovery::resolve_session(&resolved_root, cid)`.
-     - Emits structured output confirming postflight validation:
+     - Automatically resolves any in-progress recovery session via `crate::recovery::resolve_session(&resolved_root, cid)`. If resolution fails (e.g. lock failure, corrupt session), fails closed with exit code 2.
+     - Emits structured output confirming postflight validation without inventing contract states:
        ```text
-       ✓ Engram Pre-Commit Guard: Staged changes authorized (postflight verified, 0 model tokens consumed).
-         Active Contract: <contract_id> (Status: Validated)
+       ✓ Engram Pre-Commit Guard: Staged changes authorized; local postflight checks passed (0 model tokens consumed).
+         Active Contract: <contract_id> (Status: <actual_status>; Verification: Passed)
        ```
      - Returns exit code 0.
   2. In `tests/hook_precommit_test.rs`: Added `test_16_local_postflight_resolves_recovery_session` verifying that committing compliant staged changes under an active contract validates the contract and transitions an in-progress recovery session to `Resolved` with zero remote calls.
+  3. *(Remediated in Phase 8.2.1)*: Added `test_17_hook_outputs_real_contract_status` and `test_18_hook_fails_closed_on_corrupt_recovery_session`.
 
 ### Task 8.2-P1-03: Zero-Cost Bypass Protocol & Deterministic Recovery Fallback Guarantees
 - **Components Touched:** `src/storage.rs`, `src/prompt.rs`, `src/ci_guard.rs`, `src/hook.rs`, `src/mcp.rs`, `tests/hook_precommit_test.rs`
 - **Problem Statement:** Trivial single-file leaf edits (e.g. typos, documentation updates, comment fixes) should not incur full Change Contract locking or AST context retrieval overhead. However, any bypass protocol must maintain a 0.0% false bypass rate (Metric 6) by failing closed on multi-file, test, security, or manifest modifications, and must provide deterministic recovery guidance on violations.
 - **Implementation Changes:**
   1. In `src/storage.rs`: Added `BypassTrivialRecord` schema and storage helpers:
-     - `save_bypass_trivial`: Persists task, reason, target files, and timestamp into `.engram/bypass_trivial.json`.
-     - `load_bypass_trivial`: Loads active bypass record if present.
-     - `remove_bypass_trivial`: Cleans up bypass record upon successful commit.
-     - `is_pure_documentation_change`: Deterministically detects whether all staged files are purely documentation or non-code configuration files (`.md`, `docs/*`, `.txt`, `.gitignore`, `LICENSE`, `README`).
+     - `save_bypass_trivial`: Persists task, task_hash, reason, target files, baseline_commit, repo_root_hash, created_at, expires_at (15-min TTL), and state (`Created`). Strictly rejects multi-file, security, test, manifest, or sovereign policy targets.
+     - `load_bypass_trivial`: Loads active bypass record, validating `schema_version == 1` and returning explicit errors on parse or I/O failure.
+     - `validate_and_consume_bypass`: Atomically validates bindings (baseline commit, repo root, non-expired, single non-sensitive target match) and consumes record via atomic rename (`fs::rename`) to prevent race conditions or repeated reuse.
+     - `is_pure_documentation_change`: Deterministically detects whether all staged files are purely documentation or non-code configuration files (`.md`, `docs/*`, `.txt`, `.gitignore`, `LICENSE`, `README`), guarded with immediate negative checks against security, manifest, test, and sovereign policy paths.
   2. In `src/prompt.rs`: Exposed file classification helpers (`is_test_file_path`, `is_security_file_path`, `is_manifest_file_path`) as `pub(crate)`. Integrated `save_bypass_trivial` in `prepare_task_context_scoped` when task complexity evaluates to `Trivial`.
   3. In `src/mcp.rs` (`engram_engage`): When adaptive bypass evaluates to `Trivial`, automatically persists `save_bypass_trivial` for the authorized planned leaf targets before returning `BYPASS_TRIVIAL`.
   4. In `src/ci_guard.rs` (`run_guard`): When evaluating contracts with no active contract present:
      - Checks if staged files qualify for zero-cost bypass via `is_pure_documentation_change` OR an active matching `BypassTrivialRecord`.
      - If qualified: records `status: "bypassed"` in `checks_skipped` with zero model tokens consumed.
      - If NOT qualified and `--enforce-contract` or policy requires contracts: emits blocking finding `GUARD-CONTRACT-001` with actionable remediation guidance (`engram preflight`, `engram contract create`, or `engram_engage`).
-     - **Invariant:** Project Constitution rules (Check 5) and Blast Radius Impact rules (Check 6) STILL execute unconditionally on all staged changes. Bypassed files violating constitutional rules are strictly BLOCKED.
+     - **Invariant:** Project Constitution rules (Check 5) and Blast Radius Impact rules (Check 6) STILL execute unconditionally on all staged changes. Bypassed files violating constitutional rules are strictly BLOCKED. Malformed constitution files fail closed with `GUARD-CONST-000`. Sovereign policy file mutations in PR mode fail closed with `GUARD-CONST-001`.
   5. In `src/hook.rs`: On bypass pass, emits:
      ```text
      ✓ Engram Pre-Commit Guard: Trivial leaf edit authorized under zero-cost bypass (0 model tokens consumed).
      ```
      and cleans up `.engram/bypass_trivial.json`.
      On commit block, provides clear, actionable remediation including unstage commands, contract ratification, and recovery launcher (`engram recover <cid>`).
-  6. In `tests/hook_precommit_test.rs`: Added comprehensive tests:
-     - `test_13_trivial_documentation_bypass_under_enforce_contract`: Verifies pure doc edits pass under `--enforce-contract`.
-     - `test_14_trivial_task_bypass_marker_authorizes_edit_and_cleans_up`: Verifies single leaf code edit with bypass marker exits 0 and cleans up marker file.
-     - `test_15_non_trivial_code_modification_without_contract_is_blocked`: Verifies multi-file code modifications without a contract are strictly blocked (0.0% false bypass guarantee).
+  6. In `tests/hook_precommit_test.rs`: Added comprehensive tests (Tests 13-25).
 
 ---
 

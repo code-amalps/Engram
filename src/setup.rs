@@ -19,6 +19,7 @@ pub const GOVERNED_TOOL_NAMES: &[&str] = &[
     "engram_check_constitution",
     "engram_doctor",
     "engram_drift",
+    "engram_engage",
     "engram_get_cochanges",
     "engram_get_context",
     "engram_get_ecosystem",

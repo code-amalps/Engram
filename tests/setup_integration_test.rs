@@ -588,11 +588,15 @@ fn test_verify_mcp_health_validation_and_clean_termination() {
         health.err()
     );
     let tool_count = health.unwrap();
-    assert_eq!(tool_count, 16, "Must verify exactly 16 governed tools");
+    assert_eq!(tool_count, 17, "Must verify exactly 17 governed tools");
     assert_eq!(tool_count, GOVERNED_TOOL_NAMES.len());
     assert!(
         GOVERNED_TOOL_NAMES.contains(&"engram_prepare_task"),
         "engram_prepare_task must be included in governed tools"
+    );
+    assert!(
+        GOVERNED_TOOL_NAMES.contains(&"engram_engage"),
+        "engram_engage must be included in governed tools"
     );
     assert!(
         GOVERNED_TOOL_NAMES.contains(&"engram_ratify_decision"),
@@ -630,7 +634,7 @@ fn test_verify_mcp_health_bounded_timeout() {
 
     let health = verify_mcp_health_with_timeout(bin, &ws, 10);
     assert!(health.is_ok());
-    assert_eq!(health.unwrap(), 16);
+    assert_eq!(health.unwrap(), 17);
 }
 
 #[test]

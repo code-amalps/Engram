@@ -40,9 +40,13 @@ The Phase 8.1 prototype consolidates this into a single atomic endpoint `engram_
 | `src/lib.rs` | **Modified** | Exported `pub mod engage;` for library and test integration. |
 | `src/main.rs` | **Modified** | Exported `pub mod engage;` for binary compilation. |
 | `src/mcp.rs` | **Modified** | Registered `engram_engage` in `mcp_call_raw`, `all_tools_definitions()`, and added nested context condensation support in `enforce_mcp_envelope_boundary()`. |
+| `src/setup.rs` | **Modified** | Registered `engram_engage` in `GOVERNED_TOOL_NAMES` (17 total governed tools) to pass MCP health checks. |
 | `tests/engage_test.rs` | **New Test Suite** | 12 comprehensive integration tests covering schema, validation, bypass, boundaries, reuse, injection, and backward compatibility. |
 | `tests/engage_bench_test.rs` | **New Benchmark** | Quantitative performance benchmark comparing `engram_engage` against the multi-call baseline across 5 representative tasks. |
 | `tests/mcp_consolidation_test.rs` | **Modified** | Updated specialist tools assertion (`>= 16`) to account for the new consolidated endpoint. |
+| `tests/mcp_baseline_test.rs` | **Modified** | Updated `test_bl_04_tools_list` to assert 17 tools and verify presence of `engram_engage`. |
+| `tests/mcp_test.rs` | **Modified** | Updated `test_mcp_protocol_handshake_and_tools` to assert 17 tools and verify presence of `engram_engage`. |
+| `tests/setup_integration_test.rs` | **Modified** | Updated health check assertions to verify 17 governed tools including `engram_engage`. |
 
 ### 2.2 Reused Internal Components
 The implementation adheres strictly to the non-duplication invariant:
@@ -78,10 +82,24 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ```
 
 ### 3.2 Regression Verification Across Existing Suites
-Ran `cargo test --test mcp_consolidation_test --test turn0_injection_test --test build_provenance_test`:
+Ran `cargo test --test mcp_consolidation_test --test turn0_injection_test --test build_provenance_test --test mcp_baseline_test --test mcp_test --test setup_integration_test`:
 - `mcp_consolidation_test.rs`: **13/13 passed** (100%)
 - `turn0_injection_test.rs`: **5/5 passed** (100%)
 - `build_provenance_test.rs`: **5/5 passed** (100%)
+- `mcp_baseline_test.rs`: **27/27 passed** (100%)
+- `mcp_test.rs`: **1/1 passed** (100%)
+- `setup_integration_test.rs`: **10/10 passed** (100%)
+
+### 3.3 Multi-Platform GitHub Actions CI Certification (Run #70)
+GitHub Actions Run #70 (`ID: 45124079221`) for commit `d9bf9c20c5b531a61929ccff923b68f9d1adf0c9` passed **100% green** across all platforms:
+| Matrix Job | Target Architecture | Job ID | Status | Conclusion |
+|---|---|---|:---:|:---:|
+| **Lint & Format Check** | Ubuntu x86_64 (`cargo fmt`, `clippy`) | `137524291799` | completed | **success** |
+| **Linux Musl Static Investigation** | `x86_64-unknown-linux-musl` | `137524622730` | completed | **success** |
+| **Build & Test (Linux glibc)** | `x86_64-unknown-linux-gnu` | `137524622723` | completed | **success** |
+| **Build & Test (Windows MSVC)** | `x86_64-pc-windows-msvc` | `137524622764` | completed | **success** |
+| **Build & Test (macOS Intel)** | `x86_64-apple-darwin` | `137524622797` | completed | **success** |
+| **Build & Test (macOS Apple Silicon)** | `aarch64-apple-darwin` | `137524623044` | completed | **success** |
 
 ---
 

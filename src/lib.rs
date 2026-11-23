@@ -1,6 +1,5 @@
 //! Engram: Local engineering memory and change intelligence for AI coding agents.
 
-pub mod amstralift;
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
@@ -22,7 +21,6 @@ pub mod git;
 pub mod git_history;
 pub mod go_parser;
 pub mod graph;
-pub mod graphify;
 pub mod guard;
 pub mod hook;
 pub mod impact;

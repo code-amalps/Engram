@@ -3,9 +3,13 @@
 //! copies, merge commits, detached HEAD, and shallow clone fallback.
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 pub const SHALLOW_HISTORY_TRUNCATED: &str = "SHALLOW_HISTORY_TRUNCATED";
 
@@ -52,6 +56,123 @@ pub fn is_git_repo(root: &Path) -> bool {
         .current_dir(root)
         .output();
     matches!(output, Ok(out) if out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "true")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitStateError {
+    SpawnFailed(String),
+    CommandFailed(Option<i32>, String),
+    InvalidUtf8,
+    Timeout(u64),
+}
+
+impl std::fmt::Display for GitStateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SpawnFailed(e) => write!(f, "Failed to spawn git: {}", e),
+            Self::CommandFailed(code, err) => {
+                write!(
+                    f,
+                    "Git status failed (exit code {:?}): {}",
+                    code,
+                    err.trim()
+                )
+            }
+            Self::InvalidUtf8 => write!(f, "Git status output contained invalid UTF-8"),
+            Self::Timeout(ms) => write!(f, "Git status timed out after {}ms", ms),
+        }
+    }
+}
+
+impl std::error::Error for GitStateError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GitWorkingTreeState {
+    Clean,
+    Dirty,
+    Unknown,
+}
+
+/// Executes git status with bounded execution timeout and strict error handling.
+/// Returns:
+///   Ok(true) -> CLEAN (no tracked modifications or untracked non-internal files)
+///   Ok(false) -> DIRTY (tracked modifications or untracked files present)
+///   Err(GitStateError) -> UNKNOWN (cannot execute, non-zero exit, timeout, or invalid output)
+pub fn detect_git_state_with_timeout(
+    root: &Path,
+    git_bin: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> std::result::Result<bool, GitStateError> {
+    let mut child = Command::new(git_bin)
+        .args(args)
+        .current_dir(root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| GitStateError::SpawnFailed(e.to_string()))?;
+
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
+        if let Some(mut out) = stdout_pipe.take() {
+            let _ = out.read_to_end(&mut stdout_bytes);
+        }
+        if let Some(mut err) = stderr_pipe.take() {
+            let _ = err.read_to_end(&mut stderr_bytes);
+        }
+        let _ = tx.send((stdout_bytes, stderr_bytes));
+    });
+
+    let (stdout_bytes, stderr_bytes) = match rx.recv_timeout(timeout) {
+        Ok(data) => data,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(GitStateError::Timeout(timeout.as_millis() as u64));
+        }
+    };
+
+    let status = child
+        .wait()
+        .map_err(|e| GitStateError::CommandFailed(None, e.to_string()))?;
+
+    if !status.success() {
+        let err_str = String::from_utf8_lossy(&stderr_bytes).to_string();
+        return Err(GitStateError::CommandFailed(status.code(), err_str));
+    }
+
+    let stdout_str = std::str::from_utf8(&stdout_bytes).map_err(|_| GitStateError::InvalidUtf8)?;
+
+    let has_relevant_changes = stdout_str.lines().any(|l| {
+        let trimmed = l.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let path_part = if trimmed.len() > 3 {
+            trimmed[3..].trim()
+        } else {
+            trimmed
+        };
+        !is_internal_metadata_path(path_part)
+    });
+
+    Ok(!has_relevant_changes)
+}
+
+/// Detects working tree state using default "git" binary and 5-second timeout.
+pub fn detect_git_state(root: &Path) -> std::result::Result<bool, GitStateError> {
+    detect_git_state_with_timeout(
+        root,
+        "git",
+        &["status", "--porcelain=v1", "-uall"],
+        Duration::from_secs(5),
+    )
 }
 
 /// Detect shallow repository via `.git/shallow` or `git rev-parse --is-shallow-repository`.

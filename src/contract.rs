@@ -438,6 +438,47 @@ pub fn matches_boundary(path: &str, pattern: &str) -> bool {
     }
 }
 
+/// Validate planned files against explicit forbidden boundaries and Project Constitution rules.
+/// Returns a list of violation descriptions. If empty, all files conform to boundaries.
+pub fn validate_planned_boundaries(
+    root: &Path,
+    planned_files: &[String],
+    forbidden: Option<&[String]>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let constitution_rules = crate::constitution::load_constitution(root).unwrap_or_default();
+
+    for pf in planned_files {
+        let norm_pf = normalize_rel_path(pf);
+
+        // 1. Check explicit forbidden patterns
+        if let Some(forbidden_patterns) = forbidden {
+            for fb in forbidden_patterns {
+                if matches_boundary(&norm_pf, fb) {
+                    violations.push(format!(
+                        "Planned file '{}' matches explicit forbidden boundary '{}'",
+                        pf, fb
+                    ));
+                }
+            }
+        }
+
+        // 2. Check Project Constitution rules
+        for r in &constitution_rules {
+            if let Some(ref fb) = r.forbidden {
+                if matches_boundary(&norm_pf, fb) {
+                    violations.push(format!(
+                        "Planned file '{}' violates constitution rule '{}' ({})",
+                        pf, r.name, r.id
+                    ));
+                }
+            }
+        }
+    }
+
+    violations
+}
+
 /// Extract architectural module from a file path.
 /// Handles monorepos (e.g. "projects/app/src/app/core/auth/..." -> "core"),
 /// standard frameworks ("src/orders/export/csv.rs" -> "orders", "internal/auth/handler.go" -> "auth"),

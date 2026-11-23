@@ -23,3 +23,11 @@ benchmarks/cost-baseline/runs/
 benchmarks/cost-baseline/engram-logs/
 benchmarks/cost-baseline/transcripts/
 scratch/
+
+# Local IDE and temporary test runs
+.vscode/
+.mcp.json
+/Test/
+/releases/
+benchmarks/matched-pair-harness/runs/
+

@@ -423,31 +423,11 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
             }
 
             // Case B: Incremental Plan Delta Validation
-            let mut delta_violations = Vec::new();
-            for nf in &new_files {
-                let norm_nf = crate::contract::normalize_rel_path(nf);
-                if active
-                    .boundary
-                    .forbidden_boundaries
-                    .iter()
-                    .any(|fb| crate::contract::matches_boundary(&norm_nf, fb))
-                {
-                    delta_violations
-                        .push(format!("Planned file '{}' matches forbidden boundary", nf));
-                }
-                if let Ok(rules) = crate::constitution::load_constitution(&root) {
-                    for r in &rules {
-                        if let Some(ref fb) = r.forbidden {
-                            if crate::contract::matches_boundary(&norm_nf, fb) {
-                                delta_violations.push(format!(
-                                    "Planned file '{}' violates constitution rule '{}' ({})",
-                                    nf, r.name, r.id
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+            let delta_violations = crate::contract::validate_planned_boundaries(
+                &root,
+                &new_files,
+                Some(&active.boundary.forbidden_boundaries),
+            );
 
             if !delta_violations.is_empty() {
                 return Ok(PreflightResult {

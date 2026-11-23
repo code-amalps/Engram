@@ -83,20 +83,6 @@ fn get_git_branch(root: &Path) -> String {
     "HEAD".to_string()
 }
 
-/// Helper to check if working tree is clean.
-fn is_git_clean(root: &Path) -> bool {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(root)
-        .output();
-    if let Ok(out) = output {
-        if out.status.success() {
-            return String::from_utf8_lossy(&out.stdout).trim().is_empty();
-        }
-    }
-    true
-}
-
 /// Parse and execute an `engram_engage` tool invocation.
 pub fn handle_engram_engage(root: &Path, args: &Value) -> Result<Value> {
     let req: EngageRequest = serde_json::from_value(args.clone())
@@ -152,7 +138,12 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
     let root_str = root.display().to_string();
     let baseline_commit = crate::contract::get_baseline_revision(&root);
     let branch = get_git_branch(&root);
-    let is_clean = is_git_clean(&root);
+    let git_state_res = crate::git::detect_git_state(&root);
+    let (is_clean_val, git_state_str, git_state_err_val) = match git_state_res {
+        Ok(true) => (json!(true), "CLEAN", Value::Null),
+        Ok(false) => (json!(false), "DIRTY", Value::Null),
+        Err(ref e) => (Value::Null, "UNKNOWN", json!(e.to_string())),
+    };
 
     // 6. Task complexity classification & adaptive bypass evaluation
     let signals = classify_task_complexity(&core_task);
@@ -163,7 +154,9 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
                 "root": root_str,
                 "baseline_commit": baseline_commit,
                 "branch": branch,
-                "is_clean": is_clean,
+                "is_clean": is_clean_val,
+                "git_state": git_state_str,
+                "git_state_error": git_state_err_val,
             },
             "task": {
                 "goal": core_task,
@@ -233,37 +226,11 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
     let preflight_res = crate::flywheel::preflight_task(&root, &preflight_opts)?;
 
     // Check for boundary violations against req.forbidden and Project Constitution
-    let mut boundary_violations = Vec::new();
-    if let Some(ref planned) = effective_planned {
-        if let Some(ref forbidden) = req.forbidden {
-            for pf in planned {
-                let norm_pf = crate::contract::normalize_rel_path(pf);
-                for fb in forbidden {
-                    if crate::contract::matches_boundary(&norm_pf, fb) {
-                        boundary_violations.push(format!(
-                            "Planned file '{}' matches explicit forbidden boundary '{}'",
-                            pf, fb
-                        ));
-                    }
-                }
-            }
-        }
-        if let Ok(rules) = crate::constitution::load_constitution(&root) {
-            for pf in planned {
-                let norm_pf = crate::contract::normalize_rel_path(pf);
-                for r in &rules {
-                    if let Some(ref fb) = r.forbidden {
-                        if crate::contract::matches_boundary(&norm_pf, fb) {
-                            boundary_violations.push(format!(
-                                "Planned file '{}' violates constitution rule '{}' ({})",
-                                pf, r.name, r.id
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let boundary_violations = if let Some(ref planned) = effective_planned {
+        crate::contract::validate_planned_boundaries(&root, planned, req.forbidden.as_deref())
+    } else {
+        Vec::new()
+    };
 
     let is_blocked = preflight_res.status == crate::flywheel::PreflightStatus::Blocked
         || !boundary_violations.is_empty();
@@ -416,7 +383,9 @@ pub fn execute_engage(root: &Path, req: EngageRequest) -> Result<Value> {
             "root": root_str,
             "baseline_commit": baseline_commit,
             "branch": branch,
-            "is_clean": is_clean,
+            "is_clean": is_clean_val,
+            "git_state": git_state_str,
+            "git_state_error": git_state_err_val,
         },
         "task": {
             "goal": core_task,

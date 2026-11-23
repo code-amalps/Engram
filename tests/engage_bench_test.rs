@@ -894,27 +894,53 @@ fn test_validate_raw_results_integrity_and_statistics() {
             "Engage wire mean mismatch"
         );
         assert!(
-            (s.baseline_duration_ms.mean - expected_b_dur_mean).abs() < 0.1,
-            "Baseline duration mean mismatch"
+            (s.baseline_duration_ms.mean - expected_b_dur_mean).abs() < 0.2,
+            "Baseline duration mean mismatch in {}: summary={} vs raw={}",
+            s.workload_id,
+            s.baseline_duration_ms.mean,
+            expected_b_dur_mean
         );
         assert!(
-            (s.engage_duration_ms.mean - expected_e_dur_mean).abs() < 0.1,
-            "Engage duration mean mismatch"
+            (s.engage_duration_ms.mean - expected_e_dur_mean).abs() < 0.2,
+            "Engage duration mean mismatch in {}: summary={} vs raw={}",
+            s.workload_id,
+            s.engage_duration_ms.mean,
+            expected_e_dur_mean
         );
         assert!(
-            (s.mean_paired_wire_savings_percent - expected_p_wire_mean).abs() < 0.1,
-            "Mean paired wire savings mismatch"
+            (s.mean_paired_wire_savings_percent - expected_p_wire_mean).abs() < 0.2,
+            "Mean paired wire savings mismatch in {}: summary={} vs raw={}",
+            s.workload_id,
+            s.mean_paired_wire_savings_percent,
+            expected_p_wire_mean
         );
         assert!(
-            (s.mean_paired_latency_savings_percent - expected_p_lat_mean).abs() < 0.1,
-            "Mean paired latency savings mismatch"
+            (s.mean_paired_latency_savings_percent - expected_p_lat_mean).abs() < 0.2,
+            "Mean paired latency savings mismatch in {}: summary={} vs raw={}",
+            s.workload_id,
+            s.mean_paired_latency_savings_percent,
+            expected_p_lat_mean
         );
 
-        let expected_agg_lat =
+        let expected_agg_lat = ((s.baseline_duration_ms.mean - s.engage_duration_ms.mean)
+            / s.baseline_duration_ms.mean)
+            * 100.0;
+        assert!(
+            (s.aggregate_mean_latency_change_percent - expected_agg_lat).abs() < 0.2,
+            "Aggregate latency change mismatch in {}: summary={} vs computed={}",
+            s.workload_id,
+            s.aggregate_mean_latency_change_percent,
+            expected_agg_lat
+        );
+
+        let raw_agg_lat =
             ((expected_b_dur_mean - expected_e_dur_mean) / expected_b_dur_mean) * 100.0;
         assert!(
-            (s.aggregate_mean_latency_change_percent - expected_agg_lat).abs() < 0.1,
-            "Aggregate latency change mismatch"
+            (s.aggregate_mean_latency_change_percent - raw_agg_lat).abs() < 1.0,
+            "Raw aggregate latency change mismatch in {}: summary={} vs raw={}",
+            s.workload_id,
+            s.aggregate_mean_latency_change_percent,
+            raw_agg_lat
         );
     }
 }

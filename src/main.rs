@@ -1,3 +1,4 @@
+pub mod amstralift;
 pub mod analyzer;
 pub mod archaeology;
 pub mod bench;
@@ -16,6 +17,7 @@ pub mod git;
 pub mod git_history;
 pub mod go_parser;
 pub mod graph;
+pub mod graphify;
 pub mod guard;
 pub mod hook;
 pub mod impact;
@@ -369,6 +371,56 @@ enum CommandLine {
     Hook {
         #[command(subcommand)]
         action: HookAction,
+    },
+    /// AMstraLift Enterprise Modernization & Dependency-Upgrade Ingestion
+    Amstralift {
+        #[command(subcommand)]
+        action: AmstraliftAction,
+    },
+    /// Graphify Macro-Knowledge Graph Intelligence & Community Impact
+    Graphify {
+        #[command(subcommand)]
+        action: GraphifyAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum AmstraliftAction {
+    /// Ingest and validate an AMstraLift modernization plan against contract and constitutional boundaries
+    ValidatePlan {
+        /// Path to the modernization plan (YAML or JSON)
+        path: PathBuf,
+    },
+    /// Ingest and verify AMstraLift transformation and refusal evidence records
+    VerifyEvidence {
+        /// Path to the transformation results evidence file (JSON or YAML)
+        path: PathBuf,
+    },
+    /// Ingest plan and authorize an Engram Change Contract for modernization tasks
+    AuthorizePlan {
+        /// Path to the modernization plan (YAML or JSON)
+        path: PathBuf,
+        /// Human rationale for authorizing the modernization contract
+        #[arg(long, default_value = "AMstraLift modernization plan authorized")]
+        rationale: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GraphifyAction {
+    /// Inspect Graphify macro-graph artifacts (graphify-out/graph.json), communities, and staleness vs HEAD
+    Inspect {
+        /// Optional repository root (defaults to .)
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Calculate multi-hop change impact cone using Graphify macro-graph topology
+    Impact {
+        /// Target file path to expand impact from
+        target: String,
+        /// Maximum traversal hops (default 2)
+        #[arg(long, default_value_t = 2)]
+        max_hops: usize,
     },
 }
 
@@ -1803,6 +1855,193 @@ fn run() -> Result<()> {
                 std::process::exit(res.exit_code);
             }
         }
+        Some(CommandLine::Amstralift { action }) => match action {
+            AmstraliftAction::ValidatePlan { path } => {
+                let plan = amstralift::load_modernization_plan(&path)?;
+                let report = amstralift::validate_modernization_plan(&plan, root)?;
+                if force_json {
+                    print_json(&report)?;
+                } else {
+                    println!("AMstraLift Plan Validation: {}", report.plan_id);
+                    println!("  Ecosystem: {}", report.ecosystem);
+                    println!("  Phases: {}", report.total_phases);
+                    println!("  Transformations: {}", report.total_transformations);
+                    println!(
+                        "  Status: {}",
+                        if report.valid {
+                            "VALID (Contract Ready)"
+                        } else {
+                            "REJECTED (Constitutional/Safety Violations)"
+                        }
+                    );
+                    if !report.expected_files.is_empty() {
+                        println!("  Expected Files ({}):", report.expected_files.len());
+                        for f in &report.expected_files {
+                            println!("    - {f}");
+                        }
+                    }
+                    if !report.expected_modules.is_empty() {
+                        println!("  Expected Modules ({}):", report.expected_modules.len());
+                        for m in &report.expected_modules {
+                            println!("    - {m}");
+                        }
+                    }
+                    if !report.findings.is_empty() {
+                        println!("  Findings ({}):", report.findings.len());
+                        for f in &report.findings {
+                            println!("    [{}] {}: {}", f.severity, f.code, f.message);
+                        }
+                    }
+                }
+                if !report.valid {
+                    std::process::exit(1);
+                }
+            }
+            AmstraliftAction::VerifyEvidence { path } => {
+                let content = fs::read_to_string(&path).map_err(|e| {
+                    anyhow!("Failed to read evidence file '{}': {}", path.display(), e)
+                })?;
+                let results = amstralift::parse_transformation_evidence(&content)?;
+                let report = amstralift::verify_transformation_evidence(&results);
+                if force_json {
+                    print_json(&report)?;
+                } else {
+                    println!("AMstraLift Evidence Verification:");
+                    println!("  Valid: {}", report.valid);
+                    println!("  Total Results: {}", report.total_results);
+                    println!("  Applied Count: {}", report.applied_count);
+                    println!("  Refused Clean Count: {}", report.refused_count);
+                    if !report.files_modified.is_empty() {
+                        println!("  Modified Files ({}):", report.files_modified.len());
+                        for f in &report.files_modified {
+                            println!("    - {f}");
+                        }
+                    }
+                    if !report.files_refused_clean.is_empty() {
+                        println!(
+                            "  Refused Without Modification ({}):",
+                            report.files_refused_clean.len()
+                        );
+                        for f in &report.files_refused_clean {
+                            println!("    - {f}");
+                        }
+                    }
+                    if !report.violations.is_empty() {
+                        println!("  Violations ({}):", report.violations.len());
+                        for v in &report.violations {
+                            println!("    [SECURITY/INTEGRITY VIOLATION] {v}");
+                        }
+                    }
+                }
+                if !report.valid {
+                    std::process::exit(1);
+                }
+            }
+            AmstraliftAction::AuthorizePlan { path, rationale } => {
+                let plan = amstralift::load_modernization_plan(&path)?;
+                let contract = amstralift::generate_contract_for_plan(root, &plan, &rationale)?;
+                if force_json {
+                    print_json(&contract)?;
+                } else {
+                    println!(
+                        "✓ Authorized AMstraLift Modernization Contract '{}'",
+                        contract.contract_id
+                    );
+                    println!("  Goal: {}", contract.task_goal);
+                    println!("  Baseline Revision: {}", contract.baseline_revision);
+                    if !contract.boundary.expected_files.is_empty() {
+                        println!(
+                            "  Expected Files: {}",
+                            contract.boundary.expected_files.join(", ")
+                        );
+                    }
+                    if !contract.boundary.expected_modules.is_empty() {
+                        println!(
+                            "  Expected Modules: {}",
+                            contract.boundary.expected_modules.join(", ")
+                        );
+                    }
+                    println!("  Contract saved to active state.");
+                }
+            }
+        },
+        Some(CommandLine::Graphify { action }) => match action {
+            GraphifyAction::Inspect { path } => {
+                let target_root = path.as_deref().unwrap_or(root);
+                let report = graphify::inspect_graphify_workspace(target_root)?;
+                if force_json {
+                    print_json(&report)?;
+                } else if !report.present {
+                    println!(
+                        "No Graphify macro-graph found at '{}'. Run 'graphify' to build knowledge graph.",
+                        graphify::graphify_output_path(target_root).display()
+                    );
+                } else {
+                    println!(
+                        "Graphify Macro-Knowledge Graph: {}",
+                        report.path.unwrap_or_default()
+                    );
+                    println!("  Staleness: {:?}", report.staleness);
+                    println!("  Nodes: {}", report.node_count);
+                    println!("  Links: {}", report.link_count);
+                    println!("  Communities: {}", report.community_count);
+                    println!("  Hyperedges: {}", report.hyperedge_count);
+                    if !report.top_god_nodes.is_empty() {
+                        println!("  Top Centrality (God Nodes):");
+                        for (id, deg) in &report.top_god_nodes {
+                            println!("    - {} (degree {})", id, deg);
+                        }
+                    }
+                    if !report.communities.is_empty() {
+                        println!("  Detected Communities:");
+                        for c in &report.communities {
+                            println!(
+                                "    - [{}] {} ({} nodes, {} files)",
+                                c.id,
+                                c.name,
+                                c.member_count,
+                                c.representative_files.len()
+                            );
+                        }
+                    }
+                }
+            }
+            GraphifyAction::Impact { target, max_hops } => {
+                let graph_opt = graphify::load_macro_graph(root)?;
+                let graph = match graph_opt {
+                    Some(g) => g,
+                    None => {
+                        return Err(anyhow!(
+                            "No Graphify macro-graph found in workspace. Run 'graphify' first."
+                        ));
+                    }
+                };
+                let index = graphify::GraphifyIndex::build(graph);
+                let candidates = index.expand_impact(&target, max_hops);
+                if force_json {
+                    print_json(&candidates)?;
+                } else {
+                    println!(
+                        "Graphify Macro-Graph Impact Cone for '{}' (max {} hops):",
+                        target, max_hops
+                    );
+                    if candidates.is_empty() {
+                        println!("  No related files found in macro-graph.");
+                    } else {
+                        for c in &candidates {
+                            println!(
+                                "  - {} (hop {}, rel: {}, conf: {:.2}, community: {}) [is_graph_derived: true]",
+                                c.file_path,
+                                c.hop,
+                                c.relation,
+                                c.confidence_score,
+                                c.community_name.as_deref().unwrap_or("none")
+                            );
+                        }
+                    }
+                }
+            }
+        },
     }
     Ok(())
 }

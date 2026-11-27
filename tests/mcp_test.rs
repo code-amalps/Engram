@@ -33,6 +33,7 @@ fn test_mcp_protocol_handshake_and_tools() {
         .arg("-C")
         .arg(&repo)
         .arg("mcp")
+        .env("ENGRAM_SPECIALIST_TOOLS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -76,7 +77,9 @@ fn test_mcp_protocol_handshake_and_tools() {
     let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(resp["id"], 2);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 17);
+    assert!(tools.iter().any(|t| t["name"] == "engram_engage"));
+    assert!(tools.iter().any(|t| t["name"] == "engram_prepare_task"));
     assert!(tools.iter().any(|t| t["name"] == "engram_get_context"));
     assert!(tools.iter().any(|t| t["name"] == "engram_preflight"));
     assert!(tools.iter().any(|t| t["name"] == "engram_postflight"));

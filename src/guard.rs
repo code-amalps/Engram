@@ -1,16 +1,16 @@
 //! Change Guard: task tracking, Change Contracts, blast radius validation, and constitution rule checks.
 
-use anyhow::{anyhow, Result};
-use rusqlite::{params, OptionalExtension};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use rusqlite::{OptionalExtension, params};
+use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path};
 use uuid::Uuid;
 
 use crate::analyzer::ensure_fresh;
-use crate::compiler::{context, ContextResult};
+use crate::compiler::{ContextResult, context};
 use crate::constitution::evaluate_rules;
 use crate::contract::{
-    get_active_contract, get_contract, validate_contract_diff, FileValidationCategory,
+    FileValidationCategory, get_active_contract, get_contract, validate_contract_diff,
 };
 use crate::graph::GraphTraversal;
 use crate::storage::{db, git_changed, hash, now, revision, root_path};
@@ -131,7 +131,10 @@ enum ResolvedPathTarget {
     NotFound(String),
 }
 
-fn resolve_target_path(conn: &rusqlite::Connection, raw_target: &str) -> Result<ResolvedPathTarget> {
+fn resolve_target_path(
+    conn: &rusqlite::Connection,
+    raw_target: &str,
+) -> Result<ResolvedPathTarget> {
     let norm = crate::contract::normalize_rel_path(raw_target);
     let clean = norm.trim().trim_start_matches('/');
     if clean.is_empty() {
@@ -144,10 +147,14 @@ fn resolve_target_path(conn: &rusqlite::Connection, raw_target: &str) -> Result<
         let mut exact_stmt = conn.prepare("SELECT path FROM files WHERE path = ?1")?;
         let exact_opt: Option<String> = exact_stmt.query_row([clean_file], |r| r.get(0)).ok();
         if let Some(exact_file) = exact_opt {
-            return Ok(ResolvedPathTarget::Exact(format!("{}::{}", exact_file, sym_part)));
+            return Ok(ResolvedPathTarget::Exact(format!(
+                "{}::{}",
+                exact_file, sym_part
+            )));
         }
 
-        let mut suffix_stmt = conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
+        let mut suffix_stmt =
+            conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
         let matches: Vec<String> = suffix_stmt
             .query_map([clean_file], |r| r.get(0))?
             .filter_map(|r| r.ok())
@@ -156,9 +163,15 @@ fn resolve_target_path(conn: &rusqlite::Connection, raw_target: &str) -> Result<
         if matches.len() > 1 {
             return Ok(ResolvedPathTarget::Ambiguous(matches));
         } else if let Some(matched_file) = matches.into_iter().next() {
-            return Ok(ResolvedPathTarget::Exact(format!("{}::{}", matched_file, sym_part)));
+            return Ok(ResolvedPathTarget::Exact(format!(
+                "{}::{}",
+                matched_file, sym_part
+            )));
         } else {
-            return Ok(ResolvedPathTarget::NotFound(format!("{}::{}", clean_file, sym_part)));
+            return Ok(ResolvedPathTarget::NotFound(format!(
+                "{}::{}",
+                clean_file, sym_part
+            )));
         }
     }
 
@@ -170,7 +183,8 @@ fn resolve_target_path(conn: &rusqlite::Connection, raw_target: &str) -> Result<
     }
 
     // 3. Suffix match in files table
-    let mut suffix_stmt = conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
+    let mut suffix_stmt =
+        conn.prepare("SELECT path FROM files WHERE path LIKE '%/' || ?1 ORDER BY path ASC")?;
     let matches: Vec<String> = suffix_stmt
         .query_map([clean], |r| r.get(0))?
         .filter_map(|r| r.ok())

@@ -1,0 +1,62 @@
+{
+  "schema_version": "2.0.0",
+  "task_id": "smoke_test_read_only",
+  "title": "Locate Core Auth Logout Action Creator (Read-Only Smoke Test)",
+  "description": "Locate and state the file path and exact action creator name for authLogout in the core auth module without modifying, deleting, or creating any files.",
+  "read_only": true,
+  "requires_dependencies": false,
+  "baseline_commit": "1c2856086f3a08e3ab1c3b8573eb3ff22ff20fd2",
+  "allowed_file_patterns": [],
+  "forbidden_file_patterns": [
+    "**/*"
+  ],
+  "prompt": "Locate and state the file path and exact action creator name for authLogout in the core auth module. Do not edit, format, delete, or create any files.",
+  "target_files": [
+    "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts"
+  ],
+  "fixture_preflight": {
+    "required_files": [
+      "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts"
+    ],
+    "baseline_present_patterns": [
+      {
+        "file": "projects/angular-ngrx-material-starter/src/app/core/auth/auth.actions.ts",
+        "pattern": "export const authLogout = createAction('[Auth] Logout');"
+      }
+    ]
+  },
+  "gates": {
+    "L0_typecheck": {
+      "enabled": false,
+      "command": "npx tsc -p projects/angular-ngrx-material-starter/tsconfig.app.json --noEmit"
+    },
+    "L1_lint": {
+      "enabled": false,
+      "command": "npm run lint"
+    },
+    "L2_unit_tests": {
+      "enabled": false,
+      "command": "npm test"
+    },
+    "L3_production_build": {
+      "enabled": false,
+      "command": "npm run build"
+    }
+  },
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "description": "Identify exact relative path and symbol name for authLogout",
+      "weight": 0.50,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "auth.actions.ts contains export const authLogout = createAction('[Auth] Logout');"
+    },
+    {
+      "id": "REQ-2",
+      "description": "Zero workspace mutation (strict read-only boundary)",
+      "weight": 0.50,
+      "evaluation_type": "AUTOMATED_DIFF",
+      "criteria": "Zero files modified, added, or deleted across the workspace"
+    }
+  ]
+}

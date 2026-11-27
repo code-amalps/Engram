@@ -30,12 +30,15 @@ use engram::empirical_live::stats::{
     PILOT_VARIANCE_UPPER_80_MULTIPLIER, SecondaryHypothesis, calculate_confirmatory_sample_size,
     evaluate_itt_sensitivity, evaluate_paired_savings, holm_bonferroni_adjust, student_t_cdf,
 };
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Static mutex to serialize tests that mutate or rely on sensitive process-wide environment variables.
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Static mutex to serialize tests that mutate or snapshot process-wide WindowStation / Desktop DACLs.
+static WINSTA_MUTEX: Mutex<()> = Mutex::new(());
 
 // ============================================================================
 // 1. BudgetGuard: Pre-Flight Exhaustion Rejection
@@ -5057,6 +5060,7 @@ fn test_token_reservation_unbounded_and_malformed_requests_fail_closed() {
 fn test_appcontainer_profile_lifecycle_and_acl_grants() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::AppContainerProfile;
 
         let profile_name = format!("engram_test_lc_{}", uuid::Uuid::new_v4().simple());
@@ -5102,6 +5106,7 @@ fn test_appcontainer_profile_lifecycle_and_acl_grants() {
 fn test_appcontainer_executes_contained_command_and_captures_output() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, resolve_trusted_executable,
             spawn_contained_appcontainer_process,
@@ -5179,6 +5184,7 @@ fn test_appcontainer_executes_contained_command_and_captures_output() {
 fn test_appcontainer_network_containment_blocks_loopback_tcp_connect() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, resolve_trusted_executable,
             spawn_contained_appcontainer_process,
@@ -5408,6 +5414,7 @@ fn test_appcontainer_network_containment_blocks_loopback_tcp_connect() {
 fn test_appcontainer_network_containment_blocks_loopback_udp_datagram() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, resolve_trusted_executable,
             spawn_contained_appcontainer_process,
@@ -5530,6 +5537,7 @@ fn test_appcontainer_network_containment_blocks_loopback_udp_datagram() {
 fn test_appcontainer_job_object_tree_reaping_on_timeout() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, SecurityError,
             resolve_trusted_executable, spawn_contained_appcontainer_process,
@@ -5599,6 +5607,7 @@ fn test_appcontainer_job_object_tree_reaping_on_timeout() {
 fn test_appcontainer_fail_closed_on_unauthorized_filesystem_path() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, resolve_trusted_executable,
             spawn_contained_appcontainer_process,
@@ -5686,6 +5695,7 @@ fn test_appcontainer_fail_closed_on_unauthorized_filesystem_path() {
 fn test_sandbox_tool_dispatcher_with_appcontainer_enabled() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::dispatcher::SandboxToolDispatcher;
         use engram::empirical_live::schema::ContentBlock;
 
@@ -5736,6 +5746,7 @@ fn test_sandbox_tool_dispatcher_with_appcontainer_enabled() {
 fn test_appcontainer_toolchain_offline_compilation_boundary() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, EnvironmentPolicy, ProcessJobObject, resolve_trusted_executable,
             spawn_contained_appcontainer_process, stage_ephemeral_toolchain_mirror,
@@ -5958,6 +5969,7 @@ fn test_appcontainer_toolchain_offline_compilation_boundary() {
 fn test_production_sandbox_tool_dispatcher_network_containment_blocks_egress() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::dispatcher::SandboxToolDispatcher;
         use engram::empirical_live::schema::ContentBlock;
         use std::io::{Read, Write};
@@ -6083,6 +6095,7 @@ fn test_production_sandbox_tool_dispatcher_network_containment_blocks_egress() {
 fn test_appcontainer_dacl_snapshot_preservation_and_rollback_correctness() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{
             AppContainerProfile, snapshot_user_object_dacl, win32,
         };
@@ -6419,6 +6432,7 @@ fn test_sandbox_tool_dispatcher_shell_interpreters_and_prohibited_flags_rejected
 fn test_appcontainer_revocation_state_lifecycle_and_fault_recovery() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{AppContainerProfile, SecurityError};
 
         // 1. Successful revocation clears the corresponding state
@@ -6964,6 +6978,7 @@ fn test_dacl_drift_detection_and_concurrent_change_prevention() {
     // 5. Live Windows User Object drift detection test
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::AppContainerProfile;
 
         let name = format!("engram_live_drift_{}", uuid::Uuid::new_v4().simple());
@@ -7214,6 +7229,7 @@ fn test_dacl_state_representation_and_control_semantics() {
 fn test_appcontainer_execution_lease_concurrency_boundary() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::AppContainerProfile;
 
         let name = format!("engram_lease_test_{}", uuid::Uuid::new_v4().simple());
@@ -7274,6 +7290,7 @@ fn test_appcontainer_execution_lease_concurrency_boundary() {
 fn test_appcontainer_lease_lifecycle_barrier_concurrency_and_retry() {
     #[cfg(windows)]
     {
+        let _winsta_lock = WINSTA_MUTEX.lock().unwrap();
         use engram::empirical_live::security::{AppContainerProfile, SecurityError};
         use std::sync::{Arc, Barrier};
         use std::thread;

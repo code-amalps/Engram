@@ -2,7 +2,7 @@
 //! Orchestrated Pre-Flight and Post-Flight protocol uniting Context, Impact,
 //! Contracts, Guard, and Candidate Compounding under a strict Human Authority Boundary.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -10,10 +10,10 @@ use crate::analyzer::ensure_fresh;
 use crate::compiler::context;
 use crate::constitution::evaluate_rules;
 use crate::contract::{
-    create_contract, get_active_contract, get_contract, ChangeContract, FileClassification,
+    ChangeContract, FileClassification, create_contract, get_active_contract, get_contract,
 };
 use crate::impact::compute_impact_cone;
-use crate::memory::{query_scoped_memories, record_task_candidate, MemoryCandidate};
+use crate::memory::{MemoryCandidate, query_scoped_memories, record_task_candidate};
 use crate::model::{RuleSeverity, RuleViolation};
 use crate::storage::{db, git_changed, revision, root_path};
 
@@ -131,8 +131,18 @@ pub struct PostflightResult {
 }
 
 const GENERIC_UNSCOPED_NAMES: &[&str] = &[
-    "constructor", "new", "init", "__init__", "toString", "clone", "equals", "hashCode",
-    "render", "build", "create", "destroy",
+    "constructor",
+    "new",
+    "init",
+    "__init__",
+    "toString",
+    "clone",
+    "equals",
+    "hashCode",
+    "render",
+    "build",
+    "create",
+    "destroy",
 ];
 
 fn extract_symbols_for_paths(root: &Path, paths: &[String]) -> Vec<String> {
@@ -413,31 +423,11 @@ pub fn preflight_task(root: &Path, opts: &PreflightOptions) -> Result<PreflightR
             }
 
             // Case B: Incremental Plan Delta Validation
-            let mut delta_violations = Vec::new();
-            for nf in &new_files {
-                let norm_nf = crate::contract::normalize_rel_path(nf);
-                if active
-                    .boundary
-                    .forbidden_boundaries
-                    .iter()
-                    .any(|fb| crate::contract::matches_boundary(&norm_nf, fb))
-                {
-                    delta_violations
-                        .push(format!("Planned file '{}' matches forbidden boundary", nf));
-                }
-                if let Ok(rules) = crate::constitution::load_constitution(&root) {
-                    for r in &rules {
-                        if let Some(ref fb) = r.forbidden {
-                            if crate::contract::matches_boundary(&norm_nf, fb) {
-                                delta_violations.push(format!(
-                                    "Planned file '{}' violates constitution rule '{}' ({})",
-                                    nf, r.name, r.id
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+            let delta_violations = crate::contract::validate_planned_boundaries(
+                &root,
+                &new_files,
+                Some(&active.boundary.forbidden_boundaries),
+            );
 
             if !delta_violations.is_empty() {
                 return Ok(PreflightResult {

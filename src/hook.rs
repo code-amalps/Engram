@@ -8,7 +8,7 @@
 //! Exits 0 silently on clean, authorized commits without model calls.
 //! Blocks commits with non-zero exit code and actionable recovery guidance on violations.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -63,7 +63,7 @@ OUTDATED_CANDIDATE=""
 # 1. Explicit ENGRAM_PATH environment override (never silently falls back)
 if [ -n "$ENGRAM_PATH" ]; then
   if engram_check_candidate "$ENGRAM_PATH" || engram_check_path "$ENGRAM_PATH"; then
-    "$ENGRAM_RESOLVED" hook run || exit $?
+    "$ENGRAM_RESOLVED" hook pre-commit || "$ENGRAM_RESOLVED" hook run || exit $?
     exit 0
   else
     echo "[engram] Pre-commit hook error: Configured ENGRAM_PATH='$ENGRAM_PATH' is missing, non-executable, or does not support the required 'hook' command." >&2
@@ -115,7 +115,7 @@ fi
 
 # Execution or actionable diagnostic failure
 if [ -n "$ENGRAM_RESOLVED" ]; then
-  "$ENGRAM_RESOLVED" hook run || exit $?
+  "$ENGRAM_RESOLVED" hook pre-commit || "$ENGRAM_RESOLVED" hook run || exit $?
 else
   if [ -n "$OUTDATED_CANDIDATE" ]; then
     cand_version="$("$OUTDATED_CANDIDATE" --version 2>/dev/null || echo "unknown")"
@@ -146,10 +146,48 @@ pub fn generate_hook_script(installer_bin: Option<&Path>) -> String {
 }
 
 /// Resolve the Git hooks directory, supporting standard repositories,
-/// git worktrees (where `.git` is a file pointing to a gitdir), and submodules.
+/// git worktrees (where `.git` is a file pointing to a gitdir), submodules,
+/// and custom `core.hooksPath` configurations.
 pub fn resolve_hooks_dir(root: &Path) -> Result<PathBuf> {
+    // 1. Authoritative resolution via `git rev-parse --git-path hooks` (handles core.hooksPath and worktrees)
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["rev-parse", "--git-path", "hooks"])
+        .current_dir(root)
+        .output()
+    {
+        if out.status.success() {
+            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                let p = PathBuf::from(path_str);
+                if p.is_absolute() {
+                    return Ok(p);
+                } else {
+                    return Ok(root.join(p));
+                }
+            }
+        }
+    }
+
+    // 2. File-based fallback (synthetic test environments, offline or minimal systems)
     let dot_git = root.join(".git");
     if dot_git.is_dir() {
+        let config_file = dot_git.join("config");
+        if config_file.is_file() {
+            if let Ok(cfg) = fs::read_to_string(&config_file) {
+                for line in cfg.lines() {
+                    let trimmed = line.trim();
+                    if let Some(val) = trimmed.strip_prefix("hooksPath") {
+                        if let Some((_, path_part)) = val.split_once('=') {
+                            let hp = path_part.trim().trim_matches('"').trim_matches('\'');
+                            if !hp.is_empty() {
+                                let p = PathBuf::from(hp);
+                                return Ok(if p.is_absolute() { p } else { root.join(p) });
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return Ok(dot_git.join("hooks"));
     }
     if dot_git.is_file() {
@@ -185,22 +223,6 @@ pub fn resolve_hooks_dir(root: &Path) -> Result<PathBuf> {
                     }
                     return Ok(hooks);
                 }
-            }
-        }
-    }
-
-    if let Ok(out) = std::process::Command::new("git")
-        .args(["rev-parse", "--git-path", "hooks"])
-        .current_dir(root)
-        .output()
-    {
-        if out.status.success() {
-            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let p = PathBuf::from(path_str);
-            if p.is_absolute() {
-                return Ok(p);
-            } else {
-                return Ok(root.join(p));
             }
         }
     }
@@ -382,6 +404,7 @@ pub fn uninstall_hook(root: &Path, dry_run: bool) -> Result<String> {
 pub fn run_hook(
     root: &Path,
     strict: bool,
+    enforce_contract: bool,
     policy_path: Option<&Path>,
     contract_file: Option<&str>,
     force_json: bool,
@@ -394,6 +417,7 @@ pub fn run_hook(
         contract_file: contract_file.map(String::from),
         staged: true,
         strict,
+        enforce_contract,
         diagnostic: false,
     };
 
@@ -412,16 +436,64 @@ pub fn run_hook(
 
     match guard_res.status {
         GuardStatus::Pass => {
-            println!(
-                "✓ Engram Pre-Commit Guard: Staged changes authorized ({} file(s) evaluated).",
-                guard_res.changed_files.len()
-            );
-            if let Some(ref cid) = guard_res.context.contract_id {
-                println!("  Active Contract: {cid} (Status: Locked)");
+            let is_bypassed = guard_res
+                .checks_skipped
+                .iter()
+                .any(|c| c.name == "contracts" && c.status == "bypassed");
+
+            if is_bypassed {
+                println!(
+                    "✓ Engram Pre-Commit Guard: Trivial leaf edit authorized under zero-cost bypass (0 model tokens consumed)."
+                );
+                let _ = crate::storage::remove_bypass_trivial(&resolved_root);
+            } else if let Some(ref cid) = guard_res.context.contract_id {
+                let contract_status_str = match crate::contract::get_contract(&resolved_root, cid) {
+                    Ok(c) => format!("{:?}", c.status),
+                    Err(_) => "Active".to_string(),
+                };
+                println!(
+                    "✓ Engram Pre-Commit Guard: Staged changes authorized; local postflight checks passed (0 model tokens consumed)."
+                );
+                println!(
+                    "  Active Contract: {cid} (Status: {contract_status_str}; Verification: Passed)"
+                );
+                match crate::recovery::resolve_session(&resolved_root, cid) {
+                    Ok(Some(_)) => {
+                        println!("  Recovery Session: Resolved");
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!(
+                            "\n❌ Engram Pre-Commit Guard: Failed resolving recovery session for contract '{cid}': {e}"
+                        );
+                        return Ok(2);
+                    }
+                }
+            } else {
+                println!(
+                    "✓ Engram Pre-Commit Guard: Staged changes authorized ({} file(s) evaluated).",
+                    guard_res.changed_files.len()
+                );
             }
             Ok(0)
         }
         GuardStatus::Warn if !strict => {
+            let is_bypassed = guard_res
+                .checks_skipped
+                .iter()
+                .any(|c| c.name == "contracts" && c.status == "bypassed");
+
+            if is_bypassed {
+                let _ = crate::storage::remove_bypass_trivial(&resolved_root);
+            } else if let Some(ref cid) = guard_res.context.contract_id {
+                if let Err(e) = crate::recovery::resolve_session(&resolved_root, cid) {
+                    eprintln!(
+                        "\n❌ Engram Pre-Commit Guard: Failed resolving recovery session for contract '{cid}': {e}"
+                    );
+                    return Ok(2);
+                }
+            }
+
             println!(
                 "⚠️  Engram Pre-Commit Guard: Staged changes accepted with {} advisory warning(s):",
                 guard_res.findings.len()
@@ -460,11 +532,13 @@ pub fn run_hook(
             if let Some(ref cid) = guard_res.context.contract_id {
                 eprintln!("  2. If this expansion is intentional, ratify the contract:");
                 eprintln!("     engram contract ratify {cid} --reason \"<human rationale>\"");
+                eprintln!("  3. Or launch automated contract recovery:");
+                eprintln!("     engram recover {cid}");
             } else {
                 eprintln!("  2. To govern this task under a contract, run preflight:");
-                eprintln!("     engram preflight \"<task goal>\"");
+                eprintln!("     engram preflight \"<task goal>\" or engram_engage");
             }
-            eprintln!("  3. Emergency bypass (skips all pre-commit hooks):");
+            eprintln!("  4. Emergency bypass (skips all pre-commit hooks):");
             eprintln!("     git commit --no-verify\n");
 
             Ok(1)

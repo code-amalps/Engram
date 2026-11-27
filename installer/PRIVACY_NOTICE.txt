@@ -1,0 +1,40 @@
+================================================================================
+ENGRAM PRIVACY, SECURITY & DATA GOVERNANCE NOTICE
+================================================================================
+
+Engram is an open-source, local-first engineering memory and change intelligence
+system designed for developers and AI coding agents (Factory.ai, GitHub Copilot,
+Cursor, Windsurf, Claude Code, and autonomous developer agents).
+
+Before installing Engram, please review our core data governance principles:
+
+1. 100% LOCAL-FIRST EXECUTION
+   All repository analysis, AST symbol indexing, dependency extraction,
+   architectural decision tracking, and change contract guards run strictly
+   on your local machine.
+
+2. ZERO SOURCE CODE EXFILTRATION
+   Engram NEVER transmits your source code, task descriptions, diffs, git
+   history, file paths, or architectural decisions to any external server,
+   cloud API, or third-party service. Your code stays on your device.
+
+3. ZERO EXTERNAL TELEMETRY & TRACKING
+   Engram does not contain third-party tracking pixels, analytics beacons,
+   or behavioral surveillance. Local diagnostic logs and telemetry remain
+   contained within your local repository (.engram/) and local cache directory.
+
+4. LOCAL MCP INTEGRATION (Factory.ai, Copilot, Cursor, Windsurf)
+   When connected to AI coding platforms such as Factory.ai or editor extensions,
+   Engram communicates exclusively over standard local inter-process pipes
+   (stdio JSON-RPC / Model Context Protocol). No remote credentials or external
+   API keys are required or transmitted.
+
+5. TRANSPARENT LOCAL STORAGE & USER CONTROL
+   - Repository data: Stored in the `.engram/` folder inside your repository.
+   - Machine cache: Stored locally in `%LOCALAPPDATA%\Engram`.
+   You retain complete ownership and control. You can inspect, audit, or delete
+   Engram data at any time.
+
+By installing Engram, you acknowledge and agree to this local-first operational
+model.
+================================================================================

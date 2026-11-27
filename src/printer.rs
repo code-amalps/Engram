@@ -32,11 +32,26 @@ pub fn print_context_result(ctx: &ContextResult, explain: bool) {
     println!("🧠 Task Context: \"{}\"", ctx.task);
     println!("──────────────────────────────────────────");
     println!("  Project:     {}", ctx.project);
+    if let Some(sub) = &ctx.subpath_filter {
+        println!("  Subpath:     {}", sub);
+    }
+    if let Some(lang) = &ctx.language_filter {
+        println!("  Language:    {}", lang);
+    }
     println!("  Confidence:  {}", ctx.confidence);
     println!(
         "  Budget:      {} / {} tokens",
         ctx.estimated_tokens, ctx.token_budget
     );
+    if let Some(ref diag) = ctx.budget_diagnostics {
+        println!(
+            "  Payload:     {} bytes ({} source, {} overhead)",
+            diag.exact_serialized_bytes,
+            diag.selected_source_bytes,
+            diag.serialization_overhead_bytes
+        );
+        println!("  Tokenizer:   {}", diag.tokenizer_telemetry);
+    }
     println!("  Files:       {}", ctx.files.len());
     println!("──────────────────────────────────────────");
 

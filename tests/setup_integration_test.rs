@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use engram::instructions::{END_MARKER, START_MARKER};
 use engram::setup::{
-    all_providers, get_provider, inspect_mcp_config, list_targets, orchestrate_setup, setup_client,
-    verify_mcp_health, verify_mcp_health_with_timeout, SetupOptions, SetupScope,
-    GOVERNED_TOOL_NAMES,
+    GOVERNED_TOOL_NAMES, SetupOptions, SetupScope, all_providers, get_provider, inspect_mcp_config,
+    list_targets, orchestrate_setup, setup_client, verify_mcp_health,
+    verify_mcp_health_with_timeout,
 };
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -22,7 +22,7 @@ fn temp_workspace(name: &str) -> PathBuf {
 #[test]
 fn test_setup_providers_target_matrix_and_scopes() {
     let providers = all_providers();
-    assert_eq!(providers.len(), 4, "Must have exactly 4 providers");
+    assert_eq!(providers.len(), 5, "Must have exactly 5 providers");
 
     let cursor = get_provider("cursor").expect("cursor provider must exist");
     assert_eq!(cursor.id(), "cursor");
@@ -45,10 +45,20 @@ fn test_setup_providers_target_matrix_and_scopes() {
     assert_eq!(windsurf.scope(), SetupScope::User);
     assert!(windsurf.capabilities().user_mcp);
 
+    let droid = get_provider("droid").expect("droid provider must exist");
+    assert_eq!(droid.id(), "droid");
+    assert_eq!(droid.scope(), SetupScope::Project);
+    assert!(droid.capabilities().project_mcp);
+    assert!(!droid.capabilities().user_mcp);
+
+    let factory_alias =
+        get_provider("factory").expect("factory alias must resolve to droid provider");
+    assert_eq!(factory_alias.id(), "droid");
+
     // List targets output
     let list = list_targets();
     let supp = list["supported"].as_array().unwrap();
-    assert_eq!(supp.len(), 4);
+    assert_eq!(supp.len(), 5);
 
     // Verify instruction file paths strictly target project workspace root
     let dummy_root = PathBuf::from(if cfg!(windows) {
@@ -72,6 +82,10 @@ fn test_setup_providers_target_matrix_and_scopes() {
         windsurf.default_instruction_path(&dummy_root).unwrap(),
         dummy_root.join(".windsurfrules")
     );
+    assert_eq!(
+        droid.default_instruction_path(&dummy_root).unwrap(),
+        dummy_root.join("AGENTS.md")
+    );
 
     assert!(
         cursor
@@ -93,6 +107,12 @@ fn test_setup_providers_target_matrix_and_scopes() {
     );
     assert!(
         windsurf
+            .default_instruction_path(&dummy_root)
+            .unwrap()
+            .starts_with(&dummy_root)
+    );
+    assert!(
+        droid
             .default_instruction_path(&dummy_root)
             .unwrap()
             .starts_with(&dummy_root)
@@ -210,6 +230,113 @@ fn test_cursor_setup_lifecycle_dry_run_apply_and_remove() {
     assert!(
         !rules_file.exists(),
         ".cursorrules should be cleaned as it had zero user content"
+    );
+}
+
+#[test]
+fn test_factory_droid_setup_lifecycle_dry_run_apply_and_remove() {
+    let ws = temp_workspace("droid_lifecycle");
+    let factory_dir = ws.join(".factory");
+    fs::create_dir_all(&factory_dir).unwrap();
+    let mcp_file = factory_dir.join("mcp.json");
+    let agents_file = ws.join("AGENTS.md");
+
+    // 1. Dry run on clean workspace: must not modify disk
+    let dry_res = setup_client(&ws, "droid", true, false, false).unwrap();
+    assert_eq!(dry_res["dry_run"], true);
+    assert!(!mcp_file.exists(), "Dry run must not create config file");
+
+    let dry_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("factory".to_string()),
+            check: false,
+            dry_run: true,
+            apply: false,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(dry_orch.mode, "DRY_RUN");
+    assert_eq!(dry_orch.changes_applied, 0);
+    assert!(!mcp_file.exists());
+    assert!(!agents_file.exists());
+
+    // 2. Apply on clean workspace: creates .factory/mcp.json and AGENTS.md
+    let apply_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("droid".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(apply_orch.mode, "APPLIED");
+    assert_eq!(apply_orch.changes_applied, 2); // 1 mcp + 1 instruction
+    assert!(mcp_file.exists(), ".factory/mcp.json must be created");
+    assert!(agents_file.exists(), "AGENTS.md must be created");
+
+    let mcp_content = fs::read_to_string(&mcp_file).unwrap();
+    let mcp_json: serde_json::Value = serde_json::from_str(&mcp_content).unwrap();
+    assert!(mcp_json["mcpServers"]["engram"].is_object());
+    assert_eq!(
+        mcp_json["mcpServers"]["engram"]["args"].as_array().unwrap()[2],
+        "mcp"
+    );
+
+    let agents_content = fs::read_to_string(&agents_file).unwrap();
+    assert!(agents_content.contains(START_MARKER));
+    assert!(agents_content.contains(END_MARKER));
+    assert!(agents_content.contains("engram_preflight"));
+
+    // 3. Repeated Apply: Strict Idempotency
+    let reapply_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("factory".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        reapply_orch.changes_applied, 0,
+        "Repeated apply must be strictly idempotent"
+    );
+
+    let agents_reapply = fs::read_to_string(&agents_file).unwrap();
+    assert_eq!(agents_reapply.matches(START_MARKER).count(), 1);
+    assert_eq!(agents_reapply.matches(END_MARKER).count(), 1);
+
+    // 4. Surgical Remove
+    let remove_orch = orchestrate_setup(
+        &ws,
+        SetupOptions {
+            client: Some("droid".to_string()),
+            check: false,
+            dry_run: false,
+            apply: true,
+            force: false,
+            status: false,
+            remove: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(remove_orch.mode, "REMOVED");
+    assert!(
+        !agents_file.exists(),
+        "AGENTS.md should be cleaned as it had zero user content"
     );
 }
 
@@ -461,8 +588,16 @@ fn test_verify_mcp_health_validation_and_clean_termination() {
         health.err()
     );
     let tool_count = health.unwrap();
-    assert_eq!(tool_count, 15, "Must verify exactly 15 governed tools");
+    assert_eq!(tool_count, 17, "Must verify exactly 17 governed tools");
     assert_eq!(tool_count, GOVERNED_TOOL_NAMES.len());
+    assert!(
+        GOVERNED_TOOL_NAMES.contains(&"engram_prepare_task"),
+        "engram_prepare_task must be included in governed tools"
+    );
+    assert!(
+        GOVERNED_TOOL_NAMES.contains(&"engram_engage"),
+        "engram_engage must be included in governed tools"
+    );
     assert!(
         GOVERNED_TOOL_NAMES.contains(&"engram_ratify_decision"),
         "engram_ratify_decision must be included in governed tools"
@@ -499,7 +634,7 @@ fn test_verify_mcp_health_bounded_timeout() {
 
     let health = verify_mcp_health_with_timeout(bin, &ws, 10);
     assert!(health.is_ok());
-    assert_eq!(health.unwrap(), 15);
+    assert_eq!(health.unwrap(), 17);
 }
 
 #[test]
@@ -554,12 +689,10 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
     assert_eq!(args[2], "mcp");
 
     // 3. Inspect configuration
-    let root_canon = fs::canonicalize(&ws)
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let root_canon = fs::canonicalize(&ws).unwrap().to_string_lossy().to_string();
     let current_bin = engram::setup::get_engram_binary_path();
-    let (status, conflict, details) = inspect_mcp_config(&mcp_file, &current_bin, &root_canon).unwrap();
+    let (status, conflict, details) =
+        inspect_mcp_config(&mcp_file, &current_bin, &root_canon).unwrap();
     assert_eq!(status, "CONFIGURED_HEALTHY", "Details: {:?}", details);
     assert!(!conflict);
     assert!(details.is_none());
@@ -578,7 +711,10 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
         },
     )
     .unwrap();
-    assert_eq!(reapply.changes_applied, 0, "Repeated apply must be strictly idempotent");
+    assert_eq!(
+        reapply.changes_applied, 0,
+        "Repeated apply must be strictly idempotent"
+    );
 
     // 5. Remove surgically cleans engram from servers
     let rem = orchestrate_setup(
@@ -598,6 +734,11 @@ fn test_vscode_native_schema_lifecycle_and_workspace_folder_expansion() {
     if mcp_file.exists() {
         let cleaned: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&mcp_file).unwrap()).unwrap();
-        assert!(cleaned.get("servers").and_then(|s| s.get("engram")).is_none());
+        assert!(
+            cleaned
+                .get("servers")
+                .and_then(|s| s.get("engram"))
+                .is_none()
+        );
     }
 }

@@ -13,11 +13,12 @@ use uuid::Uuid;
 use crate::analyzer::{analyze, estimate_tokens};
 use crate::archaeology::explain_why;
 use crate::compiler::context;
-use crate::contract::{create_contract, validate_contract_diff, FileValidationCategory};
-use crate::doctor::{diagnose_memory_health, LivenessStatus};
+use crate::contract::{FileValidationCategory, create_contract, validate_contract_diff};
+use crate::doctor::{LivenessStatus, diagnose_memory_health};
 use crate::memory::{
-    detect_memory_conflicts, load_durable_memories, query_scoped_memories, record_decision,
-    record_scoped_decision, supersede_memory, ConflictType, MemoryLifecycleState, MemoryScope,
+    ConflictType, MemoryLifecycleState, MemoryScope, detect_memory_conflicts,
+    load_durable_memories, query_scoped_memories, record_decision, record_scoped_decision,
+    supersede_memory,
 };
 
 const BENCHMARK_VERSION: &str = "1.0.0";

@@ -1,0 +1,101 @@
+{
+  "schema_version": "2.0.0",
+  "task_id": "task_commit_cache_invalidation",
+  "title": "Commit-Bound AST Cache Invalidation and Stale Index Cleanup",
+  "description": "Record active Git commit HEAD in SQLite .engram/index.db metadata; in ensure_fresh(), detect commit drift and invalidate stale AST records; add engram clean --cache subcommand to purge index cache while preserving user memories.",
+  "repository_type": "cargo",
+  "read_only": false,
+  "requires_dependencies": false,
+  "baseline_commit": "c70845b4d5913457f1b176fb0370b80dd792711f",
+  "allowed_file_patterns": [
+    "src/compiler.rs",
+    "src/analyzer.rs",
+    "src/main.rs",
+    "tests/commit_cache_invalidation_test.rs"
+  ],
+  "forbidden_file_patterns": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "src/mcp.rs",
+    "src/guard.rs",
+    "src/ci_guard.rs",
+    "src/hook.rs",
+    ".engram/memories.json"
+  ],
+  "target_files": [
+    "src/compiler.rs",
+    "src/analyzer.rs",
+    "src/main.rs",
+    "tests/commit_cache_invalidation_test.rs"
+  ],
+  "prompt": "Implement commit-bound cache invalidation and stale index cleanup in Engram:\n1. Record the active Git commit HEAD in the SQLite .engram/index.db meta table.\n2. In ensure_fresh(), check whether the current repository HEAD matches the cached commit hash; trigger invalidation of stale file records if commit drift is detected.\n3. Implement the 'engram clean --cache' subcommand to safely purge the AST SQLite database while preserving .engram/memories.json.\n4. Write integration tests in tests/commit_cache_invalidation_test.rs verifying that commit drift triggers ensure_fresh() cache invalidation. Confine all changes strictly to authorized files (src/compiler.rs, src/analyzer.rs, src/main.rs, and tests/commit_cache_invalidation_test.rs). Do NOT modify Cargo.toml or unrelated modules.\n5. Verify using 'cargo check --offline' and 'cargo test --offline --lib compiler::tests && cargo test --offline --test commit_cache_invalidation_test'.",
+  "fixture_preflight": {
+    "required_files": [
+      "src/compiler.rs",
+      "src/analyzer.rs",
+      "src/main.rs"
+    ],
+    "baseline_present_patterns": [
+      {
+        "file": "src/compiler.rs",
+        "pattern": "pub fn context"
+      },
+      {
+        "file": "src/analyzer.rs",
+        "pattern": "pub fn ensure_fresh"
+      },
+      {
+        "file": "src/main.rs",
+        "pattern": "enum CommandLine"
+      }
+    ]
+  },
+  "gates": {
+    "L0_typecheck": {
+      "enabled": true,
+      "command": "cargo check --offline"
+    },
+    "L1_lint": {
+      "enabled": false,
+      "command": "cargo clippy --offline"
+    },
+    "L2_unit_tests": {
+      "enabled": true,
+      "command": "cargo test --offline --lib compiler::tests && cargo test --offline --test commit_cache_invalidation_test"
+    },
+    "L3_production_build": {
+      "enabled": true,
+      "command": "cargo build --offline"
+    }
+  },
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "description": "Record active Git commit HEAD in SQLite meta table",
+      "weight": 0.25,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "index.db contains meta table recording git_commit_head"
+    },
+    {
+      "id": "REQ-2",
+      "description": "Commit drift detection invalidates stale cache entries",
+      "weight": 0.25,
+      "evaluation_type": "UNIT_TEST",
+      "criteria": "ensure_fresh triggers re-index when repository HEAD diverges from cached commit"
+    },
+    {
+      "id": "REQ-3",
+      "description": "Add engram clean --cache subcommand preserving memories",
+      "weight": 0.25,
+      "evaluation_type": "STATIC_CHECK",
+      "criteria": "clean subcommand removes SQLite cache without deleting memories.json"
+    },
+    {
+      "id": "REQ-4",
+      "description": "Boundary adherence and regression prevention",
+      "weight": 0.25,
+      "evaluation_type": "AUTOMATED_DIFF",
+      "criteria": "Zero edits to Cargo.toml, Cargo.lock, or unauthorized modules; existing compiler tests pass"
+    }
+  ]
+}

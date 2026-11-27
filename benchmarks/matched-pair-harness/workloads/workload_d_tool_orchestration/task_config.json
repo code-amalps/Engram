@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload_d_tool_orchestration",
+  "title": "Workload D: Multi-turn tool orchestration",
+  "prompt": "Read config.json and update batch_size to 64, workers to 4, and validated to true.",
+  "complexity": "COMPLEX",
+  "verification_command": "python -m unittest tests/test_pipeline.py",
+  "target_file": "config.json"
+}

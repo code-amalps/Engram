@@ -492,7 +492,10 @@ fn test_hook_script_explicit_engram_path_invalid_fails_closed() {
         .output()
         .unwrap();
 
-    assert!(!commit_out.status.success(), "Commit must fail with invalid ENGRAM_PATH");
+    assert!(
+        !commit_out.status.success(),
+        "Commit must fail with invalid ENGRAM_PATH"
+    );
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&commit_out.stdout),
@@ -546,7 +549,10 @@ fn test_hook_script_explicit_engram_path_incompatible_fails_closed() {
         .output()
         .unwrap();
 
-    assert!(!commit_out.status.success(), "Commit must fail with incompatible ENGRAM_PATH");
+    assert!(
+        !commit_out.status.success(),
+        "Commit must fail with incompatible ENGRAM_PATH"
+    );
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&commit_out.stdout),
@@ -649,7 +655,13 @@ fn test_hook_executes_from_repository_subdirectory() {
     let _ = Command::new(bin)
         .arg("-C")
         .arg(&ws)
-        .args(["contract", "create", "Nested task", "--files", "nested/subpkg/sub.ts"])
+        .args([
+            "contract",
+            "create",
+            "Nested task",
+            "--files",
+            "nested/subpkg/sub.ts",
+        ])
         .output()
         .unwrap();
 
@@ -692,7 +704,11 @@ fn test_hook_prefers_repository_target_over_outdated_path() {
 
     let target_debug = ws.join("target").join("debug");
     fs::create_dir_all(&target_debug).unwrap();
-    let target_bin = target_debug.join(if cfg!(windows) { "engram.exe" } else { "engram" });
+    let target_bin = target_debug.join(if cfg!(windows) {
+        "engram.exe"
+    } else {
+        "engram"
+    });
     fs::copy(bin, &target_bin).unwrap();
     #[cfg(unix)]
     {
@@ -801,7 +817,10 @@ fn test_hook_outdated_binary_without_fallback_diagnostics() {
         .output()
         .unwrap();
 
-    assert!(!commit_out.status.success(), "Commit must fail when only outdated binary is found");
+    assert!(
+        !commit_out.status.success(),
+        "Commit must fail when only outdated binary is found"
+    );
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&commit_out.stdout),

@@ -12,7 +12,7 @@ use std::process::Command;
 
 use crate::contract::{extract_module, list_all_contracts};
 use crate::memory::{
-    load_durable_memories, save_durable_memories, DurableMemory, MemoryLifecycleState,
+    DurableMemory, MemoryLifecycleState, load_durable_memories, save_durable_memories,
 };
 use crate::storage::{db, root_path};
 use crate::telemetry::load_events;

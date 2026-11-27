@@ -10,7 +10,7 @@
 //! - 1: Block (mandatory check failed or forbidden boundary breached)
 //! - 2: Error (configuration error, malformed policy, fail-closed diagnostic)
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 
 use crate::constitution::{evaluate_rules, is_policy_file, load_constitution};
 use crate::contract::{
-    inspect_changed_files, matches_boundary, normalize_rel_path,
-    validate_contract_diff_with_constitution_and_base, CheckOptions, FileValidationCategory,
+    CheckOptions, FileValidationCategory, inspect_changed_files, matches_boundary,
+    normalize_rel_path, validate_contract_diff_with_constitution_and_base,
 };
 use crate::impact::compute_impact_cone;
 use crate::model::RuleSeverity;
@@ -116,6 +116,7 @@ pub struct GuardOptions {
     pub contract_file: Option<String>,
     pub staged: bool,
     pub strict: bool,
+    pub enforce_contract: bool,
     pub diagnostic: bool,
 }
 
@@ -269,7 +270,7 @@ pub fn parse_policy_toml(content: &str) -> Result<GuardPolicy> {
                     return Err(anyhow!(
                         "Unknown property '{}' in [checks.constitution]",
                         key
-                    ))
+                    ));
                 }
             }
         } else if current_section == "checks.impact" {
@@ -475,7 +476,11 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
         }
     };
 
-    let baseline_ref = options.base_commit.as_deref().unwrap_or("HEAD");
+    let baseline_ref = if options.staged && options.base_commit.is_none() {
+        "WORKTREE"
+    } else {
+        options.base_commit.as_deref().unwrap_or("HEAD")
+    };
 
     // 2. Discover changed files
     let check_opts = CheckOptions {
@@ -602,13 +607,83 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
         } else {
-            crate::contract::get_active_contract(&resolved_root).unwrap_or(None)
+            match crate::contract::get_active_contract(&resolved_root) {
+                Ok(opt) => opt,
+                Err(e) => {
+                    findings.push(GuardFinding {
+                        rule_id: "GUARD-CONTRACT-001".to_string(),
+                        severity: FindingSeverity::Block,
+                        message: format!("Active Change Contract is malformed, corrupt, or unreadable: {e}"),
+                        path: None,
+                        remediation: Some(
+                            "Re-create the active contract with 'engram preflight \"<task>\"' or repair the contract JSON file."
+                                .to_string(),
+                        ),
+                    });
+                    None
+                }
+            }
         };
 
         match contract_opt {
             Some(contract) => {
                 contract_id_used = Some(contract.contract_id.clone());
                 checks_executed.push("contracts".to_string());
+
+                // Contract status validation
+                if contract.status == crate::contract::ContractStatus::BlockedAwaitingHuman {
+                    findings.push(GuardFinding {
+                        rule_id: "GUARD-CONTRACT-006".to_string(),
+                        severity: FindingSeverity::Block,
+                        message: format!(
+                            "Change Contract '{}' is BLOCKED_AWAITING_HUMAN. Human reconciliation required before changes can be accepted.",
+                            contract.contract_id
+                        ),
+                        path: None,
+                        remediation: Some(format!(
+                            "Run 'engram contract ratify {} --reason \"<human rationale>\"' or re-run preflight.",
+                            contract.contract_id
+                        )),
+                    });
+                }
+
+                // Contract baseline validation
+                if contract.baseline_revision != "WORKTREE"
+                    && !contract.baseline_revision.is_empty()
+                {
+                    match crate::git::resolve_baseline(&resolved_root, &contract.baseline_revision)
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-CONTRACT-007".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!(
+                                    "Change Contract baseline commit '{}' is invalid or unavailable in current repository: {}",
+                                    contract.baseline_revision, err
+                                ),
+                                path: None,
+                                remediation: Some(
+                                    "Re-anchor contract baseline to current HEAD using 'engram preflight \"<task>\"' or update contract baseline.".to_string(),
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-CONTRACT-007".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!(
+                                    "Failed verifying Change Contract baseline commit '{}': {}",
+                                    contract.baseline_revision, e
+                                ),
+                                path: None,
+                                remediation: Some(
+                                    "Verify Git repository health and baseline commit.".to_string(),
+                                ),
+                            });
+                        }
+                    }
+                }
 
                 let (classifications, missing_changes, _summary) =
                     validate_contract_diff_with_constitution_and_base(
@@ -691,33 +766,111 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
                 }
             }
             None => {
-                if policy.checks.contracts.required {
-                    findings.push(GuardFinding {
-                        rule_id: "GUARD-CONTRACT-001".to_string(),
-                        severity: FindingSeverity::Block,
-                        message: "No active Change Contract found and policy requires a contract"
-                            .to_string(),
-                        path: None,
-                        remediation: Some(
-                            "Create an active contract using 'engram preflight \"<task>\"' or 'engram contract create \"<goal>\"'"
+                // Check if this qualifies for zero-cost trivial bypass or pure documentation change
+                let is_pure_docs = crate::storage::is_pure_documentation_change(&changed_files);
+                if is_pure_docs {
+                    checks_skipped.push(CheckExecutionRecord {
+                        name: "contracts".to_string(),
+                        status: "bypassed".to_string(),
+                        reason: Some(
+                            "Documentation-only changes authorized under zero-cost bypass (0 model tokens consumed)"
                                 .to_string(),
                         ),
                     });
-                    checks_executed.push("contracts".to_string());
                 } else {
-                    checks_skipped.push(CheckExecutionRecord {
-                        name: "contracts".to_string(),
-                        status: "not_applicable".to_string(),
-                        reason: Some(
-                            "No active Change Contract present (optional in policy)".to_string(),
-                        ),
-                    });
+                    match crate::storage::validate_and_consume_bypass(
+                        &resolved_root,
+                        &changed_files,
+                    ) {
+                        Ok(crate::storage::BypassValidationResult::Authorized(record)) => {
+                            checks_skipped.push(CheckExecutionRecord {
+                                name: "contracts".to_string(),
+                                status: "bypassed".to_string(),
+                                reason: Some(format!(
+                                    "Trivial leaf edit authorized under zero-cost bypass (record {}, 0 model tokens consumed)",
+                                    record.record_id
+                                )),
+                            });
+                        }
+                        Ok(crate::storage::BypassValidationResult::Rejected(reason)) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-BYPASS-001".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!("Trivial task bypass rejected: {reason}"),
+                                path: None,
+                                remediation: Some(
+                                    "Create an active contract using 'engram preflight \"<task>\"' or 'engram contract create \"<goal>\"'"
+                                        .to_string(),
+                                ),
+                            });
+                            checks_executed.push("contracts".to_string());
+                        }
+                        Ok(crate::storage::BypassValidationResult::NoRecord) => {
+                            if policy.checks.contracts.required || options.enforce_contract {
+                                findings.push(GuardFinding {
+                                    rule_id: "GUARD-CONTRACT-001".to_string(),
+                                    severity: FindingSeverity::Block,
+                                    message: "No active Change Contract found and contract enforcement is enabled"
+                                        .to_string(),
+                                    path: None,
+                                    remediation: Some(
+                                        "Create an active contract using 'engram preflight \"<task>\"', 'engram contract create \"<goal>\"', or invoke 'engram_engage'"
+                                            .to_string(),
+                                    ),
+                                });
+                                checks_executed.push("contracts".to_string());
+                            } else {
+                                checks_skipped.push(CheckExecutionRecord {
+                                    name: "contracts".to_string(),
+                                    status: "not_applicable".to_string(),
+                                    reason: Some(
+                                        "No active Change Contract present (optional in policy: permissive mode permitted)".to_string(),
+                                    ),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            findings.push(GuardFinding {
+                                rule_id: "GUARD-BYPASS-001".to_string(),
+                                severity: FindingSeverity::Block,
+                                message: format!("Bypass authorization failed: unreadable or corrupt bypass record: {e}"),
+                                path: None,
+                                remediation: Some(
+                                    "Remove corrupt .engram/bypass_trivial.json and initialize an active contract with 'engram preflight \"<task>\"'"
+                                        .to_string(),
+                                ),
+                            });
+                            checks_executed.push("contracts".to_string());
+                        }
+                    }
                 }
             }
         }
     }
 
-    // 5. Sovereign Constitution Check
+    // 5. Sovereign Constitution Check & Mandatory Policy Invariants
+    // In PR mode, protect sovereign policy files from unratified mutation unconditionally
+    if options.base_commit.is_some() {
+        for file in &changed_files {
+            let norm = normalize_rel_path(file);
+            if is_policy_file(&norm) {
+                findings.push(GuardFinding {
+                    rule_id: "GUARD-CONST-001".to_string(),
+                    severity: FindingSeverity::Block,
+                    message: format!(
+                        "Sovereign policy file '{}' cannot be modified in PR without human ratification",
+                        file
+                    ),
+                    path: Some(file.clone()),
+                    remediation: Some(
+                        "Submit policy modifications through a separate approved governance PR"
+                            .to_string(),
+                    ),
+                });
+            }
+        }
+    }
+
     if !policy.checks.constitution.enabled {
         checks_skipped.push(CheckExecutionRecord {
             name: "constitution".to_string(),
@@ -727,53 +880,46 @@ pub fn run_guard(root: &Path, options: &GuardOptions) -> GuardResult {
     } else {
         checks_executed.push("constitution".to_string());
 
-        // In PR mode, protect sovereign policy files from unratified mutation
-        if options.base_commit.is_some() {
-            for file in &changed_files {
-                let norm = normalize_rel_path(file);
-                if is_policy_file(&norm) {
-                    findings.push(GuardFinding {
-                        rule_id: "GUARD-CONST-001".to_string(),
-                        severity: FindingSeverity::Block,
-                        message: format!(
-                            "Sovereign policy file '{}' cannot be modified in PR without human ratification",
-                            file
-                        ),
-                        path: Some(file.clone()),
-                        remediation: Some(
-                            "Submit policy modifications through a separate approved governance PR"
-                                .to_string(),
-                        ),
-                    });
+        // Evaluate loaded Project Constitution rules
+        match load_constitution(&resolved_root) {
+            Ok(rules) => {
+                for file in &changed_files {
+                    let norm = normalize_rel_path(file);
+                    for rule in &rules {
+                        let violated = if let Some(ref forbidden) = rule.forbidden {
+                            matches_boundary(&norm, forbidden)
+                        } else {
+                            false
+                        };
+                        if violated {
+                            findings.push(GuardFinding {
+                                rule_id: format!("GUARD-CONST-{}", rule.id),
+                                severity: policy.checks.constitution.severity,
+                                message: format!(
+                                    "Constitution rule '{}' ({}) strictly forbids modifying '{}'",
+                                    rule.name, rule.id, file
+                                ),
+                                path: Some(file.clone()),
+                                remediation: Some(
+                                    "Do not modify files within this forbidden constitutional boundary"
+                                        .to_string(),
+                                ),
+                            });
+                        }
+                    }
                 }
             }
-        }
-
-        // Evaluate loaded Project Constitution rules
-        let rules = load_constitution(&resolved_root).unwrap_or_default();
-        for file in &changed_files {
-            let norm = normalize_rel_path(file);
-            for rule in &rules {
-                let violated = if let Some(ref forbidden) = rule.forbidden {
-                    matches_boundary(&norm, forbidden)
-                } else {
-                    false
-                };
-                if violated {
-                    findings.push(GuardFinding {
-                        rule_id: format!("GUARD-CONST-{}", rule.id),
-                        severity: policy.checks.constitution.severity,
-                        message: format!(
-                            "Constitution rule '{}' ({}) strictly forbids modifying '{}'",
-                            rule.name, rule.id, file
-                        ),
-                        path: Some(file.clone()),
-                        remediation: Some(
-                            "Do not modify files within this forbidden constitutional boundary"
-                                .to_string(),
-                        ),
-                    });
-                }
+            Err(e) => {
+                findings.push(GuardFinding {
+                    rule_id: "GUARD-CONST-000".to_string(),
+                    severity: FindingSeverity::Block,
+                    message: format!("Failed to load or parse Project Constitution: {e}"),
+                    path: None,
+                    remediation: Some(
+                        "Ensure .engram/constitution.yaml exists, is readable, and contains valid YAML"
+                            .to_string(),
+                    ),
+                });
             }
         }
 
@@ -1267,7 +1413,7 @@ fi
 
 /// Safe opt-in pre-commit hook installer
 pub fn install_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
-    let hooks_dir = root.join(".git").join("hooks");
+    let hooks_dir = crate::hook::resolve_hooks_dir(root)?;
     if !hooks_dir.exists() && !dry_run {
         fs::create_dir_all(&hooks_dir)?;
     }
@@ -1333,7 +1479,8 @@ pub fn install_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
 
 /// Safe pre-commit hook uninstaller
 pub fn uninstall_guard_hook(root: &Path, dry_run: bool) -> Result<String> {
-    let hook_path = root.join(".git").join("hooks").join("pre-commit");
+    let hooks_dir = crate::hook::resolve_hooks_dir(root)?;
+    let hook_path = hooks_dir.join("pre-commit");
     if !hook_path.exists() {
         return Ok(format!(
             "No pre-commit hook found at {}",

@@ -3,13 +3,13 @@
 //! dependency classification (LOCAL, VENDORED, REPLACED_LOCAL, REPLACED_EXTERNAL, EXTERNAL, UNRESOLVED),
 //! two-stage structural interface satisfaction, and test conventions.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Node, Parser as TsParser};
 
-use crate::analyzer::{node_text, Relationship, Symbol};
+use crate::analyzer::{Relationship, Symbol, node_text};
 use crate::storage::hash;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -342,7 +342,7 @@ pub fn is_go_stdlib(import_path: &str) -> bool {
 }
 
 /// Classify and resolve dependency import path with strict Go module semantics.
-/// Invariant 1: AMstraLift/Engram must never report an external dependency as local merely because a matching-looking directory exists.
+/// Invariant 1: Engram must never report an external dependency as local merely because a matching-looking directory exists.
 /// Invariant 2: An unresolved dependency must remain UNRESOLVED and must never silently degrade into an inferred relationship.
 pub fn resolve_go_dependency_origin(
     root: &Path,
@@ -889,6 +889,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 PackageOrigin::External => ("EXTERNAL", 0.95),
             };
 
+            let is_external = crate::analyzer::is_external_target(&target);
             rels.push(Relationship {
                 source: rel_path.to_string(),
                 target,
@@ -896,6 +897,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 evidence: evidence.to_string(),
                 confidence,
                 line: imp.line,
+                is_external,
             });
         }
     }
@@ -925,6 +927,7 @@ pub fn convert_go_ast_to_engram_with_root(
                     evidence: "EXTRACTED".to_string(),
                     confidence: 0.95,
                     line: iface.line,
+                    is_external: false,
                 });
             }
         }
@@ -940,6 +943,7 @@ pub fn convert_go_ast_to_engram_with_root(
                 evidence: "NAMING_CONVENTION".to_string(),
                 confidence: 0.95,
                 line: 1,
+                is_external: false,
             });
         }
     }
@@ -987,6 +991,7 @@ pub fn infer_cross_file_go_interfaces(files: &[(&str, &GoFileAst)]) -> Vec<Relat
                             evidence: "EXTRACTED".to_string(),
                             confidence: 0.95,
                             line,
+                            is_external: false,
                         });
                     }
                 }

@@ -11,8 +11,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::compiler::context;
-use crate::flywheel::{parse_task_and_planned_files, preflight_task, PreflightOptions};
+use crate::flywheel::{PreflightOptions, parse_task_and_planned_files, preflight_task};
 use crate::storage::root_path;
 
 // ---------------------------------------------------------------------------
@@ -320,7 +319,7 @@ fn contains_keyword_phrase(normalized_text: &str, kw: &str) -> bool {
 }
 
 /// Checks if a path targets a test or specification file.
-fn is_test_file_path(path: &str) -> bool {
+pub(crate) fn is_test_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.contains(".spec.")
         || lower.contains(".test.")
@@ -335,7 +334,7 @@ fn is_test_file_path(path: &str) -> bool {
 }
 
 /// Checks if a path targets a security, crypto, or credential file.
-fn is_security_file_path(path: &str) -> bool {
+pub(crate) fn is_security_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.contains("/auth/")
         || lower.contains("\\auth\\")
@@ -352,7 +351,7 @@ fn is_security_file_path(path: &str) -> bool {
 }
 
 /// Checks if a path targets a manifest, lockfile, or deployment configuration.
-fn is_manifest_file_path(path: &str) -> bool {
+pub(crate) fn is_manifest_file_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.ends_with("package.json")
         || lower.ends_with("package-lock.json")
@@ -435,10 +434,14 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
 
     // Classification logic — deterministic, zero-cost, local-first
     let (classification, reason) = if effective_file_count >= 2 {
-        (TaskComplexity::Standard, format!(
-            "Multiple files detected ({} file references: {}); requires full context and contract workflow.",
-            effective_file_count, detected_files.join(", ")
-        ))
+        (
+            TaskComplexity::Standard,
+            format!(
+                "Multiple files detected ({} file references: {}); requires full context and contract workflow.",
+                effective_file_count,
+                detected_files.join(", ")
+            ),
+        )
     } else if effective_file_count == 0 {
         (TaskComplexity::Standard,
          "No target files specified; scope cannot be established safely. Defaulting to full workflow.".to_string())
@@ -476,8 +479,13 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
                 .to_string(),
         )
     } else if single_explicit_file && has_trivial_action_keywords {
-        (TaskComplexity::Trivial,
-         format!("Single file ('{}') with trivial action keyword and clean boundaries; eligible for bypass.", detected_files[0]))
+        (
+            TaskComplexity::Trivial,
+            format!(
+                "Single file ('{}') with trivial action keyword and clean boundaries; eligible for bypass.",
+                detected_files[0]
+            ),
+        )
     } else {
         (TaskComplexity::Standard,
          "Insufficient trivial signals or unrecognized task pattern; defaulting to full workflow.".to_string())
@@ -500,7 +508,7 @@ pub fn classify_task_complexity(task: &str) -> ClassificationSignals {
 
 /// Collects distinct file-like references from the task text.
 /// Looks for patterns like `path/to/file.ext` or standalone files like `README.md` that weren't captured by planned-file parsing.
-fn collect_inline_file_references(raw_task: &str) -> Vec<String> {
+pub(crate) fn collect_inline_file_references(raw_task: &str) -> Vec<String> {
     let mut files = Vec::new();
     // Split on whitespace, commas, backticks, and quotes
     for token in
@@ -567,7 +575,21 @@ pub fn generate_prompt(
     format: PromptFormat,
     copy_clipboard: bool,
 ) -> Result<PromptOutput> {
-    let ctx = context(root, task, budget)?;
+    generate_prompt_scoped(root, task, budget, format, copy_clipboard, None, None)
+}
+
+/// Generates structured prompt context for tools that cannot use Engram MCP,
+/// optionally scoped to a repository subpath and/or language.
+pub fn generate_prompt_scoped(
+    root: &Path,
+    task: &str,
+    budget: usize,
+    format: PromptFormat,
+    copy_clipboard: bool,
+    subpath: Option<&str>,
+    language: Option<&str>,
+) -> Result<PromptOutput> {
+    let ctx = crate::compiler::context_scoped(root, task, budget, subpath, language)?;
 
     let mut body = String::new();
 
@@ -612,6 +634,12 @@ pub fn generate_prompt(
             }
 
             body.push_str("## Context Completeness\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("- **Subpath Scope:** `{}`\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("- **Language Scope:** `{}`\n", lang));
+            }
             body.push_str(&format!(
                 "- **Estimated Tokens:** ~{} (BM25 + AST estimation)\n",
                 ctx.estimated_tokens
@@ -648,6 +676,12 @@ pub fn generate_prompt(
             body.push('\n');
 
             body.push_str("=== CONTEXT COMPLETENESS ===\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("• Subpath Scope: {}\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("• Language Scope: {}\n", lang));
+            }
             body.push_str(&format!("• Estimated Tokens: ~{}\n", ctx.estimated_tokens));
             body.push_str(&format!("• Budget: {}\n", ctx.token_budget));
             body.push_str(&format!("• Confidence: {}\n", ctx.confidence));
@@ -718,11 +752,34 @@ pub fn prepare_task_context(
     copy_clipboard: bool,
     write_active_file: bool,
 ) -> Result<PreparedTaskOutput> {
+    prepare_task_context_scoped(
+        root,
+        task,
+        budget,
+        format,
+        copy_clipboard,
+        write_active_file,
+        None,
+        None,
+    )
+}
+
+/// Prepares task-aware context optionally scoped to a repository subpath and/or language.
+pub fn prepare_task_context_scoped(
+    root: &Path,
+    task: &str,
+    budget: usize,
+    format: PromptFormat,
+    copy_clipboard: bool,
+    write_active_file: bool,
+    subpath: Option<&str>,
+    language: Option<&str>,
+) -> Result<PreparedTaskOutput> {
     let root = root_path(root)?;
     let (core_task, mut planned_files) = parse_task_and_planned_files(task, None);
 
     // 1. Compile AST grounded context within token budget
-    let ctx = context(&root, &core_task, budget)?;
+    let ctx = crate::compiler::context_scoped(&root, &core_task, budget, subpath, language)?;
 
     // 2. If no planned files specified explicitly, seed from top ranked context files
     if planned_files.is_empty() {
@@ -760,6 +817,10 @@ pub fn prepare_task_context(
             ));
             body.push_str(&format!(
                 "- **Baseline Revision:** `{}`\n",
+                preflight.baseline_commit
+            ));
+            body.push_str(&format!(
+                "- **Provenance:** Compiled locally from repository AST index at revision `{}`.\n",
                 preflight.baseline_commit
             ));
             if !preflight.expected_files.is_empty() {
@@ -824,6 +885,12 @@ pub fn prepare_task_context(
             }
 
             body.push_str("## Context Completeness\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("- **Subpath Scope:** `{}`\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("- **Language Scope:** `{}`\n", lang));
+            }
             body.push_str(&format!(
                 "- **Estimated Tokens:** ~{} (BM25 + AST estimation)\n",
                 ctx.estimated_tokens
@@ -840,6 +907,13 @@ pub fn prepare_task_context(
                     body.push_str(&format!("  - `{}`: {}\n", path, reason));
                 }
             }
+
+            body.push_str("\n## Verification & Quality Guidance\n");
+            body.push_str("- **Targeted Tests:** Run project test suites (e.g. unit/integration tests) for modified modules before finishing.\n");
+            body.push_str(&format!(
+                "- **Change Compliance:** When code edits are complete, run `engram postflight` with contract `{}` to verify conformance against authorized boundaries.\n",
+                preflight.contract_id
+            ));
         }
         PromptFormat::Text => {
             body.push_str(&format!("=== TASK ===\n{}\n\n", core_task));
@@ -860,10 +934,31 @@ pub fn prepare_task_context(
             if let Some(eco) = &ctx.ecosystem_guard {
                 body.push_str(&format!("• ECOSYSTEM POLICY: {}\n", eco));
             }
+
+            body.push_str("\n=== CONTEXT COMPLETENESS ===\n");
+            if let Some(sub) = &ctx.subpath_filter {
+                body.push_str(&format!("• Subpath Scope: {}\n", sub));
+            }
+            if let Some(lang) = &ctx.language_filter {
+                body.push_str(&format!("• Language Scope: {}\n", lang));
+            }
+            body.push_str(&format!("• Estimated Tokens: ~{}\n", ctx.estimated_tokens));
+            body.push_str(&format!("• Budget: {}\n", ctx.token_budget));
+            body.push_str(&format!("• Included Files: {}\n", ctx.files.len()));
+            body.push_str(&format!("• Omitted Files: {}\n", ctx.excluded_files.len()));
+
+            body.push_str("\n=== VERIFICATION GUIDANCE ===\n");
+            body.push_str("• Run targeted test suites for modified components.\n");
+            body.push_str(&format!(
+                "• Call engram_postflight with contract {} upon completion.\n",
+                preflight.contract_id
+            ));
         }
     }
 
-    let completeness_status = if ctx.excluded_files.is_empty() {
+    let completeness_status = if ctx.files.is_empty() {
+        "UNRESOLVED_CONTEXT (0 matching files or symbols found in repository index)".to_string()
+    } else if ctx.excluded_files.is_empty() {
         "SUFFICIENT_GROUNDING".to_string()
     } else {
         format!(
@@ -932,56 +1027,67 @@ pub fn prepare_task_context_adaptive(
 
     if signals.classification == TaskComplexity::Trivial && !force_no_bypass {
         // Bypass path: no contract, no AST context, no preflight overhead
-        let (core_task, _) = parse_task_and_planned_files(task, None);
-
-        let body = match format {
-            PromptFormat::Markdown => {
-                format!(
-                    "# Task\n{}\n\n## Engram Bypass Notice\n\
-                     This task was classified as **trivial** by Engram's deterministic classifier.\n\
-                     - **Reason:** {}\n\
-                     - No Change Contract was created.\n\
-                     - No preflight or context compilation was performed.\n\
-                     - Proceed directly with the edit. Call `engram_postflight` only if you want compliance auditing.\n",
-                    core_task, signals.reason
-                )
+        let (core_task, mut planned) = parse_task_and_planned_files(task, None);
+        if planned.is_empty() {
+            for inline in collect_inline_file_references(task) {
+                if !planned.contains(&inline) {
+                    planned.push(inline);
+                }
             }
-            PromptFormat::Text => {
-                format!(
-                    "=== TASK ===\n{}\n\n=== ENGRAM BYPASS ===\n\
-                     Classification: TRIVIAL\n\
-                     Reason: {}\n\
-                     No contract or preflight was generated. Proceed directly.\n",
-                    core_task, signals.reason
-                )
-            }
-        };
-
-        let mut clipboard_copied = false;
-        if copy_clipboard {
-            clipboard_copied = try_copy_to_clipboard(&body).is_ok();
         }
+        if planned.len() == 1
+            && crate::storage::save_bypass_trivial(root, &core_task, &signals.reason, &planned)
+                .is_ok()
+        {
+            let body = match format {
+                PromptFormat::Markdown => {
+                    format!(
+                        "# Task\n{}\n\n## Engram Bypass Notice\n\
+                         This task was classified as **trivial** by Engram's deterministic classifier.\n\
+                         - **Reason:** {}\n\
+                         - No Change Contract was created.\n\
+                         - No preflight or context compilation was performed.\n\
+                         - Proceed directly with the edit. Call `engram_postflight` only if you want compliance auditing.\n",
+                        core_task, signals.reason
+                    )
+                }
+                PromptFormat::Text => {
+                    format!(
+                        "=== TASK ===\n{}\n\n=== ENGRAM BYPASS ===\n\
+                         Classification: TRIVIAL\n\
+                         Reason: {}\n\
+                         No contract or preflight was generated. Proceed directly.\n",
+                        core_task, signals.reason
+                    )
+                }
+            };
 
-        return Ok(PreparedTaskOutput {
-            task: core_task,
-            contract_id: String::new(),
-            contract_version: 0,
-            baseline_commit: String::new(),
-            status: "Bypassed".to_string(),
-            expected_files: vec![],
-            forbidden_boundaries: vec![],
-            content: body,
-            estimated_tokens: 0,
-            token_budget: budget,
-            files_included: 0,
-            files_omitted: 0,
-            completeness_status: "BYPASSED_TRIVIAL".to_string(),
-            clipboard_copied,
-            active_file_path: None,
-            bypass_active: true,
-            classification_signals: Some(signals),
-            injected_files: vec![],
-        });
+            let mut clipboard_copied = false;
+            if copy_clipboard {
+                clipboard_copied = try_copy_to_clipboard(&body).is_ok();
+            }
+
+            return Ok(PreparedTaskOutput {
+                task: core_task,
+                contract_id: String::new(),
+                contract_version: 0,
+                baseline_commit: String::new(),
+                status: "Bypassed".to_string(),
+                expected_files: vec![],
+                forbidden_boundaries: vec![],
+                content: body,
+                estimated_tokens: 0,
+                token_budget: budget,
+                files_included: 0,
+                files_omitted: 0,
+                completeness_status: "BYPASSED_TRIVIAL".to_string(),
+                clipboard_copied,
+                active_file_path: None,
+                bypass_active: true,
+                classification_signals: Some(signals),
+                injected_files: vec![],
+            });
+        }
     }
 
     // Standard path: delegate to full preparation

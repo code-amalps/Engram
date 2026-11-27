@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload_e_context_heavy",
+  "title": "Workload E: Context-heavy task",
+  "prompt": "In src/target_module.py update MAX_RETRIES from 1 to 5 without loading unnecessary legacy files.",
+  "complexity": "COMPLEX",
+  "verification_command": "python -m unittest tests/test_target.py",
+  "target_file": "src/target_module.py"
+}

@@ -1,137 +1,138 @@
-# Engram Architecture
+# Engram Technical Architecture
 
-Engram is a local repository intelligence engine and change boundary system built in Rust. It runs locally as a standalone binary or JSON-RPC 2.0 Model Context Protocol (MCP) server for AI coding assistants.
+Engram is a local repository intelligence engine and change boundary system built in Rust. It runs locally as a standalone command-line tool or a JSON-RPC 2.0 Model Context Protocol (MCP) server for AI coding assistants.
 
-```text
- ┌─────────────────────────────────────────────────────────────────────────────┐
- │                             AI Coding Assistant                             │
- │                  (Cursor, Claude Desktop, Windsurf, Copilot)                │
- └──────────────────────────────────────┬──────────────────────────────────────┘
-                                        │ stdio / CLI
-                                        ▼
- ┌─────────────────────────────────────────────────────────────────────────────┐
- │                         Engram Intelligence Core                            │
- ├──────────────────────────────────────┬──────────────────────────────────────┤
- │  1. Context Intelligence             │  2. Change-Impact Intelligence       │
- │     • BM25 Lexical Grounding         │     • 7 Relationship Categories      │
- │     • Token Budget Slicing           │     • Multi-Hop Blast Radius         │
- │     • Relevance Provenance           │     • Causal Breadcrumbs             │
- ├──────────────────────────────────────┼──────────────────────────────────────┤
- │  3. Change Contracts & Change Guard  │  4. Stateful Automated Recovery      │
- │     • Preflight Boundary Handshake   │     • Bounded Retry (Max 2 attempts) │
- │     • Git Diff Working-Tree Guard    │     • Revert & Preserve Plans        │
- │     • Constitution Precedence        │     • Never directly modifies code   │
- ├──────────────────────────────────────┼──────────────────────────────────────┤
- │  5. Engineering Memory               │  6. Architecture Drift               │
- │     • Scoped Hierarchy (Symbol→Repo) │     • Scoped Staleness Tracking      │
- │     • Immutable Supersession Chains  │     • Explicit Human Ratification    │
- │     • Zero-Poisoning Gate            │     • Boundary Erosion Trends        │
- └──────────────────────────────────────┴──────────────────────────────────────┘
-                                        │
-                                        ▼
- ┌─────────────────────────────────────────────────────────────────────────────┐
- │                              Storage & Cache                                │
- │   • Local SQLite WAL (.engram/index.db) — Bi-temporal entity graph          │
- │   • Two-Tier Invalidation: Tier 1 (Content Hash) + Tier 2 (Relational Link)  │
- │   • Append-Only Cryptographic Telemetry Hash Chain (.engram/events/)        │
- └─────────────────────────────────────────────────────────────────────────────┘
+---
+
+## 1. System Overview & Agent-in-the-Loop Model
+
+Engram operates as an intelligent intermediary between your local codebase and AI coding agents (such as Cursor, Claude Desktop, VS Code with Copilot or Cline, and Windsurf). Rather than feeding entire files or arbitrary text embeddings to an LLM, Engram provides structurally indexed, semantically linked AST context and enforces strict change boundaries.
+
+```mermaid
+flowchart TD
+    subgraph Host ["Developer Environment"]
+        Agent["AI Coding Assistant (Cursor / Claude / Copilot)"]
+        CLI["Developer CLI (engram init / analyze / context)"]
+    end
+
+    subgraph Interface ["Communication Layer"]
+        Stdio["JSON-RPC 2.0 via Stdio"]
+        CLIRuntime["CLI Argument Parser (clap)"]
+    end
+
+    subgraph Core ["Engram Intelligence Core (Rust)"]
+        Parser["Tree-sitter Language Analyzers (7 Languages)"]
+        GraphEngine["AST Dependency Graph (Schema 2.0.0)"]
+        StorageEngine["SQLite WAL Index (.engram/index.db)"]
+        Compiler["Context Compiler & Token Budget Slicer"]
+        ContractEngine["Change Contracts & Change Guard"]
+        RecoveryEngine["Stateful Automated Recovery (Max 2 Retries)"]
+        MemoryStore["Engineering Memory (.engram/memory.yaml)"]
+    end
+
+    subgraph Workspace ["Target Repository"]
+        SourceFiles["Source Code & Git Working Tree"]
+        GitRepo["Git Repository (.git)"]
+    end
+
+    Agent <-->|MCP Protocol| Stdio
+    CLI <--> CLIRuntime
+    Stdio <--> Core
+    CLIRuntime <--> Core
+
+    Parser -->|Parse AST| SourceFiles
+    StorageEngine <-->|Read / Write| SourceFiles
+    ContractEngine <-->|Diff & Rev-Parse| GitRepo
+    MemoryStore <-->|Load / Persist ADRs| SourceFiles
 ```
 
 ---
 
-## 1. Storage & State Model
+## 2. Multi-Language Indexing Pipeline
 
-Engram persists its knowledge in the local `.engram/` folder inside your repository:
+Engram indexes code repositories by executing compiled Tree-sitter parsers locally. It extracts concrete syntax trees (CST) and transforms them into unified Abstract Syntax Tree (AST) symbol definitions and relationships.
 
-- `.engram/index.db`: An embedded SQLite database using Write-Ahead Logging (WAL). It stores bi-temporal entity versions (`entities`, `entity_versions`, `entity_identity`), relationships (`relationships`), AST observations (`observations`), and confidence-scored evidence (`evidence`).
-- `.engram/memory.yaml`: Durable engineering decisions and architectural rationale. Kept in human-readable, Git-versionable YAML.
-- `.engram/constitution.yaml`: Team-wide architectural boundary rules and dependency restrictions that take absolute precedence over contract boundaries.
-- `.engram/events/`: Append-only cryptographic hash-chained audit events (`previous_event_hash` $\to$ `event_hash`).
-- `.engram/cache/`: Local ephemeral runtime caches, including active recovery sessions (`.engram/cache/recovery/<contract-id>.json`).
+### Supported Languages & Extensions (`src/analyzer.rs`)
+Engram provides native AST extraction across 7 primary language families:
+- **Rust (`.rs`):** structs, enums, traits, impl blocks, functions, macros, `use` declarations.
+- **TypeScript (`.ts`, `.tsx`):** classes, interfaces, types, functions, arrow functions, methods, `import`/`export` bindings.
+- **JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`):** classes, functions, arrow functions, methods, ES/CJS module imports.
+- **Python (`.py`):** classes, methods, functions, decorators, `import` and `from ... import` statements.
+- **Go (`.go`):** structs, interfaces, functions, methods, packages, package imports (via `go_parser.rs` structural interface resolution).
+- **Java (`.java`):** classes, interfaces, records, methods, annotations, package imports (via `java_parser.rs`).
+- **C# (`.cs`):** classes, interfaces, structs, records, methods, properties, `using` directives.
 
----
-
-## 2. Two-Tier Incremental Invalidation
-
-Rather than rescanning the whole repository on every prompt, Engram uses a two-tier cache invalidation pipeline:
-
-1. **Authoritative Content Hashing (Tier 1 - Syntactic):**
-   - For Git-tracked files, Git blob hashes and working-tree content SHA-256 hashes are authoritative.
-   - `mtime` and file size are strictly fast-path optimizations: if both are unchanged, file byte reading is short-circuited.
-   - Only files whose content hash actually changes are reparsed via Tree-sitter.
-
-2. **Relational Graph Invalidation (Tier 2 - Relational):**
-   - When a file is reparsed, Engram queries SQLite for all entities that import, implement, or call the modified symbols.
-   - Only those related edges are updated in the relational graph.
-
----
-
-## 3. Tree-Sitter Polyglot AST Extractors
-
-Engram embeds Tree-sitter parsers directly into the native binary for 7 languages:
-- **Rust** (`tree-sitter-rust`)
-- **Go** (`tree-sitter-go` + native `go.mod` parser)
-- **TypeScript** (`tree-sitter-typescript`)
-- **JavaScript** (`tree-sitter-javascript`)
-- **Python** (`tree-sitter-python`)
-- **C#** (`tree-sitter-c-sharp`)
-- **Java** (`tree-sitter-java` + native `pom.xml` & `build.gradle` parsers)
-
-Extractors capture:
-- Module and package declarations
-- Class, interface, struct, record, enum, and trait definitions
-- Method, function, and constructor signatures
-- Import and dependency declarations
-- Structural interface satisfaction (Go and Java)
-- Test-to-implementation naming conventions
+### Ingestion Stages
+1. **File Discovery:** Scans directory tree respecting `.gitignore` and `.engramignore`. Skips symbolic links, binary files, and files exceeding size thresholds.
+2. **Two-Tier Change Invalidation:** 
+   - Tier 1: Filesystem modified time (`mtime`) check.
+   - Tier 2: Cryptographic SHA-256 content hash comparison against `.engram/index.db`.
+   Files whose content hash matches the index bypass parsing completely.
+3. **AST Symbol Extraction:** Traverses Tree-sitter syntax nodes, resolving identifiers, enclosing scopes, declaration line bounds, and structural docstrings.
+4. **Relationship Extraction:** Identifies cross-symbol references, type usages, and module imports to populate dependency edges.
+5. **Secret Redaction:** Before persistence, raw source snippets are scanned for potential secrets, private keys, API credentials, and tokens using targeted regex patterns, replacing matches with `[REDACTED]`.
 
 ---
 
-## 4. Change Contracts & The Change Guard
+## 3. Storage Engine & SQLite WAL Schema
 
-Change Contracts establish formal, machine-readable boundaries for AI code modifications.
+Engram persists all extracted symbols, relations, and file metadata into an embedded SQLite database (`.engram/index.db`) operated in Write-Ahead Logging (`PRAGMA journal_mode = WAL`) mode with `PRAGMA synchronous = NORMAL`.
 
-### Lifecycle:
-1. **Preflight Handshake:** Before the AI begins writing code, `engram preflight` or `engram contract create` generates a contract anchored to the current Git baseline commit. The contract declares `expected_files`, `expected_modules`, and `expected_symbols`, along with `forbidden_boundaries`.
-2. **AI Mutation:** The agent edits code in the working tree.
-3. **Postflight Verification:** `engram postflight` or `engram contract check` evaluates the Git diff against the contract.
-4. **Constitution Precedence:** Rules in `.engram/constitution.yaml` take absolute precedence over contract allowances. If a rule forbids `src/auth/**`, an edit to that path is rejected as a boundary violation even if an agent's contract declared it expected.
-
----
-
-## 5. Stateful Automated Recovery
-
-When a Change Guard check blocks an agent with a boundary violation, Engram does not leave the agent stranded or force an infinite retry loop:
-
-- **Safety Invariant:** Engram **never** modifies source code directly. It emits a structured, machine-readable recovery plan containing:
-  - `revert_mutation`: Specific files to revert that breached boundaries.
-  - `preserve_requested_change`: Authorized changes that should be retained.
-  - `rerun`: Instructions to re-evaluate compliance.
-- **Bounded Retry Invariant:** Recovery is strictly bounded to a maximum of 2 authorized execution attempts:
-  - 1st violation: Attempt 1 plan generated.
-  - 2nd violation: Attempt 2 retry plan generated.
-  - 3rd violation: Request rejected with status `BLOCKED_AWAITING_HUMAN`. Engram will not execute a 3rd recovery.
-- **Concurrency Protection:** Recovery sessions use an atomic compare-and-update (CAS) lock on `(session_version, lock_state)` to prevent race conditions when multiple agent sub-tasks run simultaneously.
+### Core Schema Concepts
+- `files`: Tracks relative file paths, language tags, mtime, and authoritative content hashes.
+- `symbols`: Stores discrete AST symbols (functions, classes, structs, traits, interfaces) with line bounds, scope hierarchy, and signatures.
+- `relations`: Records directional dependency edges between symbols or packages.
+- `contracts`: Persists active change contracts and recorded violation events.
 
 ---
 
-## 6. Engineering Memory Lifecycle
+## 4. AST Dependency Graph & 7 Impact Categories
 
-Engram preserves architectural rationale across sessions while defending against memory poisoning:
+Engram's graph engine (`src/knowledge_graph.rs` & `src/impact.rs`) models code structure and evaluates change blast radius across **7 deterministic impact categories**:
 
-- **Scoped Hierarchy:** Memories are attached to specific scopes: `Global` < `Repository` < `Module` < `Package` < `Symbol`.
-- **Immutable Supersession:** Older decisions are not silently deleted or rewritten. A newer decision points to predecessor records via explicit supersession chains (e.g. `ADR-014` $\to$ `ADR-029`).
-- **Zero-Poisoning Gate:** Proposed agent decisions remain ephemeral candidates. No decision enters durable memory (`.engram/memory.yaml`) without explicit human promotion (`engram memory promote <id>`).
+| Impact Category | Description | Weight | Example |
+|---|---|:---:|---|
+| `DIRECT` | The target symbol or enclosing definition | 1.0 | `pub struct Storage` |
+| `TEST` | Test suites asserting against the target | 0.95 | `tests/storage_test.rs` asserting `Storage` |
+| `IMPLEMENTATION` | Struct ↔ Interface structural implementation | 0.95 | `impl StorageEngine for SqliteStorage` |
+| `CALLER` | Functions or methods referencing or invoking the target | 0.85 | `compiler::compile_context` calls `storage.query` |
+| `IMPORT_DEPENDENT` | Workspace packages importing the target package | 0.80 | `use crate::storage::Storage;` |
+| `CONFIGURATION` | Manifests, environment, or ecosystem configurations | 0.70 | `Cargo.toml`, `.engram/config.yaml` |
+| `HISTORICAL` | Statistically mined Git co-change coupling | 0.60 | Files frequently committed in tandem with target |
+
+In addition, `src/knowledge_graph.rs` maintains fine-grained directional graph relation edges (`Contains`, `Imports`, `DependsOn`, `Calls`, `References`, `Implements`, `Inherits`, `Extends`, `Declares`, `Tests`, `GovernedBy`, `Documents`, `Configures`).
 
 ---
 
-## 7. Model Context Protocol (MCP) Integration
+## 5. Context Compiler & Token Budget Slicing
 
-Engram implements the JSON-RPC 2.0 MCP standard over `stdio`. Supported tools:
-- `engram_context`: Task-grounded context compilation within token budget.
-- `engram_inspect`: Blast radius and downstream dependency impact cone.
-- `engram_preflight`: Contract generation and boundary handshake.
-- `engram_postflight`: Working-tree boundary verification.
-- `engram_recover`: Structured recovery plan generation for boundary violations.
-- `engram_drift`: Scoped architectural staleness and boundary erosion trends.
-- `engram_memory_record` / `engram_memory_list`: Decision recording and querying.
+The Context Compiler (`src/compiler.rs` & `src/budget.rs`) synthesizes retrieved AST symbols, architectural decisions, and blast-radius breadcrumbs into a single, structured markdown block formatted for AI coding prompts.
+
+### Pipeline Stages
+1. **Lexical Grounding (BM25):** Evaluates the task query against indexed symbol names, signatures, docstrings, and filenames to establish seed nodes.
+2. **AST Graph Expansion:** Expands across high-confidence dependency edges to capture referenced interfaces and callers.
+3. **Engineering Memory Inclusion:** Retrieves relevant Architectural Decision Records (ADRs) from `memory.yaml` matching query keywords or touched files.
+4. **Token Budget Slicing:** Dynamically truncates low-priority context components to fit strictly within the specified token budget (default: 1,200 tokens).
+5. **Boundary Armor:** Wraps compiled context in prompt-injection containment tags (`<engram_context>` / `</engram_context>`) to prevent untrusted repo strings from hijacking agent instructions.
+
+---
+
+## 6. Change Contracts & Change Guard
+
+Change Contracts (`src/contract.rs`, `src/hook.rs`) enforce architectural boundaries during autonomous or assisted agent coding sessions.
+
+### Lifecycle State Machine
+- **Proposed:** Agent creates contract via `engram_preflight` with declared `planned_files` and `forbidden` boundaries.
+- **Active:** Contract locked to current Git commit (`git rev-parse HEAD`).
+- **Validated:** `engram_postflight` confirms working tree diff modifies only permitted files.
+- **Violated:** Unapproved files edited; trips violation and triggers recovery.
+- **Reverted:** Recovery recipe applied to reset unauthorized edits.
+
+---
+
+## 7. Stateful Automated Recovery
+
+When an agent violates a Change Contract, Engram's recovery engine (`src/recovery.rs` / `engram_recover`) guides structured remediation without modifying files directly:
+- **Bounded Retries:** Enforces a strict limit of **maximum 2 retry attempts** per task.
+- **Diagnostic Generation:** Emits exact diff violations, forbidden files touched, and causal breadcrumbs.
+- **Non-Destructive Guidance:** Emits Git-compatible revert recipes to reset unapproved edits while preserving valid progress.

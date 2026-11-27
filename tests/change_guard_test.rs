@@ -4,8 +4,8 @@ use std::process::Command;
 use uuid::Uuid;
 
 use engram::ci_guard::{
-    install_guard_hook, parse_policy_toml, run_guard, uninstall_guard_hook, FindingSeverity,
-    GuardOptions, GuardStatus, GUARD_HOOK_BODY, GUARD_HOOK_START,
+    FindingSeverity, GUARD_HOOK_BODY, GUARD_HOOK_START, GuardOptions, GuardStatus,
+    install_guard_hook, parse_policy_toml, run_guard, uninstall_guard_hook,
 };
 use engram::contract::{create_contract, save_contract};
 
@@ -132,10 +132,11 @@ severity = "warn"
         "Warning-only findings must yield exit code 0"
     );
     assert!(!res.blocked);
-    assert!(res
-        .findings
-        .iter()
-        .any(|f| f.severity == FindingSeverity::Warn));
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.severity == FindingSeverity::Warn)
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -169,10 +170,11 @@ fn test_03_blocking_findings_and_nonzero_exit_codes() {
     assert_eq!(res.status, GuardStatus::Block);
     assert_eq!(res.exit_code, 1);
     assert!(res.blocked);
-    assert!(res
-        .findings
-        .iter()
-        .any(|f| f.severity == FindingSeverity::Block && f.rule_id == "GUARD-CONTRACT-002"));
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.severity == FindingSeverity::Block && f.rule_id == "GUARD-CONTRACT-002")
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -217,10 +219,11 @@ severity = "warn"
     assert_eq!(res.status, GuardStatus::Block);
     assert_eq!(res.exit_code, 1);
     assert!(res.blocked);
-    assert!(res
-        .findings
-        .iter()
-        .any(|f| f.rule_id == "GUARD-CONTRACT-001" && f.severity == FindingSeverity::Block));
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.rule_id == "GUARD-CONTRACT-001" && f.severity == FindingSeverity::Block)
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -308,10 +311,11 @@ fn test_07_missing_active_contract_distinction() {
     let res = run_guard(&root, &opts);
 
     assert_eq!(res.exit_code, 0);
-    assert!(res
-        .checks_skipped
-        .iter()
-        .any(|c| c.name == "contracts" && c.status == "not_applicable"));
+    assert!(
+        res.checks_skipped
+            .iter()
+            .any(|c| c.name == "contracts" && c.status == "not_applicable")
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -352,10 +356,11 @@ rules:
 
     assert_eq!(res.status, GuardStatus::Block);
     assert_eq!(res.exit_code, 1);
-    assert!(res
-        .findings
-        .iter()
-        .any(|f| f.rule_id == "GUARD-CONST-ARCH-001" && f.severity == FindingSeverity::Block));
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.rule_id == "GUARD-CONST-ARCH-001" && f.severity == FindingSeverity::Block)
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -400,10 +405,11 @@ severity = "warn"
     let res = run_guard(&root, &opts);
 
     // Blast radius exceeded should produce a finding with stable rule ID GUARD-IMPACT-001
-    assert!(res
-        .findings
-        .iter()
-        .any(|f| f.rule_id == "GUARD-IMPACT-001" && f.severity == FindingSeverity::Warn));
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.rule_id == "GUARD-IMPACT-001" && f.severity == FindingSeverity::Warn)
+    );
     assert_eq!(res.status, GuardStatus::Warn);
     assert_eq!(res.exit_code, 0);
 
@@ -441,10 +447,11 @@ severity = "warn"
 
     // Impact was skipped, not failed
     assert!(!res.checks_executed.contains(&"impact".to_string()));
-    assert!(res
-        .checks_skipped
-        .iter()
-        .any(|c| c.name == "impact" && c.status == "skipped"));
+    assert!(
+        res.checks_skipped
+            .iter()
+            .any(|c| c.name == "impact" && c.status == "skipped")
+    );
     assert!(res.checks_executed.contains(&"constitution".to_string()));
 
     fs::remove_dir_all(&root).unwrap();
@@ -711,6 +718,44 @@ fn test_17_ci_policy_behavior_for_warning_and_blocking_modes() {
     assert_eq!(res_strict.status, GuardStatus::Block);
     assert_eq!(res_strict.exit_code, 1);
     assert!(res_strict.blocked);
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// 18. Guard hook installation with custom core.hooksPath and worktrees
+// ---------------------------------------------------------------------------
+#[test]
+fn test_18_guard_hook_install_custom_hookspath_and_worktree() {
+    let root = setup_test_git_repo("guard_hook_custom");
+
+    // 1. Configure custom core.hooksPath (.githooks)
+    let custom_hooks = root.join(".githooks");
+    fs::create_dir_all(&custom_hooks).unwrap();
+
+    let config_file = root.join(".git").join("config");
+    let mut config_content = fs::read_to_string(&config_file).unwrap();
+    config_content.push_str("\n[core]\n\thooksPath = .githooks\n");
+    fs::write(&config_file, config_content).unwrap();
+
+    // Verify install respects core.hooksPath
+    let install_msg = install_guard_hook(&root, false).unwrap();
+    assert!(install_msg.contains("Installed Engram Change Guard"));
+
+    let custom_hook_file = custom_hooks.join("pre-commit");
+    assert!(custom_hook_file.exists());
+    let content = fs::read_to_string(&custom_hook_file).unwrap();
+    assert!(content.contains(GUARD_HOOK_START));
+    assert!(content.contains(GUARD_HOOK_BODY));
+
+    // Verify idempotency
+    let re_install = install_guard_hook(&root, false).unwrap();
+    assert!(re_install.contains("already installed"));
+
+    // Verify uninstall
+    let uninstall_msg = uninstall_guard_hook(&root, false).unwrap();
+    assert!(uninstall_msg.contains("Removed Engram pre-commit hook"));
+    assert!(!custom_hook_file.exists());
 
     fs::remove_dir_all(&root).unwrap();
 }

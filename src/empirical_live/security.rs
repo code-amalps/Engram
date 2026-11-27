@@ -1033,6 +1033,7 @@ pub fn to_wide_null(s: &str) -> Vec<u16> {
 
 /// UTF-16 wide string null-terminated decoder.
 #[cfg(windows)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn from_wide_null(ptr: *const u16) -> String {
     if ptr.is_null() {
         return String::new();
@@ -2221,6 +2222,7 @@ pub fn parse_security_descriptor_bytes(sd_bytes: &[u8]) -> Result<DaclSnapshot, 
 
 /// Capture a deterministic snapshot of an object's DACL for before/after comparison.
 #[cfg(windows)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn snapshot_user_object_dacl(handle: win32::HANDLE) -> Result<DaclSnapshot, SecurityError> {
     if handle.is_null() || handle == win32::INVALID_HANDLE_VALUE {
         let err = unsafe { win32::GetLastError() };
@@ -3709,12 +3711,19 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
         // Rust / Cargo toolchain
         if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
             let cargo_bin = PathBuf::from(cargo_home).join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
-        } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        }
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
             let cargo_bin = PathBuf::from(userprofile).join(".cargo").join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
         }
@@ -3801,14 +3810,22 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                         let version_dir = entry.path();
                         if version_dir.is_dir() {
                             let x64 = version_dir.join("x64");
-                            if x64.is_dir() && !is_untrusted_directory(&x64) && !paths.contains(&x64) {
+                            if x64.is_dir()
+                                && !is_untrusted_directory(&x64)
+                                && !paths.contains(&x64)
+                            {
                                 paths.push(x64);
                             }
                             let x86 = version_dir.join("x86");
-                            if x86.is_dir() && !is_untrusted_directory(&x86) && !paths.contains(&x86) {
+                            if x86.is_dir()
+                                && !is_untrusted_directory(&x86)
+                                && !paths.contains(&x86)
+                            {
                                 paths.push(x86);
                             }
-                            if !is_untrusted_directory(&version_dir) && !paths.contains(&version_dir) {
+                            if !is_untrusted_directory(&version_dir)
+                                && !paths.contains(&version_dir)
+                            {
                                 paths.push(version_dir);
                             }
                         }
@@ -3826,7 +3843,10 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
             "C:\\tools\\python",
         ] {
             let root_path = PathBuf::from(root_prefix);
-            if root_path.is_dir() && !is_untrusted_directory(&root_path) && !paths.contains(&root_path) {
+            if root_path.is_dir()
+                && !is_untrusted_directory(&root_path)
+                && !paths.contains(&root_path)
+            {
                 paths.push(root_path);
             }
         }
@@ -3834,12 +3854,7 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
 
     #[cfg(not(windows))]
     {
-        for p in &[
-            "/usr/bin",
-            "/bin",
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-        ] {
+        for p in &["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"] {
             let pb = PathBuf::from(p);
             if pb.is_dir() && !is_untrusted_directory(&pb) {
                 paths.push(pb);
@@ -3849,13 +3864,45 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
         // Rust / Cargo toolchain (mirrors Windows CARGO_HOME / USERPROFILE behavior)
         if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
             let cargo_bin = PathBuf::from(cargo_home).join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
             }
-        } else if let Ok(home) = std::env::var("HOME") {
+        }
+        if let Ok(home) = std::env::var("HOME") {
             let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
-            if cargo_bin.is_dir() && !is_untrusted_directory(&cargo_bin) {
+            if cargo_bin.is_dir()
+                && !is_untrusted_directory(&cargo_bin)
+                && !paths.contains(&cargo_bin)
+            {
                 paths.push(cargo_bin);
+            }
+        }
+
+        // Rustup toolchain binary directories
+        let mut rustup_roots = Vec::new();
+        if let Ok(rustup_home) = std::env::var("RUSTUP_HOME") {
+            rustup_roots.push(PathBuf::from(rustup_home));
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            rustup_roots.push(PathBuf::from(home).join(".rustup"));
+        }
+        for rustup_root in rustup_roots {
+            let toolchains_dir = rustup_root.join("toolchains");
+            if toolchains_dir.is_dir() && !is_untrusted_directory(&toolchains_dir) {
+                if let Ok(entries) = std::fs::read_dir(&toolchains_dir) {
+                    for entry in entries.flatten() {
+                        let bin_dir = entry.path().join("bin");
+                        if bin_dir.is_dir()
+                            && !is_untrusted_directory(&bin_dir)
+                            && !paths.contains(&bin_dir)
+                        {
+                            paths.push(bin_dir);
+                        }
+                    }
+                }
             }
         }
 
@@ -3865,7 +3912,10 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
             let py_bin = py_dir.join("bin");
             if py_bin.is_dir() && !is_untrusted_directory(&py_bin) && !paths.contains(&py_bin) {
                 paths.push(py_bin);
-            } else if py_dir.is_dir() && !is_untrusted_directory(&py_dir) && !paths.contains(&py_dir) {
+            } else if py_dir.is_dir()
+                && !is_untrusted_directory(&py_dir)
+                && !paths.contains(&py_dir)
+            {
                 paths.push(py_dir);
             }
         }
@@ -3877,11 +3927,35 @@ pub fn get_trusted_system_search_paths() -> Vec<PathBuf> {
                         let version_dir = entry.path();
                         if version_dir.is_dir() {
                             let x64_bin = version_dir.join("x64").join("bin");
-                            if x64_bin.is_dir() && !is_untrusted_directory(&x64_bin) && !paths.contains(&x64_bin) {
+                            if x64_bin.is_dir()
+                                && !is_untrusted_directory(&x64_bin)
+                                && !paths.contains(&x64_bin)
+                            {
                                 paths.push(x64_bin);
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Scan parent PATH for trusted directories containing standard compiler tools (cargo, rustc).
+    // Untrusted directories (temp, downloads, desktop, relative paths) are strictly rejected.
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            if dir.is_absolute()
+                && dir.is_dir()
+                && !is_untrusted_directory(&dir)
+                && !paths.contains(&dir)
+            {
+                #[cfg(windows)]
+                let has_tool = dir.join("cargo.exe").is_file() || dir.join("rustc.exe").is_file();
+                #[cfg(not(windows))]
+                let has_tool = dir.join("cargo").is_file() || dir.join("rustc").is_file();
+
+                if has_tool {
+                    paths.push(dir);
                 }
             }
         }

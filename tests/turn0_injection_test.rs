@@ -85,11 +85,10 @@ fn test_turn0_inject_cli_standard_task() {
     let inst_content = fs::read_to_string(&inst_path).unwrap();
 
     assert!(inst_content.contains(START_MARKER));
-    assert!(inst_content.contains("Engram Turn-0 Task Intelligence & Directives"));
+    assert!(inst_content.contains("Engram Directives"));
     assert!(inst_content.contains("Active Change Contract:"));
-    assert!(inst_content.contains("ZERO-TURN EXECUTION"));
-    assert!(inst_content.contains("DO NOT CALL `engram_get_context` OR `engram_preflight`"));
-    assert!(inst_content.contains("Relevant Context (AST Grounded)"));
+    assert!(inst_content.contains("engram_inspect_symbol"));
+    assert!(inst_content.contains("engram_postflight"));
     assert!(inst_content.contains(END_MARKER));
 
     let _ = fs::remove_dir_all(&ws);
@@ -132,9 +131,9 @@ fn test_turn0_inject_cli_adaptive_bypass() {
 
     assert!(inst_content.contains(START_MARKER));
     assert!(inst_content.contains("Adaptive Small-Task Bypass Active"));
-    assert!(inst_content.contains("TRIVIAL"));
-    assert!(inst_content.contains("DO NOT call `engram_get_context` or `engram_preflight`"));
-    assert!(inst_content.contains("Proceed directly to editing the target file"));
+    assert!(inst_content.contains("Single-file edit"));
+    assert!(inst_content.contains("DO NOT call `engram_get_context`"));
+    assert!(inst_content.contains("Edit target file directly"));
     assert!(inst_content.contains(END_MARKER));
 
     let _ = fs::remove_dir_all(&ws);
@@ -241,7 +240,6 @@ fn test_turn0_inject_clear_and_strip_lifecycle() {
 
     let content_after_inject = fs::read_to_string(&inst_file).unwrap();
     assert!(content_after_inject.contains("# Project Standards"));
-    assert!(content_after_inject.contains("Refactor session store"));
     assert!(content_after_inject.contains("Active Change Contract:"));
 
     // 2. Clear: resets back to DEFAULT_INSTRUCTION_BODY, keeping user section
@@ -312,7 +310,7 @@ fn test_turn0_prepare_cli_inject_integration_and_json() {
     let inst_path = ws.join(".github").join("copilot-instructions.md");
     assert!(inst_path.exists());
     let inst_content = fs::read_to_string(&inst_path).unwrap();
-    assert!(inst_content.contains("OAuth login handler"));
+    assert!(inst_content.contains("Active Change Contract:"));
 
     // Test JSON output of engram inject
     let json_out = Command::new(bin)

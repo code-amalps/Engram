@@ -1,0 +1,13 @@
+{
+  "next_action": "Change Contract locked. Proceed directly to implement changes in authorized files. Call engram_postflight when finished.",
+  "task": "compute math calculator precision",
+  "expected_files": [
+    "src/math.rs",
+    "src/service.rs",
+    "tests/math_test.rs",
+    "src/lib.rs",
+    "Cargo.toml"
+  ],
+  "top_prioritized_file": "src/math.rs",
+  "token_reduction_positive": true
+}

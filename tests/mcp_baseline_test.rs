@@ -48,6 +48,7 @@ impl McpFixture {
             .arg("-C")
             .arg(&temp_dir)
             .arg("mcp")
+            .env("ENGRAM_SPECIALIST_TOOLS", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -215,8 +216,10 @@ fn test_bl_04_tools_list() {
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     println!("[BL-04 Tool Names]: {:?}", tool_names);
 
-    // Verify exact 15 approved tools are present
-    assert_eq!(tools.len(), 15);
+    // Verify exact 17 approved tools are present
+    assert_eq!(tools.len(), 17);
+    assert!(tool_names.contains(&"engram_engage"));
+    assert!(tool_names.contains(&"engram_prepare_task"));
     assert!(tool_names.contains(&"engram_get_context"));
     assert!(tool_names.contains(&"engram_inspect_symbol"));
     assert!(tool_names.contains(&"engram_preflight"));

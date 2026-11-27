@@ -1,6 +1,6 @@
 //! Durable Engineering Memory: human rationale, promotion lifecycle, poisoning protection, and Git persistence.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

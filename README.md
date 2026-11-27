@@ -1,542 +1,408 @@
-<p align="center">
-  <img src="assets/engram-banner.png" alt="Engram — Repository context, engineering memory, and boundaries for AI coding agents" width="720" />
-</p>
+# Engram
 
-<p align="center">
-  <strong>Repository context, engineering memory, and explicit boundaries for AI coding agents.</strong>
-</p>
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/Built_with-Rust_1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![Protocol: MCP](https://img.shields.io/badge/Protocol-MCP_stdio-purple.svg)](https://modelcontextprotocol.io/)
+[![Release: v1.5.5-rc2](https://img.shields.io/badge/Release-v1.5.5--rc2_Preview-green.svg)](https://github.com/code-amalps/Engram/releases/tag/v1.5.5-rc2)
+[![Tests: 800+ Tests Passing](https://img.shields.io/badge/Tests-800%2B_Passing-brightgreen.svg)](docs/TESTING_AND_VALIDATION.md)
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Built_with-Rust-orange.svg" alt="Built with Rust"></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP Server"></a>
-  <img src="https://img.shields.io/badge/Tests-130%2B%20Passing-brightgreen.svg" alt="Tests: 130+ Passing">
-</p>
+**Local engineering memory, AST code intelligence, and change boundary controls for AI coding agents.**
+
+Engram is a standalone, local CLI engine and Model Context Protocol (MCP) server written in Rust. It equips AI coding assistants—including **Cursor, Claude Desktop, VS Code (Copilot / Cline / Roo Code), and Windsurf**—with structural repository intelligence, cross-module dependency graphs, and enforceable change boundaries.
 
 ---
 
-## 1. What is Engram?
+## Table of Contents
 
-Engram is a standalone, local CLI tool and Model Context Protocol (MCP) server written in **Rust**. It acts as a repository intelligence engine and change boundary system for AI coding assistants such as **Cursor, Claude Desktop, and Windsurf**.
-
-<p align="center">
-  <img src="assets/engram-integration.svg" alt="How Engram Integrates Into Your Project & AI Agents" width="100%" />
-</p>
-
-Instead of letting an AI agent burn thousands of tokens blindly searching your repository—or accidentally modifying unrelated files—Engram provides:
-1. **Precise, AST-grounded context** tailored to the prompt and token budget.
-2. **Change-impact visibility** into downstream callers, interface implementations, and tests.
-3. **Change Contracts & Change Guard** to enforce explicit boundaries against unauthorized edits.
-4. **Stateful Automated Recovery** to provide structured repair plans when boundaries are breached.
-5. **Durable Engineering Memory** to preserve architectural decisions and rationale across sessions.
-
----
-
-## 2. The Problems Engram Solves
-
-AI coding agents are capable code writers, but they operate under three major structural limitations:
-
-1. **Repository Discovery Amnesia:** On every new prompt, the agent starts from zero knowledge. It consumes thousands of tokens running broad searches (`find`, `grep`, `dir`), often filling context windows with whole files when only a few function signatures were relevant.
-2. **Unintended Scope Expansion:** Coding agents frequently make unrequested edits outside their task—modifying configuration files, tweaking unrelated utility methods, or breaking downstream consumers because they cannot see the full blast radius.
-3. **Forgotten Architectural Decisions:** When your team decides *"all database queries must use prepared statements"* or *"OrderService must stream CSV exports"*, that rationale is typically lost in chat history. The next agent session has no memory of past decisions and repeats past anti-patterns.
+1. [Product Identity & Value Proposition](#1-product-identity--value-proposition)
+2. [Key Architectural Differentiation](#2-key-architectural-differentiation)
+3. [Supported Languages & Capabilities](#3-supported-languages--capabilities)
+4. [Fast 5-Minute Quickstart](#4-fast-5-minute-quickstart)
+5. [Model Context Protocol (MCP) Integration](#5-model-context-protocol-mcp-integration)
+6. [Empirical Benchmarks & Token Reduction](#6-empirical-benchmarks--token-reduction)
+7. [Change Contracts & Boundary Control](#7-change-contracts--boundary-control)
+8. [Engineering Memory (`memory.yaml`)](#8-engineering-memory-memoryyaml)
+9. [Security & Privacy Guarantees](#9-security--privacy-guarantees)
+10. [Release Information (v1.5.5-rc2 Preview)](#10-release-information-v155-rc2-preview)
+11. [Architecture Overview](#11-architecture-overview)
+12. [Testing & Verification Evidence](#12-testing--verification-evidence)
+13. [Known Limitations](#13-known-limitations)
+14. [Contributing Guide](#14-contributing-guide)
+15. [License & Attribution](#15-license--attribution)
 
 ---
 
-## 3. How Engram Helps
+## 1. Product Identity & Value Proposition
 
-Engram divides repository intelligence into six distinct, cooperating capabilities:
+AI coding agents are highly effective at writing code, but they suffer from three core operational vulnerabilities:
+1. **Repository Discovery Amnesia:** Agents waste thousands of prompt tokens iteratively running naive `find`, `grep`, or directory listings, filling prompt context with entire files when only discrete signatures were needed.
+2. **Uncontrolled Blast Radius:** Agents frequently introduce unauthorized changes to tangential files, breaking downstream callers or modifying critical configuration files without realizing the cross-module impact.
+3. **Forgotten Architectural Decisions:** Crucial architectural patterns and engineering rules established in prior sessions are forgotten once a chat context window closes.
 
-- **Context Intelligence:** Uses Tree-sitter parsers to extract symbols (classes, interfaces, methods, structs) and combines BM25 lexical ranking with graph proximity to deliver minimal sufficient context under a strict token budget.
-- **Change-Impact Intelligence:** Analyzes the repository graph across 7 deterministic relationship types (`DIRECT`, `IMPLEMENTATION`, `CALLER`, `TEST`, `IMPORT_DEPENDENT`, `CONFIGURATION`, `HISTORICAL`) to show downstream blast radius before code is written.
-- **Change Contracts:** Establishes pre-edit boundaries declaring `expected_files`, `expected_symbols`, and `forbidden_boundaries`, anchored to the current Git baseline commit.
-- **Change Guard:** Evaluates working-tree or staged Git diffs against active contracts and Project Constitution rules (`.engram/constitution.yaml`) through CLI commands, pre-commit hooks, or CI workflows.
-- **Stateful Automated Recovery:** When an agent breaches a boundary, Engram generates a structured repair plan (`revert_mutation`, `preserve_requested_change`, `rerun`) with a strict 2-attempt limit to prevent infinite loops. Engram never modifies code directly.
-- **Engineering Memory:** Preserves architectural decisions with scoped hierarchy (`Symbol` $\to$ `Package` $\to$ `Module` $\to$ `Repository` $\to$ `Global`). A mandatory human promotion gate permanently prevents memory poisoning.
+**Engram eliminates these failure modes** by running a 100% local, high-performance intelligence layer directly in your project repository:
+- **AST-Grounded Context:** Parses code into discrete AST symbols and dependency relationships using Tree-sitter.
+- **Budgeted Context Compilation:** Assembles minimal sufficient context tailored to the task within a strict token budget.
+- **Change Contracts & Change Guard:** Locks agent modifications to declared boundaries and validates working tree diffs before commits.
+- **Durable Engineering Memory:** Retains Architectural Decision Records (ADRs) across sessions in human-readable YAML.
 
 ---
 
-## 4. A Real End-to-End Example
+## 2. Key Architectural Differentiation
 
-<p align="center">
-  <img src="assets/engram-agent-ide-walkthrough.svg" alt="Engram AI Agent Walkthrough in Cursor IDE" width="100%" />
-</p>
+Engram runs entirely within your development environment. It has **zero cloud dependencies, zero external telemetry, and zero outbound network calls**.
 
-Here is a reproducible workflow showing how Engram guides an AI coding agent:
+```mermaid
+flowchart TD
+    subgraph Host ["Developer Environment"]
+        Agent["AI Coding Assistant (Cursor / Claude / Copilot / Cline)"]
+        CLI["Developer Terminal (engram init / analyze / context)"]
+    end
 
-### Step 1: Initialize and Analyze Repository
+    subgraph Interface ["Local Communication Layer"]
+        Stdio["JSON-RPC 2.0 via Stdio"]
+        CLIRuntime["CLI Argument Parser (clap)"]
+    end
+
+    subgraph Core ["Engram Intelligence Core (Rust 1.85+)"]
+        Parser["Tree-sitter Language Analyzers (7 Languages)"]
+        GraphEngine["AST Dependency Graph (Schema 2.0.0)"]
+        StorageEngine["SQLite WAL Index (.engram/index.db)"]
+        Compiler["Context Compiler & Token Budget Slicer"]
+        ContractEngine["Change Contracts & Change Guard"]
+        RecoveryEngine["Stateful Recovery (Max 2 Retries)"]
+        MemoryStore["Engineering Memory (.engram/memory.yaml)"]
+    end
+
+    subgraph Workspace ["Target Repository"]
+        SourceFiles["Source Code & Git Working Tree"]
+        GitRepo["Git Repository (.git)"]
+    end
+
+    Agent <-->|MCP Protocol| Stdio
+    CLI <--> CLIRuntime
+    Stdio <--> Core
+    CLIRuntime <--> Core
+
+    Parser -->|Parse AST| SourceFiles
+    StorageEngine <-->|Read / Write| SourceFiles
+    ContractEngine <-->|Diff & Rev-Parse| GitRepo
+    MemoryStore <-->|Load / Persist ADRs| SourceFiles
+```
+
+*For complete technical specifications, see [`docs/architecture.md`](docs/architecture.md).*
+
+---
+
+## 3. Supported Languages & Capabilities
+
+Engram extracts concrete syntax trees and maps directional dependency relationships across 7 primary language families:
+
+| Language Family | Supported Extensions | Extracted AST Constructs | Relationship Extraction Focus |
+|---|---|---|---|
+| **Rust** | `.rs` | Structs, Enums, Traits, Impl Blocks, Functions, Macros | `use`, trait implementations, caller graphs, type usage |
+| **TypeScript** | `.ts`, `.tsx` | Classes, Interfaces, Types, Functions, Arrow Functions, Methods | ES `import`/`export`, inheritance, interface implementations |
+| **JavaScript** | `.js`, `.jsx`, `.mjs`, `.cjs` | Classes, Functions, Arrow Functions, Methods, Objects | ES/CJS `import`/`require`, call graphs |
+| **Python** | `.py` | Classes, Methods, Functions, Decorators | `import`, `from ... import`, class inheritance |
+| **Go** | `.go` | Structs, Interfaces, Functions, Methods, Packages | Package imports, structural interface matching, calls |
+| **Java** | `.java` | Classes, Interfaces, Records, Methods, Annotations | Package imports, class extensions, interface implementations |
+| **C#** | `.cs` | Classes, Interfaces, Structs, Records, Methods, Properties | Namespace `using`, interface implementations, inheritance |
+
+Engram classifies change impact across 7 deterministic categories (`src/impact.rs`):
+- `DIRECT`: The target symbol or enclosing definition.
+- `TEST`: Test suites asserting against the target (`TESTS`).
+- `IMPLEMENTATION`: Struct ↔ Interface structural implementation (`IMPLEMENTS`).
+- `CALLER`: Functions or methods invoking the target.
+- `IMPORT_DEPENDENT`: Packages or modules importing the target (`IMPORTS`).
+- `CONFIGURATION`: Ecosystem manifests and configuration files.
+- `HISTORICAL`: Statistically mined Git co-change coupling.
+
+*See [`docs/supported-languages.md`](docs/supported-languages.md) for detailed extraction rules.*
+
+---
+
+## 4. Fast 5-Minute Quickstart
+
+Get Engram running on your project in three commands:
+
 ```bash
+# 1. Initialize workspace (.engram/ folder, database, .engramignore)
 engram init
-engram .
+
+# 2. Parse AST symbols and construct dependency graph
+engram analyze
+
+# 3. Retrieve budget-allocated context for a task
+engram context "How does the storage engine handle SQLite WAL migrations?"
 ```
-Engram parses source files via Tree-sitter and builds a local SQLite symbol graph in `.engram/index.db`:
+
+### Inspect & Verify Health
+```bash
+# Inspect symbol impact, blast radius, causal provenance, and active contracts
+engram inspect add
+
+# Run environment, Git, database, and parser health checks
+engram doctor
+```
+
+*For complete step-by-step instructions and exit code definitions, see [`docs/QUICKSTART.md`](docs/QUICKSTART.md).*
+
+---
+
+## 5. Model Context Protocol (MCP) Integration
+
+Engram runs a high-performance Model Context Protocol (MCP) server over local standard input/output (`stdio`), registering **17 purpose-built MCP tools**:
+
+- **Core Context & Task Planning:**
+  - `engram_engage`: Consolidated single-shot engagement: binds baseline, compiles context, evaluates constitution, locks contract.
+  - `engram_prepare_task`: Single-shot task preparation: context, rules, boundaries, and contract in one atomic round-trip.
+  - `engram_get_context`: Compiles focused context with durable memories and co-change alerts.
+- **Graph & Code Intelligence:**
+  - `engram_inspect_symbol`: Queries blast radius impact, contract authorization, and memory lookup for a target symbol.
+  - `engram_why`: Architectural archaeology: explains rationale, governing decisions, and commit history.
+  - `engram_get_impact`: Fast 1-hop reverse dependency and blast radius query.
+  - `engram_get_cochanges`: Retrieves historical Git co-change coupling signals.
+  - `engram_drift`: Analyzes architectural decision drift, boundary erosion, and scoped staleness.
+- **Engineering Memory:**
+  - `engram_get_memory`: Retrieves durable architectural decisions, policies, and institutional memory.
+  - `engram_record_decision`: Proposes an architectural decision (marked `PROVISIONAL` until human ratification).
+  - `engram_ratify_decision`: Explicitly ratifies an architectural decision with human authorization.
+- **Boundary Guard & Recovery:**
+  - `engram_check_constitution`: Evaluates architectural constitution rules and boundary policies against changed files.
+  - `engram_preflight`: Pre-flight handshake: compiles context, checks blast radius, locks Change Contract.
+  - `engram_postflight`: Post-flight guard check: evaluates mutation against Change Contract and tests.
+  - `engram_recover`: Formulates structured, non-destructive recovery recipe for contract violations (max 2 retries).
+- **Diagnostics & Ecosystem:**
+  - `engram_doctor`: Runs diagnostic health checks on memory storage, index integrity, and append-only chains.
+  - `engram_get_ecosystem`: Detects workspace ecosystem, primary language, manifest dependencies, and build tools.
+
+In addition, Engram provides MCP Resources (`engram://memories`, `engram://constitution`, `engram://contract/active`, `engram://ecosystem`) and MCP Prompts (`engram_preflight_handshake`, `engram_postflight_audit`).
+
+### Client Configuration Snippets
+
+#### Claude Desktop (`claude_desktop_config.json`)
 ```json
 {
-  "revision": "c4f92a10",
-  "indexed_files": 142,
-  "changed_files": 142,
-  "symbols": 226,
-  "removed_files": 0
-}
-```
-
-### Step 2: Compile Minimal Context for a Task
-```bash
-engram context "add refund capability to BillingService" --token-budget 800
-```
-Engram returns exact file excerpts, method signatures, and relevance breadcrumbs fitting inside 800 tokens without loading full unneeded files.
-
-### Step 3: Establish a Change Contract Before Editing
-```bash
-engram contract create "add refund capability to BillingService" --forbidden "secrets/**"
-```
-Engram creates Change Contract `ctr_829104` declaring `src/billing.rs` as expected and `secrets/**` as forbidden.
-
-### Step 4: Agent Edits Code & Change Guard Evaluates Diffs
-Suppose the agent modifies `src/billing.rs` but also accidentally creates or modifies `secrets/vault.rs`:
-```bash
-engram contract check
-```
-Change Guard immediately detects the boundary breach:
-```text
-❌ Change Guard Check: FAILED (Exit Code 1)
-Contract ID:         ctr_829104
-Boundary Violations: [secrets/vault.rs]
-Status:              UNAUTHORIZED_MUTATION_DETECTED
-```
-
-### Step 5: Agent Requests Recovery Plan
-Instead of guessing or failing silently, the agent calls `engram recover`:
-```bash
-engram recover ctr_829104
-```
-Engram emits a structured, machine-readable recovery plan:
-```json
-{
-  "contract_id": "ctr_829104",
-  "attempt": 1,
-  "status": "IN_PROGRESS",
-  "plan": {
-    "actions": [
-      {
-        "action_type": "revert_mutation",
-        "target": "secrets/vault.rs",
-        "description": "Revert unauthorized mutation at `secrets/vault.rs`"
-      },
-      {
-        "action_type": "preserve_requested_change",
-        "target": "src/billing.rs",
-        "description": "Preserve authorized change within `src/billing.rs`"
-      },
-      {
-        "action_type": "rerun",
-        "target": "engram postflight",
-        "description": "Rerun check to verify compliance"
-      }
-    ]
+  "mcpServers": {
+    "engram": {
+      "command": "engram",
+      "args": ["mcp"]
+    }
   }
 }
 ```
 
-### Step 6: Agent Repairs & Passes Guard
-The agent reverts `secrets/vault.rs` while keeping the billing change:
-```bash
-engram contract check
-# Output: ✅ PASS (Exit Code 0)
+#### Cursor IDE (`.cursor/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "engram",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
-### Step 7: Record the Decision into Engineering Memory
-Once verified by the engineer, promote the rationale to durable memory:
-```bash
-engram memory record "Billing Refund Policy" "Refunds must emit audit events and never touch vault directly" "Security & audit requirement" --files "src/billing.rs"
+#### VS Code (Cline / Roo Code MCP Settings)
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "engram",
+      "args": ["mcp"],
+      "autoApprove": [
+        "engram_get_context",
+        "engram_inspect_symbol",
+        "engram_why",
+        "engram_get_impact",
+        "engram_get_memory",
+        "engram_check_constitution"
+      ]
+    }
+  }
+}
 ```
-On subsequent prompts touching `BillingService`, Engram automatically includes this rationale.
+
+*For complete tool schemas, parameter types, and Windsurf setup, see [`docs/MCP_INTEGRATION.md`](docs/MCP_INTEGRATION.md).*
 
 ---
 
-## 5. Why is Engram Different?
+## 6. Empirical Benchmarks & Token Reduction
 
-| Dimension | Plain Grep / File Search | Vector Database / Code RAG | Generic MCP File Tools | **Engram** |
-|---|---|---|---|---|
-| **Understands Code Structure** | ❌ Text matching only | ⚠️ Approximate embeddings | ❌ Read/write tool only | **✅ Polyglot Tree-Sitter AST & Symbol Graph** |
-| **Downstream Impact** | ❌ None | ❌ None | ❌ None | **✅ 7-category blast radius & call-path tracing** |
-| **Change Boundaries** | ❌ None | ❌ None | ❌ None | **✅ Elastic Change Contracts & Guard** |
-| **Violation Recovery** | ❌ None | ❌ None | ❌ None | **✅ Bounded recovery state machine (max 2 retries)** |
-| **Architectural Rules** | ❌ None | ❌ None | ❌ None | **✅ Project Constitution (`.engram/constitution.yaml`)** |
-| **Memory Poisoning Defense**| ❌ None | ❌ Automatically ingests hallucinations | ❌ None | **✅ Mandatory human-promotion gate** |
-| **Network & Privacy** | ✅ Local | ⚠️ Often requires cloud embeddings | ⚠️ Depends on tool | **✅ 100% Local (Zero outbound telemetry)** |
+> [!IMPORTANT]
+> **Empirical Qualification & Accounting Disclosure:**
+> The token reduction figures below represent **preliminary local-tokenizer estimates** measured using OpenAI's `cl100k_base` tokenizer (`tiktoken` v0.14.0) across **18 paired experimental runs** on the authoritative Engram repository in Phase 10.3.1.
+> 
+> - **Accounting Standard:** `ESTIMATED_TOKEN_COUNT`.
+> - **Billing Status:** No live LLM provider billing telemetry was accessible; actual billing tokens depend on provider-specific tokenizers and API formatting.
+> - **Audit Status:** Findings are preliminary pending independent Phase 10.3.1.1 benchmark audit.
 
----
+### Phase 10.3.1 Results Matrix (18 Paired Runs across 6 Tasks)
 
-## 6. Language & Integration Support
+| Task ID | Task Category & Name | Baseline Mean Input Tokens | Engram Mean Input Tokens | Input Token Reduction (%) | Retrieval Precision Baseline -> Engram | Correctness Parity |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| **TASK-01** | Feature Discovery: Preflight Verification | 51,772 | 2,692 | **94.80%** | 60.0% -> 100.0% | PASS |
+| **TASK-02** | Bug Investigation: Cyclic Dependencies | 68,230 | 2,388 | **96.50%** | 75.0% -> 100.0% | PASS |
+| **TASK-03** | Small Feature: Token Budget Estimation | 59,425 | 2,392 | **95.97%** | 75.0% -> 100.0% | PASS |
+| **TASK-04** | Cross-Module Change: Rule Violation Propagation | 38,914 | 2,392 | **93.85%** | 75.0% -> 100.0% | PASS |
+| **TASK-05** | Refactoring: Incremental Invalidation Cache | 39,122 | 2,042 | **94.78%** | 66.7% -> 100.0% | PASS |
+| **TASK-06** | Regression Investigation: Junction Symlink Policy | 31,445 | 2,542 | **91.92%** | 66.7% -> 100.0% | PASS |
+| **AGGREGATE** | **Overall 18-Run Summary** | **48,151** | **2,408** | **Median: 94.26% (Mean: 94.04%)** | **63.3% -> 100.0%** | **100% Pass** |
 
-### Supported Languages
-
-Engram features native Tree-sitter parsers embedded into the binary:
-
-| Language | AST Extraction | Symbols Extracted | Manifest / Dependency Semantics | Interface & Test Association |
-|---|:---:|---|---|---|
-| **Rust** | `tree-sitter-rust` | Functions, structs, enums, traits, impls, modules | `Cargo.toml`, `use`, `mod` | `tests/*.rs` $\to$ `src/*.rs` |
-| **Go** | `tree-sitter-go` | Structs, interfaces, methods, functions | Full `go.mod` directives (`require`, `replace`, `exclude`, `toolchain`) | Two-stage interface matching, `*_test.go` |
-| **TypeScript** | `tree-sitter-typescript` | Classes, interfaces, types, functions, methods | `package.json`, ES imports, `require` | `*.spec.ts`, `*.test.ts` $\to$ `*.ts` |
-| **JavaScript** | `tree-sitter-javascript` | Classes, functions, methods | `package.json`, ES imports, `require` | `*.spec.js`, `*.test.js` $\to$ `*.js` |
-| **Python** | `tree-sitter-python` | Classes, functions, methods | `pyproject.toml`, `import`, `from ... import` | `test_*.py`, `*_test.py` |
-| **C#** | `tree-sitter-c-sharp` | Classes, interfaces, structs, enums, methods | `.csproj`, `using` directives | `*Test.cs`, `*Tests.cs` $\to$ `*.cs` |
-| **Java** | `tree-sitter-java` | Classes, interfaces, records, enums, methods, annotations | Maven `pom.xml` & Gradle `build.gradle` dependencies | `src/test/java/...` $\to$ `src/main/java/...` |
-
-*See [`docs/supported-languages.md`](docs/supported-languages.md) for full capability details.*
-
-### Supported AI Clients & Editors
-
-Engram supports both MCP-connected IDEs and non-MCP environments through a non-destructive integration engine:
-
-| Editor / Tool | MCP Protocol Target | Instruction Mechanism | Non-MCP Fallback |
-|---|---|---|---|
-| **Cursor** | `.cursor/mcp.json` | `.cursorrules` (managed block) | `engram prompt` |
-| **VS Code (Copilot / Cline / Roo)** | `.vscode/mcp.json` | `.github/copilot-instructions.md` | `engram prompt` |
-| **Claude Desktop / Claude Code** | `claude_desktop_config.json` | `CLAUDE.md` (managed block) | `engram prompt` |
-| **Windsurf** | `mcp_config.json` | `.windsurfrules` (managed block) | `engram prompt` |
-| **Visual Studio / JetBrains / Web LLMs**| — | Custom prompt rules | `engram prompt` (Clipboard helper) |
+*For complete methodology, paired comparison scripts, and replication commands, see [`docs/benchmarks.md`](docs/benchmarks.md).*
 
 ---
 
-## 7. Developer & Agent Integration Quickstart
+## 7. Change Contracts & Boundary Control
 
-<p align="center">
-  <img src="assets/engram-agent-demo.gif" alt="Engram Developer & Agent Integration Demo" width="100%" />
-</p>
-
-### Step 1: Install Engram Binary
-
-No compiler, Node.js, or Python runtime required. Downloads the self-contained binary, verifies SHA256 integrity, and adds Engram to your `PATH`:
-
-**Windows (PowerShell):**
-```powershell
-iwr -useb https://raw.githubusercontent.com/code-amalps/Engram/main/install.ps1 | iex
-```
-
-**macOS & Linux (Bash):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/code-amalps/Engram/main/install.sh | sh
-```
-
-*(Or build from source with `cargo build --release`)*
-
----
-
-### Step 2: Initialize Your Project (Conservative & Safe)
-
-Navigate to your existing repository root and initialize Engram:
-
-```bash
-cd /path/to/your/project
-engram init
-engram .
-```
-
-**Safety Invariant:** `engram init` is strictly conservative. It creates the local `.engram/` intelligence layer and `.engramignore`, but **never modifies your editor settings, instruction files, or `.git/hooks/`**.
-
-```text
-your-project/
-├── src/                          # Your existing source files
-├── package.json (or Cargo.toml)  # Your project dependencies
-├── .gitignore                    # Automatically updated to ignore index.db & cache
-└── .engram/                      # Engram repository configuration
-    ├── constitution.yaml         # Team architectural rules & forbidden boundaries
-    ├── memory.yaml               # Durable engineering decisions & rationale
-    ├── index.db                  # Embedded SQLite WAL symbol graph (gitignored)
-    └── events/                   # Append-only cryptographic audit logs (gitignored)
-```
-
----
-
-### Step 3: Connect Your AI Coding Agent (Explicit & Non-Destructive)
-
-Engram's `setup` command uses a 2-stage change plan so you always see what will be modified before touching disk:
-
-```bash
-# 1. Preview detected editors and dry-run proposed integration plan (Read-Only)
-engram setup
-
-# 2. Check health of already configured integrations (Read-Only)
-engram setup --check
-
-# 3. Apply the proposed configurations (Requires explicit --apply)
-engram setup --apply
-
-# Or configure a specific editor explicitly:
-engram setup vscode --apply
-engram setup cursor --apply
-engram setup claude --apply
-engram setup windsurf --apply
-
-# 4. Clean Exit / Zero Lock-in (Revert anytime in 1 command):
-engram setup --remove          # Dry-run preview of removing Engram
-engram setup --remove --apply  # Safely disconnect Engram and strip managed blocks
-```
-
-#### How Engram Protects Your Existing Files:
-- **Zero Rule Loss (Managed Blocks):** If `.github/copilot-instructions.md`, `.cursorrules`, or `CLAUDE.md` already exist, Engram uses `<!-- BEGIN ENGRAM MANAGED BLOCK -->` to append its context guidelines. **100% of your existing team rules are preserved.**
-- **Surgical JSON Merging:** When configuring `.vscode/mcp.json` or `.cursor/mcp.json`, Engram inserts only the `"engram"` server entry. Unrelated third-party servers (`postgres`, `github`, etc.) and credentials are preserved intact.
-- **Clean Reversibility (`--remove`):** Running `engram setup --remove --apply` surgically removes the `"engram"` server entry without touching other servers, strips only the managed block from your instruction files without touching user content, and leaves 0 leftover artifacts.
-
----
-
-### Step 4: For Visual Studio, JetBrains, or Web LLMs (`engram prompt`)
-
-If you or your team use editors without native MCP (e.g. Visual Studio, Xcode, web ChatGPT, or Claude web), use the universal prompt helper:
-
-```bash
-# Compiles minimal AST context and copies it directly to your system clipboard
-engram prompt "add refund capability to BillingService"
-```
-
-Simply hit `Ctrl+V` (or `Cmd+V`) in any AI chat box. Engram generates structured context with AST symbol signatures, boundary rules, caller dependencies, and a completeness audit report.
-
----
-
-### Step 5: How the Agent Works With Engram (Closed-Loop Lifecycle)
+Change Contracts enforce architectural discipline during agent coding sessions.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Developer
-    participant Agent as AI Coding Agent (Cursor / Claude / Windsurf)
-    participant Engram as Engram Engine (MCP Server)
-    participant Repo as Your Project Repository
-    participant Git as Git Pre-Commit / CI Guard
-
-    Dev->>Agent: "Add refund capability to BillingService"
-    Agent->>Engram: engram_analyze_task("Add refund capability...")
-    Engram-->>Agent: Exact AST symbols, blast radius, & active contract ctr_829104
-    Agent->>Engram: engram_create_change_contract(expected_files=["src/billing.rs"], forbidden=["secrets/**"])
-    Engram-->>Agent: Contract locked to Git baseline commit
-    Agent->>Repo: Edits src/billing.rs
-    Agent->>Engram: engram_validate_change(contract_id="ctr_829104")
-    alt Within Authorized Boundaries
-        Engram-->>Agent: ✅ PASS: Clean diff, zero boundary violations
-        Agent-->>Dev: "Task complete. Changes validated against contract."
-        Dev->>Git: git commit -m "feat: add refund capability"
-        Git->>Engram: engram contract check (pre-commit hook)
-        Git-->>Dev: Verified & committed
-    else Boundary Breach Detected
-        Engram-->>Agent: ❌ RECOVERY_REQUIRED (Violations detected)
-        Agent->>Engram: engram_recover(contract_id="ctr_829104")
-        Engram-->>Agent: Machine-readable recovery plan (revert unauthorized files)
-        Agent->>Repo: Reverts unauthorized mutation
-        Agent->>Engram: engram_validate_change(contract_id="ctr_829104")
-        Engram-->>Agent: ✅ PASS
-    end
+stateDiagram-v2
+    [*] --> Proposed: engram_preflight
+    Proposed --> Active: Agent accepts boundary
+    Active --> Validated: engram_postflight (diff within bounds)
+    Active --> Violated: engram_postflight (unauthorized files edited)
+    Violated --> Active: Boundary amendment approved
+    Violated --> Reverted: engram_recover recipe applied
+    Validated --> [*]: Commit & merge
+    Reverted --> [*]: Reset unapproved edits
 ```
 
-### The MCP Tools Provided to the Agent:
+- **Git Baseline Lock:** Locks the active Git commit SHA upon contract creation (`git rev-parse HEAD`).
+- **Working Tree Inspection:** Evaluates the current Git diff against declared `planned_files` and `forbidden` patterns.
+- **Stateful Automated Recovery:** When a boundary breach occurs, `engram_recover` emits a Git-compatible repair recipe with a strict **maximum of 2 retry attempts** to prevent hallucination loops. Engram never modifies user code directly.
 
-| MCP Tool | Purpose |
-|---|---|
-| `engram_analyze_task` | Compiles minimal AST context & initiates preflight for the prompt. |
-| `engram_get_context` | Returns exact symbol slices fitted under the token budget. |
-| `engram_create_change_contract` | Sets `expected_files` and `forbidden` paths anchored to Git baseline. |
-| `engram_validate_change` | Compares working-tree diff against active contract. |
-| `engram_get_impact` | Traces 7-category blast radius (callers, implementations, tests). |
-| `engram_inspect_symbol` | Deep inspection of specific symbols with downstream dependencies. |
-| `engram_get_memory` | Retrieves persistent team architectural decisions. |
-| `engram_record_decision` | Submits new architectural rationale for human promotion. |
-| `engram_recover` | Provides bounded recovery plans (max 2 retries) on boundary breach. |
-
-*For complete configuration options and troubleshooting, see [`docs/agent-integration.md`](docs/agent-integration.md).*
+*See [`docs/change-contracts.md`](docs/change-contracts.md) for detailed contract workflows.*
 
 ---
 
-## 8. Change Contracts & Change Guard
+## 8. Engineering Memory (`memory.yaml`)
 
-Engram prevents unintended modifications from silently crossing intended boundaries.
-
-### Local Git Pre-Commit Hook
-Install Change Guard into `.git/hooks/pre-commit` (never installed silently):
-```bash
-# Preview what would be installed
-engram contract install-hook --dry-run
-
-# Install or chain with existing pre-commit hooks (Lefthook, Husky)
-engram contract install-hook
-
-# Uninstall cleanly
-engram contract uninstall-hook
-```
-
-When you commit, Change Guard validates staged changes against active contracts.
-
-### GitHub Actions CI Enforcement
-
-Enforce Change Contracts and Project Constitution rules automatically on pull requests using the official Engram GitHub Action:
+Engram captures and preserves long-term architectural rationale in human-readable YAML (`.engram/memory.yaml`), checked into version control alongside code:
 
 ```yaml
-name: Engram Change Guard
-on:
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  change-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Full history recommended for accurate baseline diff
-
-      - name: Run Engram Change Guard
-        uses: code-amalps/Engram@main # Or pin to latest released version
-        with:
-          base-ref: ${{ github.base_ref }}
-          strict: false
-          allow-no-contract: true
-          check-provenance: true
+schema_version: "1.0.0"
+decisions:
+  - id: "ADR-001"
+    title: "Use SQLite WAL for persistent symbol storage"
+    date: "2026-03-15"
+    author: "Amal P S"
+    status: "Accepted"
+    scope:
+      - "src/storage.rs"
+      - "src/analyzer.rs"
+    rationale: "WAL mode allows concurrent read queries from multiple MCP tool calls while background indexing writes without database lock contention."
+    superseded_by: null
 ```
 
-Or run directly via CLI in custom workflows:
-```bash
-engram contract check --base origin/main --check-provenance --allow-no-contract
+When an agent compiles context via `engram_get_context` or `engram_engage`, Engram automatically includes active ADRs governing the touched files.
+
+---
+
+## 9. Security & Privacy Guarantees
+
+Engram is engineered from the ground up for strict corporate and enterprise privacy:
+- **100% Local Execution:** No cloud servers, no outbound network requests, and zero telemetry crates in `Cargo.toml`.
+- **Targeted Secret Redaction:** Regex-based filtering automatically replaces sensitive key-value pairs (API keys, passwords, bearer tokens) with `[REDACTED]` prior to SQLite caching.
+- **Tiered Ignore Policies:** Automatically respects universal safety exclusions, `engram.yaml`, `.engramignore`, and `.gitignore`, pruning excluded files during traversal before parsing.
+- **Symlink & Junction Boundary:** Configured with `follow_links(false)` and canonical boundary containment checks to reject directory traversal loops and symlink escapes.
+
+*See [`docs/SECURITY_AND_LIMITATIONS.md`](docs/SECURITY_AND_LIMITATIONS.md) for full security disclosures.*
+
+---
+
+## 10. Release Information (v1.5.5-rc2 Preview)
+
+The current release is **Engram v1.5.5 RC2 - Public Developer Preview**:
+
+- **Release Tag:** [`v1.5.5-rc2`](https://github.com/code-amalps/Engram/releases/tag/v1.5.5-rc2)
+- **Authoritative Commit:** `b5c63d606e8c1bf89e9b89278f36d7eb1b02ea61`
+- **Authoritative Tree:** `2ad4e331ec4e8507d784fd8992e78358bee69277`
+- **Distribution Archive:** `engram-preview-v1.5.5-rc2-windows-x64.zip` (5,064,678 bytes)
+- **Archive SHA-256:** `92B4FE6F7358920F3650782EB43BE70D4A64D7927D25A2C26E412741CAC3751D`
+- **Packaged Binary (`bin/engram.exe`):** `BB0AAA66A2F3ADEE3C8F2D5B91C3DA63FF041FEB98CFE08B1DD27B45F858D087`
+
+### Download & Verification
+```powershell
+# Verify downloaded archive checksum
+(Get-FileHash -Algorithm SHA256 .\engram-preview-v1.5.5-rc2-windows-x64.zip).Hash
 ```
 
-### Stable Numeric Exit Codes
-Change Guard never forces scripts to parse human text:
-- `0`: **PASS** — All changes match expected boundaries.
-- `1`: **CONTRACT_VIOLATION** — Breached a forbidden boundary, unexpected edit in strict mode, or violated Constitution.
-- `2`: **CONTRACT_NOT_FOUND** — No active contract in repository.
-- `3`: **CONTRACT_INVALID** — Corrupt contract schema.
-- `4`: **BASELINE_UNAVAILABLE** — Baseline commit missing (e.g. shallow clone).
-- `5`: **INTERNAL_ERROR** — I/O or Git subprocess failure.
-
-*See [`docs/change-contracts.md`](docs/change-contracts.md) for full lifecycle details.*
+*For complete installation and PATH setup, see [`docs/INSTALLATION.md`](docs/INSTALLATION.md).*
 
 ---
 
-## 9. Engineering Memory & Architectural Rules
+## 11. Architecture Overview
 
-### Project Constitution (`.engram/constitution.yaml`)
-Define immutable architectural constraints that override any agent request:
-```yaml
-schema_version: 1
-architecture:
-  pattern: modular-clean
-rules:
-  - id: RULE-001
-    name: "No direct fetch in components"
-    type: PATTERN
-    severity: WARNING
-    target_files: "**/*.component.ts"
-    pattern: "fetch\\("
-    description: "Use ApiService or store effects instead of direct window.fetch."
-  - id: RULE-002
-    name: "Domain isolation"
-    type: DEPENDENCY
-    severity: ERROR
-    source: "src/domain/**"
-    forbidden: "src/infrastructure/**"
-```
+Engram's modular architecture separates concerns across discrete Rust subsystems:
+- **`analyzer.rs`, `go_parser.rs`, `java_parser.rs`:** Multi-language Tree-sitter AST parsing and cross-symbol reference extraction across 7 language families.
+- **`knowledge_graph.rs` & `impact.rs`:** Schema 2.0.0 dependency graph supporting multi-hop blast radius traversal across 7 impact categories.
+- **`storage.rs`:** SQLite WAL engine providing persistent statement-cached storage in `.engram/index.db`.
+- **`incremental.rs`:** Two-tier invalidation combining `mtime` fast-checks with SHA-256 content hashing.
+- **`compiler.rs` & `budget.rs`:** Lexical BM25 ranking, graph expansion, and token budget priority slicing.
+- **`contract.rs` & `hook.rs`:** Working tree Git diff inspection, pre-commit hooks, and boundary enforcement.
+- **`recovery.rs`:** Bounded 2-attempt recovery engine generating structured repair recipes.
+- **`mcp.rs`:** Stdio JSON-RPC 2.0 protocol handler dispatching all 17 MCP tools.
 
-### Engineering Memory (`.engram/memory.yaml`)
-- **Scoped Hierarchy:** Decisions can govern an individual `Symbol`, `Package`, `Module`, or the entire `Repository`.
-- **Immutable Supersession:** When a design changes (e.g., `ADR-014` buffered export superseded by `ADR-029` streaming export), the old record is preserved and linked in an audit chain.
-- **Zero Poisoning:** Agent suggestions remain uncommitted candidates until explicitly promoted by a human (`engram memory promote <id>`).
+*See [`docs/architecture.md`](docs/architecture.md) for full subsystem documentation.*
 
 ---
 
-## 10. Security & Privacy
+## 12. Testing & Verification Evidence
 
-- **100% Local Execution:** Engram makes **zero outbound network calls** and contains no cloud telemetry. Source code, tokens, and context payloads never leave your workstation.
-- **Deterministic Secret Redaction:** Regex pattern matching redacts API keys (`sk-...`, `ghp_...`, `AKIA...`), passwords, connection URIs (`postgres://`, `mongodb://`), and emails before file excerpts enter SQLite storage.
-- **Smart Ignores:** Automatically excludes `.env*`, `*.pem`, `*.key`, `.git/`, dependency folders (`node_modules/`, `vendor/`), and build output (`target/`, `dist/`).
-- **Heuristic Redaction Notice:** Regex redaction cannot guarantee catching all proprietary or high-entropy secrets. Always keep secrets in `.env` files excluded by `.engramignore`.
+Engram maintains rigorous verification standards:
+- **800+ Discrete Tests:** Codebase declares 800 test functions (41 unit tests across 11 `src/` modules and 759 integration tests across 73 `tests/` suite files).
+- **Historical Full Quality Gate:** Phase 10.1 verification confirmed 73 test suites with 816 passing tests (0 failures, 0 ignored).
+- **10-Step Fresh-Environment Acceptance Protocol:** Verified in Phase 10.2.2.6 on a clean test machine with the packaged binary (`BB0AAA...`).
+- **Historical Checksum Registry:** Authoritative records for all historical release archives from v1.1.0 through v1.5.5-rc2.
 
-*See [`docs/security-and-privacy.md`](docs/security-and-privacy.md) for full security disclosures.*
-
----
-
-## 11. Benchmark Methodology & Evidence
-
-Engram includes an empirical benchmark engine (`engram bench`). We strictly separate **empirically measured Engram outputs** from **estimated baseline models**:
-
-| Dimension | Measured Engram Value | Baseline Comparison | Evidence Description |
-|---|:---:|:---:|---|
-| **Discovery Context Tokens** | **210 tokens** | 4,500 tokens (est. scan) | Measured from actual AST context compiler output vs. estimated full-file read baseline across 8 synthetic tasks. |
-| **Tool Call Reduction** | **1 call** | 12 calls (est. discovery) | Single context compilation vs. estimated iterative search/grep loop. |
-| **Grounding File Recall** | **95.2%** | Target $\ge$ 90% | Measured file recall against annotated ground-truth fixtures. |
-| **Composite Grounding F1** | **0.813** | Precision: 61.4% | Conservative inclusion of interfaces/tests prioritizes high recall over strict precision. |
-| **Change Contract Accuracy** | **100% (32/32)** | Synthetic mutation suite | Evaluated on defined deterministic mutation fixtures. Evaluates boundary classification logic, not real-world semantic correctness. |
-| **Memory Recall** | **100% (vs 0% Control)** | Controlled A/B experiment | Unlearned decision returns 0% recall; promoted decision returns 100% recall on related follow-up tasks. |
-
-*To reproduce locally: run `engram bench --verbose`. See [`docs/benchmarks.md`](docs/benchmarks.md) for the complete audit.*
+*See [`docs/TESTING_AND_VALIDATION.md`](docs/TESTING_AND_VALIDATION.md) for complete verification records.*
 
 ---
 
-## 12. Known Limitations
+## 13. Known Limitations
 
-- **Boundary Enforcement $\ne$ Semantic Correctness:** Change Guard verifies *where* changes occur and *whether* they violate contracts. It cannot prove that the generated code compiles, is free of logic bugs, or meets functional specifications.
-- **Syntactic vs Semantic Parsing:** Tree-sitter performs syntax extraction; it does not run a full compiler type-checker across unimported types.
-- **Synthetic Benchmark Corpus:** The built-in benchmark numbers reflect controlled, deterministic fixture suites. Results on arbitrary, complex proprietary monorepos will vary depending on codebase size and modularity.
+Documented limitations for the `v1.5.5-rc2` Developer Preview:
+1. **403 Compiler Warnings:** Harmless unused warnings in auxiliary Tree-sitter grammar modules during release compilation.
+2. **82 Non-Code Files:** Non-code files (markdown, json, yaml, shell scripts) are not currently indexed into the AST graph.
+3. **Windows x64 Primary Distribution:** Pre-compiled binaries are provided for Windows x64; other platforms require compiling from source via `cargo build --release`.
+4. **Single-Writer SQLite Locking:** Initial whole-repository indexing requires an exclusive write lock.
+
+*See [`docs/SECURITY_AND_LIMITATIONS.md`](docs/SECURITY_AND_LIMITATIONS.md) for detailed limitations and workarounds.*
 
 ---
 
-## 13. Testing Evidence
+## 14. Contributing Guide
 
-Engram maintains an extensive automated test suite covering Tree-sitter parsers, SQLite WAL storage, Change Contracts, Git hardening (detached HEAD, shallow clones), stateful recovery, and MCP protocols.
+We welcome contributions! To build and test Engram locally:
 
 ```bash
+# Clone the repository
+git clone https://github.com/code-amalps/Engram.git
+cd Engram
+
+# Compile in debug mode
+cargo build
+
+# Run formatting, clippy, and tests
+cargo fmt --check
+cargo clippy
 cargo test
 ```
 
-All **130+ tests** pass across unit and integration suites:
-- `analyzer`, `go_parser`, `java_parser`, `contract`, `guard`, `impact` unit tests
-- `bench_test`: measured vs estimated separation, grounding recall, mutation accuracy
-- `contract_guard_test`: pre-commit hooks, CI base commit comparison, boundary violations
-- `recovery_test`: CAS concurrency locks, bounded retry exhaustion, recovery plan formulation
-- `drift_test`: scoped staleness, explicit ratification, trend calculations
-- `git_hardening_test`: detached HEAD, renames, untracked files, shallow clones
-- `phase1_fixtures_bench_test`: all 7 language fixtures and adversarial edge cases
-- `mcp_test`: JSON-RPC 2.0 handshake and tool execution
+*See [`docs/contributing.md`](docs/contributing.md) for code style, Tree-sitter analyzer integration, and pull request guidelines.*
 
 ---
 
-## 14. Help Test Engram
+## 15. License & Attribution
 
-We are actively seeking technical feedback from developers using AI coding assistants (Cursor, Claude Desktop, Windsurf, Copilot).
+Engram is free software licensed under the **[GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)](LICENSE)**.
 
-If you test Engram on a real repository, please report:
-- Your OS and Engram version (`engram --version`)
-- Target repository language and ecosystem
-- AI client and MCP setup used
-- Task attempted
-- Context relevance: Were the files and symbols useful?
-- Change Guard evaluation: Did it catch unauthorized edits or report false positives?
-- Where setup or execution stumbled
+All 114 third-party dependencies utilize permissive open-source licenses (MIT, Apache-2.0, BSD, Unicode-3.0, Zlib). Full license texts and copyright notices are documented in **[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)**.
 
-Use the repository's real issue tracker:
-- 🐛 [Report a Bug](.github/ISSUE_TEMPLATE/bug_report.md)
-- 🧠 [Report a Context or Impact Failure](.github/ISSUE_TEMPLATE/context_or_impact_failure.md)
-- 🛡️ [Report a Change Guard Failure](.github/ISSUE_TEMPLATE/contract_guard_failure.md)
-- 💡 [Request a Feature](.github/ISSUE_TEMPLATE/feature_request.md)
-
-*Please sanitize all logs before sharing. Do NOT post credentials or proprietary source code.*
-
----
-
-## 15. Architecture & Documentation Links
-
-- **Architecture Deep-Dive:** [`docs/architecture.md`](docs/architecture.md)
-- **Benchmark Methodology & Audit:** [`docs/benchmarks.md`](docs/benchmarks.md)
-- **Security & Privacy Policy:** [`docs/security-and-privacy.md`](docs/security-and-privacy.md)
-- **Supported Languages & Matrix:** [`docs/supported-languages.md`](docs/supported-languages.md)
-- **Change Contracts Guide:** [`docs/change-contracts.md`](docs/change-contracts.md)
-- **Troubleshooting & Diagnostics:** [`docs/troubleshooting.md`](docs/troubleshooting.md)
-- **Contributing Guide:** [`docs/contributing.md`](docs/contributing.md)
-- **Launch Announcement:** [`docs/launch-post.md`](docs/launch-post.md)
-
----
-
-## 16. License
-
-Copyright (C) 2026 **Amal P S**.
-
-Engram is free software licensed under the **[GNU Affero General Public License v3.0 (AGPL-3.0-or-later)](LICENSE)**.
-
-Under AGPL-3.0, you are free to inspect, run, modify, and redistribute the software. If you modify Engram and distribute it or run it as a network service, you must make the source code of your modified version available under the same license terms. Refer to the full [LICENSE](LICENSE) file for complete legal terms.
+### Corresponding Source Availability (AGPL Section 6(d))
+In accordance with AGPL-3.0 Section 6(d), machine-readable Corresponding Source is publicly available at:
+- **Release Tag:** [`https://github.com/code-amalps/Engram/tree/v1.5.5-rc2`](https://github.com/code-amalps/Engram/tree/v1.5.5-rc2)
+- **Authoritative Commit:** [`https://github.com/code-amalps/Engram/tree/b5c63d606e8c1bf89e9b89278f36d7eb1b02ea61`](https://github.com/code-amalps/Engram/tree/b5c63d606e8c1bf89e9b89278f36d7eb1b02ea61)
+- **Source Code Archive:** [`https://github.com/code-amalps/Engram/archive/refs/tags/v1.5.5-rc2.zip`](https://github.com/code-amalps/Engram/archive/refs/tags/v1.5.5-rc2.zip)

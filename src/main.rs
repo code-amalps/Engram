@@ -1,13 +1,19 @@
 pub mod analyzer;
 pub mod archaeology;
+pub mod ast_deps;
 pub mod bench;
+pub mod budget;
 pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;
+pub mod discovery;
 pub mod doctor;
 pub mod drift;
+pub mod engage;
+pub mod feature_trace;
 pub mod flywheel;
+pub mod frameworks;
 pub mod gc;
 pub mod git;
 pub mod git_history;
@@ -19,6 +25,7 @@ pub mod impact;
 pub mod incremental;
 pub mod instructions;
 pub mod java_parser;
+pub mod knowledge_graph;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
@@ -31,17 +38,17 @@ pub mod setup;
 pub mod storage;
 pub mod telemetry;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
 use analyzer::analyze;
-use compiler::context;
+use compiler::context_scoped;
 use guard::{analyze_task, impact, make_contract, record_decision, update_memory, validate};
 use manifest::detect_ecosystem;
 use mcp::mcp;
@@ -50,7 +57,7 @@ use storage::{cache_dir, project_id, root_path};
 #[derive(Parser)]
 #[command(
     name = "engram",
-    version,
+    version = engram::build_info::VERSION_FULL,
     about = "Local engineering memory and change intelligence for AI coding agents"
 )]
 struct Cli {
@@ -60,6 +67,14 @@ struct Cli {
     /// Force machine-readable JSON output
     #[arg(long, global = true)]
     json: bool,
+
+    /// Output format (e.g. 'json')
+    #[arg(long, global = true)]
+    format: Option<String>,
+
+    /// Display full deterministic build and provenance identity
+    #[arg(long)]
+    build_info: bool,
 
     #[command(subcommand)]
     command: Option<CommandLine>,
@@ -83,6 +98,12 @@ enum CommandLine {
         token_budget: usize,
         #[arg(long)]
         explain: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Ground a task, detect gaps, and generate task record
     AnalyzeTask {
@@ -131,7 +152,7 @@ enum CommandLine {
     UpdateMemory { task_id: String },
     /// Inspect declared and resolved ecosystem packages and scripts
     Ecosystem,
-    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf)
+    /// Configure and inspect editor and MCP integrations (Cursor, VS Code, Claude, Windsurf, Factory AI)
     Setup {
         client: Option<String>,
         #[arg(long)]
@@ -151,7 +172,11 @@ enum CommandLine {
     },
     /// Prepare task-aware context, lock preflight contract to baseline commit, and emit Turn-0 prompt
     Prepare {
-        task: String,
+        /// Task description and optional planned files (can be passed via --task or as positional argument)
+        #[arg(long, short = 't')]
+        task: Option<String>,
+        #[arg(value_name = "TASK")]
+        task_pos: Option<String>,
         #[arg(long, default_value_t = 1200)]
         token_budget: usize,
         #[arg(long, default_value = "markdown")]
@@ -175,9 +200,12 @@ enum CommandLine {
         /// Explicit target instruction file path for injection
         #[arg(long)]
         inject_target: Option<PathBuf>,
-        /// Client identifier for injection (vscode, cursor, claude, windsurf, all)
+        /// Client identifier for injection (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         inject_client: Option<String>,
+        /// Dry run: show planned preparation and injection without modifying files or clipboard
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Inject task-aware Turn-0 context and contract directives into workspace instruction files
     Inject {
@@ -189,7 +217,7 @@ enum CommandLine {
         /// Explicit target instruction file path (defaults to detected workspace instruction files)
         #[arg(long)]
         target: Option<PathBuf>,
-        /// Client identifier (vscode, cursor, claude, windsurf, all)
+        /// Client identifier (vscode, cursor, claude, windsurf, droid, all)
         #[arg(long)]
         client: Option<String>,
         /// Dry run: show planned injection without writing files
@@ -222,9 +250,19 @@ enum CommandLine {
         /// Lock preflight Change Contract to baseline commit and inject directives
         #[arg(long)]
         lock_contract: bool,
+        /// Restrict context retrieval to a specific repository subpath (e.g. 'src/' or 'benchmarks/')
+        #[arg(long)]
+        subpath: Option<String>,
+        /// Restrict context retrieval to a specific programming language (e.g. 'rust' or 'python')
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Start the Model Context Protocol (MCP) server over stdio
-    Mcp,
+    Mcp {
+        /// Expose all 16 specialist tools instead of the lean default 4-tool surface
+        #[arg(long)]
+        all_tools: bool,
+    },
     /// Run scientific empirical benchmarks evaluating discovery, grounding, contracts, and memory lift
     Bench {
         #[arg(long, short = 'v')]
@@ -306,6 +344,8 @@ enum CommandLine {
     },
     /// Policy-driven Change Guard for local Git and CI pull-request workflows
     Guard {
+        #[command(subcommand)]
+        action: Option<GuardAction>,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -342,15 +382,129 @@ enum CommandLine {
         #[command(subcommand)]
         action: HookAction,
     },
+    /// Native Micro-Knowledge Graph and repository intelligence queries
+    Graph {
+        #[command(subcommand)]
+        action: GraphAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GraphAction {
+    /// Inspect knowledge graph status, node/edge counts, and index health
+    Status,
+    /// Query neighborhood around a file or symbol
+    Query {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Query change impact, callers, dependent files, tests, and governing contracts
+    Impact {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Query shortest call path between two symbols
+    CallPath {
+        source: String,
+        target: String,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+    },
+    /// Trace vertical cross-layer architectural feature flows
+    Trace {
+        query: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 3)]
+        max_paths: usize,
+        #[arg(long)]
+        confidence: Option<String>,
+    },
+    /// Inspect architectural subsystems and cross-module relationships
+    Subsystems,
+    /// Query forward dependencies of a file, module, or symbol
+    Dependencies {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Query reverse dependencies (who imports, calls, implements, inherits, or tests target)
+    #[command(alias = "rdeps")]
+    ReverseDependencies {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Explain graph connections, resolution status, and provenance for a target
+    Explain {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Force a full re-index of the native micro-knowledge graph
+    Reindex,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GuardAction {
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
+    Install {
+        /// Dry run: show what would be installed without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Uninstall pre-commit hook from Git hooks directory
+    Uninstall {
+        /// Dry run: show what would be uninstalled without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Execute Git pre-commit validation of staged changes
+    #[command(name = "check", alias = "run")]
+    Check {
+        /// Path to custom policy configuration file (.toml)
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Base commit or ref to compare against (e.g. origin/main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Explicit Change Contract JSON file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Check staged index changes only (pre-commit mode)
+        #[arg(long)]
+        staged: bool,
+        /// Enforce strict policy (treat unexpected expansions as blocking)
+        #[arg(long)]
+        strict: bool,
+        /// Output format (text or json)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Detailed diagnostic mode explaining checks executed and skipped
+        #[arg(long, alias = "explain")]
+        diagnostic: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum HookAction {
     /// Execute Git pre-commit validation of staged changes
-    Run {
+    #[command(name = "pre-commit", alias = "run")]
+    PreCommit {
         /// Enforce strict policy (treat unexpected expansions as blocking)
         #[arg(long)]
         strict: bool,
+        /// Explicitly require an active Change Contract (fail if none exists)
+        #[arg(long)]
+        enforce_contract: bool,
         /// Path to custom policy configuration file (.toml)
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -361,13 +515,13 @@ pub enum HookAction {
         #[arg(long)]
         json: bool,
     },
-    /// Install pre-commit hook into .git/hooks/pre-commit
+    /// Install pre-commit hook into Git hooks directory (.git/hooks/pre-commit or core.hooksPath)
     Install {
         /// Dry run: show what would be installed without modifying files
         #[arg(long)]
         dry_run: bool,
     },
-    /// Uninstall pre-commit hook from .git/hooks/pre-commit
+    /// Uninstall pre-commit hook from Git hooks directory
     Uninstall {
         /// Dry run: show what would be uninstalled without modifying files
         #[arg(long)]
@@ -550,7 +704,21 @@ fn init(root: &Path) -> Result<Value> {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let root = &cli.root;
-    let force_json = cli.json;
+    let force_json = cli.json
+        || cli
+            .format
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+
+    if cli.build_info {
+        if force_json {
+            println!("{}", engram::build_info::build_info_json());
+        } else {
+            println!("{}", engram::build_info::VERSION_FULL);
+        }
+        return Ok(());
+    }
 
     match cli.command {
         None => {
@@ -583,8 +751,16 @@ fn run() -> Result<()> {
             task,
             token_budget,
             explain,
+            subpath,
+            language,
         }) => {
-            let res = context(root, &task, token_budget)?;
+            let res = context_scoped(
+                root,
+                &task,
+                token_budget,
+                subpath.as_deref(),
+                language.as_deref(),
+            )?;
             if force_json {
                 print_json(res)?;
             } else {
@@ -1027,7 +1203,8 @@ fn run() -> Result<()> {
                             "cursor (Cursor IDE: .cursor/mcp.json + .cursorrules)",
                             "vscode (VS Code: .vscode/mcp.json + .github/copilot-instructions.md)",
                             "claude (Claude Desktop: claude_desktop_config.json + CLAUDE.md)",
-                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)"
+                            "windsurf (Windsurf IDE: mcp_config.json + .windsurfrules)",
+                            "droid / factory (Factory AI: .factory/mcp.json + AGENTS.md)"
                         ]
                     }))?;
                 } else {
@@ -1038,6 +1215,7 @@ fn run() -> Result<()> {
                     );
                     println!("  ✓ Claude:   claude_desktop_config.json     | CLAUDE.md");
                     println!("  ✓ Windsurf: mcp_config.json                | .windsurfrules");
+                    println!("  ✓ Factory:  .factory/mcp.json              | AGENTS.md");
                     println!("\nCommands:");
                     println!(
                         "  engram setup                   # Read-only auto-detection and dry-run plan"
@@ -1130,6 +1308,7 @@ fn run() -> Result<()> {
         }
         Some(CommandLine::Prepare {
             task,
+            task_pos,
             token_budget,
             format,
             json,
@@ -1140,19 +1319,24 @@ fn run() -> Result<()> {
             inject,
             inject_target,
             inject_client,
+            dry_run,
         }) => {
+            let task_str = task.or(task_pos).ok_or_else(|| {
+                anyhow!("Task description required. Provide --task \"<goal>\" or pass task as an argument.")
+            })?;
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
                 _ => prompt::PromptFormat::Markdown,
             };
-            let copy_clip = !no_clipboard && !stdout;
+            let copy_clip = !no_clipboard && !stdout && !dry_run;
+            let write_f = write_file && !dry_run;
             let mut res = prompt::prepare_task_context_adaptive(
                 root,
-                &task,
+                &task_str,
                 token_budget,
                 fmt,
                 copy_clip,
-                write_file,
+                write_f,
                 no_bypass,
             )?;
             if inject {
@@ -1161,7 +1345,7 @@ fn run() -> Result<()> {
                     &res,
                     inject_target.as_deref(),
                     inject_client.as_deref(),
-                    false,
+                    dry_run,
                 )?;
                 res.injected_files = reports
                     .into_iter()
@@ -1174,12 +1358,17 @@ fn run() -> Result<()> {
                 if stdout || !res.clipboard_copied {
                     println!("{}", res.content);
                 }
+                if dry_run {
+                    eprintln!("ℹ️ DRY-RUN ONLY. No files or clipboard were modified.");
+                }
                 if res.bypass_active {
                     eprintln!("⚡ Adaptive Bypass Active: Trivial task detected.");
                     if let Some(ref sig) = res.classification_signals {
                         eprintln!("  Reason: {}", sig.reason);
                     }
-                    eprintln!("  Bypassed Change Contract and preflight round trips. Proceed directly to editing.");
+                    eprintln!(
+                        "  Bypassed Change Contract and preflight round trips. Proceed directly to editing."
+                    );
                 } else if res.clipboard_copied {
                     eprintln!(
                         "✓ Locked Change Contract '{}' and copied ~{} tokens of Turn-0 context to clipboard.",
@@ -1187,7 +1376,7 @@ fn run() -> Result<()> {
                     );
                     eprintln!("  Status: {}", res.completeness_status);
                     eprintln!(
-                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                        "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                     );
                     eprintln!(
                         "  Agent will skip get_context/preflight and start implementation directly."
@@ -1339,14 +1528,17 @@ fn run() -> Result<()> {
                     if dry_run {
                         println!("  ℹ️ DRY-RUN ONLY. No files were written to disk.");
                     } else {
-                        println!("  🚀 Turn-0 context ready. Agent will execute directly without get_context or preflight tool turns.");
+                        println!(
+                            "  🚀 Turn-0 context ready. Agent will execute directly without get_context or preflight tool turns."
+                        );
                     }
                 }
             }
         }
         Some(CommandLine::Hook { action }) => match action {
-            HookAction::Run {
+            HookAction::PreCommit {
                 strict,
+                enforce_contract,
                 policy,
                 file,
                 json,
@@ -1354,6 +1546,7 @@ fn run() -> Result<()> {
                 let code = hook::run_hook(
                     root,
                     strict,
+                    enforce_contract,
                     policy.as_deref(),
                     file.as_deref(),
                     force_json || json,
@@ -1378,6 +1571,8 @@ fn run() -> Result<()> {
             stdout,
             no_clipboard,
             lock_contract,
+            subpath,
+            language,
         }) => {
             let fmt = match format.to_lowercase().as_str() {
                 "text" => prompt::PromptFormat::Text,
@@ -1385,8 +1580,16 @@ fn run() -> Result<()> {
             };
             let copy_clip = !no_clipboard && !stdout;
             if lock_contract {
-                let res =
-                    prompt::prepare_task_context(root, &task, token_budget, fmt, copy_clip, false)?;
+                let res = prompt::prepare_task_context_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    false,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1400,12 +1603,20 @@ fn run() -> Result<()> {
                         );
                         eprintln!("  Status: {}", res.completeness_status);
                         eprintln!(
-                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf)."
+                            "  Paste directly into your AI chat box (Copilot, Cursor, Windsurf, Droid)."
                         );
                     }
                 }
             } else {
-                let res = prompt::generate_prompt(root, &task, token_budget, fmt, copy_clip)?;
+                let res = prompt::generate_prompt_scoped(
+                    root,
+                    &task,
+                    token_budget,
+                    fmt,
+                    copy_clip,
+                    subpath.as_deref(),
+                    language.as_deref(),
+                )?;
                 if force_json {
                     print_json(&res)?;
                 } else {
@@ -1425,7 +1636,14 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Some(CommandLine::Mcp) => mcp(root)?,
+        Some(CommandLine::Mcp { all_tools }) => {
+            if all_tools {
+                unsafe {
+                    std::env::set_var("ENGRAM_SPECIALIST_TOOLS", "1");
+                }
+            }
+            mcp(root)?;
+        }
         Some(CommandLine::Bench { verbose, external }) => {
             if let Some(ext_path) = external {
                 let results = bench::run_external_benchmark(&ext_path)?;
@@ -1587,6 +1805,7 @@ fn run() -> Result<()> {
             }
         }
         Some(CommandLine::Guard {
+            action,
             policy,
             base,
             file,
@@ -1598,6 +1817,53 @@ fn run() -> Result<()> {
             uninstall_hook,
             dry_run,
         }) => {
+            if let Some(act) = action {
+                match act {
+                    GuardAction::Install { dry_run: dr } => {
+                        let msg = ci_guard::install_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Uninstall { dry_run: dr } => {
+                        let msg = ci_guard::uninstall_guard_hook(root, dr || dry_run)?;
+                        println!("{msg}");
+                        return Ok(());
+                    }
+                    GuardAction::Check {
+                        policy: p,
+                        base: b,
+                        file: f,
+                        staged: s,
+                        strict: st,
+                        format: fmt,
+                        diagnostic: diag,
+                    } => {
+                        let opts = ci_guard::GuardOptions {
+                            policy_path: p.or(policy),
+                            base_commit: b.or(base),
+                            contract_file: f.or(file),
+                            staged: s || staged,
+                            strict: st || strict,
+                            enforce_contract: false,
+                            diagnostic: diag || diagnostic,
+                        };
+                        let res = ci_guard::run_guard(root, &opts);
+                        let is_json = force_json
+                            || fmt.to_ascii_lowercase() == "json"
+                            || format.to_ascii_lowercase() == "json";
+                        if is_json {
+                            print_json(&res)?;
+                        } else {
+                            print!("{}", ci_guard::format_guard_terminal(&res, opts.diagnostic));
+                        }
+                        if res.exit_code != 0 {
+                            std::process::exit(res.exit_code);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
             if install_hook {
                 let msg = ci_guard::install_guard_hook(root, dry_run)?;
                 println!("{msg}");
@@ -1615,6 +1881,7 @@ fn run() -> Result<()> {
                 contract_file: file,
                 staged,
                 strict,
+                enforce_contract: false,
                 diagnostic,
             };
 
@@ -1631,6 +1898,313 @@ fn run() -> Result<()> {
                 std::process::exit(res.exit_code);
             }
         }
+        Some(CommandLine::Graph { action }) => match action {
+            GraphAction::Status => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                if force_json {
+                    print_json(&status)?;
+                } else {
+                    println!("Engram Micro-Knowledge Graph Status:");
+                    println!("  State: {:?}", status.state);
+                    println!("  Schema Version: {}", status.schema_version);
+                    println!("  Total Nodes: {}", status.node_count);
+                    println!("  Total Edges: {}", status.edge_count);
+                    println!("  Indexed Files: {}", status.indexed_files_count);
+                    if status.failed_files_count > 0 {
+                        println!("  Failed Files: {}", status.failed_files_count);
+                    }
+                    if status.unsupported_files_count > 0 {
+                        println!("  Unsupported Files: {}", status.unsupported_files_count);
+                    }
+                    if let Some(ref err) = status.last_error {
+                        println!("  Last Error: {}", err);
+                    }
+                    println!(
+                        "  Last Indexed Commit: {}",
+                        status
+                            .last_indexed_commit
+                            .unwrap_or_else(|| "none".to_string())
+                    );
+                }
+            }
+            GraphAction::Query {
+                target,
+                depth,
+                limit,
+            } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.neighborhood(&target, depth, limit);
+                if force_json {
+                    print_json(&edges)?;
+                } else {
+                    println!(
+                        "Neighborhood for '{}' (depth {}, limit {}):",
+                        target, depth, limit
+                    );
+                    if edges.is_empty() {
+                        println!("  No connected edges found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{}]--> {} (conf: {:.2}, tier: {:?})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.target_id,
+                                e.provenance.confidence,
+                                e.provenance.classification
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Impact { target, depth } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let report = index.impact(&target, depth);
+                if force_json {
+                    print_json(&report)?;
+                } else {
+                    println!(
+                        "Change Impact Analysis for '{}' (depth {}):",
+                        report.target, depth
+                    );
+                    println!("  Affected Files ({}):", report.affected_files.len());
+                    for f in &report.affected_files {
+                        println!("    - {f}");
+                    }
+                    println!("  Affected Symbols ({}):", report.affected_symbols.len());
+                    for s in &report.affected_symbols {
+                        println!("    - {s}");
+                    }
+                    if !report.exercised_tests.is_empty() {
+                        println!("  Exercised Tests ({}):", report.exercised_tests.len());
+                        for t in &report.exercised_tests {
+                            println!("    - {t}");
+                        }
+                    }
+                    if !report.governing_contracts.is_empty() {
+                        println!(
+                            "  Governing Contracts ({}):",
+                            report.governing_contracts.len()
+                        );
+                        for c in &report.governing_contracts {
+                            println!("    - {c}");
+                        }
+                    }
+                }
+            }
+            GraphAction::CallPath {
+                source,
+                target,
+                max_depth,
+            } => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let path_opt = index.call_path(&source, &target, max_depth);
+                if force_json {
+                    print_json(&path_opt)?;
+                } else {
+                    match path_opt {
+                        Some(path) => {
+                            println!(
+                                "Call Path ({} hops):\n  {}",
+                                path.len() - 1,
+                                path.join(" -> ")
+                            );
+                        }
+                        None => {
+                            println!(
+                                "No call path found between '{}' and '{}' within {} hops.",
+                                source, target, max_depth
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Trace {
+                query,
+                kind,
+                scope,
+                max_depth,
+                max_paths,
+                confidence,
+            } => {
+                let req = feature_trace::TraceRequest {
+                    query,
+                    entry_point_kind: kind,
+                    scope,
+                    max_depth: Some(max_depth),
+                    max_paths: Some(max_paths),
+                    confidence_threshold: confidence,
+                    include_unresolved: Some(true),
+                    max_bytes: None,
+                };
+                let trace = feature_trace::trace_feature(root, &req)?;
+                if force_json {
+                    print_json(&trace)?;
+                } else {
+                    println!("Feature Trace: '{}'", trace.query);
+                    println!(
+                        "  Repository: {} (commit: {})",
+                        trace.repository_id, trace.snapshot_id
+                    );
+                    println!("  State: {}", trace.graph_lifecycle_state);
+                    println!("  Paths Discovered: {}", trace.paths.len());
+                    for path in &trace.paths {
+                        println!(
+                            "\n  Path {}: (complete: {})",
+                            path.path_id, path.is_complete
+                        );
+                        for (i, hop) in path.hops.iter().enumerate() {
+                            let rel = hop.relationship_from_previous.as_deref().unwrap_or("ENTRY");
+                            println!(
+                                "    [{}] {} (kind: {}, conf: {:?})",
+                                i, hop.display_name, hop.node_kind, hop.confidence
+                            );
+                            println!("        path: {}:{}", hop.source_path, hop.start_line);
+                            println!("        rel:  {}", rel);
+                        }
+                    }
+                    if !trace.unresolved_links.is_empty() {
+                        println!(
+                            "\n  Unresolved Transitions ({}):",
+                            trace.unresolved_links.len()
+                        );
+                        for u in &trace.unresolved_links {
+                            println!(
+                                "    - [{}] {}:{} -> {} ({})",
+                                u.link_type, u.source_path, u.source_line, u.target_hint, u.reason
+                            );
+                        }
+                    }
+                    if !trace.diagnostics.is_empty() {
+                        println!("\n  Diagnostics:");
+                        for d in &trace.diagnostics {
+                            println!("    - {}", d);
+                        }
+                    }
+                }
+            }
+            GraphAction::Subsystems => {
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let subs = index.subsystems();
+                if force_json {
+                    print_json(&subs)?;
+                } else {
+                    println!("Repository Subsystems ({} modules):", subs.len());
+                    for s in &subs {
+                        println!(
+                            "  - {} ({} files, {} symbols, {} external deps, {} tests)",
+                            s.module_name,
+                            s.file_count,
+                            s.symbol_count,
+                            s.external_dependencies_count,
+                            s.test_count
+                        );
+                    }
+                }
+            }
+            GraphAction::Dependencies { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.dependencies(&target, depth, false);
+                if force_json {
+                    print_json(json!({
+                        "target": target,
+                        "depth": depth,
+                        "graph_state": status.state.as_str(),
+                        "schema_version": status.schema_version,
+                        "dependencies": edges
+                    }))?;
+                } else {
+                    println!(
+                        "Dependencies for '{}' (depth {}, graph state {:?}):",
+                        target, depth, status.state
+                    );
+                    if edges.is_empty() {
+                        println!("  No outgoing dependencies found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{} | {} | {}]--> {} (conf: {:.2})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.provenance.resolution_status.as_str(),
+                                e.provenance.classification.as_str(),
+                                e.target_id,
+                                e.provenance.confidence
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::ReverseDependencies { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.reverse_dependencies(&target, depth);
+                if force_json {
+                    print_json(json!({
+                        "target": target,
+                        "depth": depth,
+                        "graph_state": status.state.as_str(),
+                        "schema_version": status.schema_version,
+                        "reverse_dependencies": edges
+                    }))?;
+                } else {
+                    println!(
+                        "Reverse dependencies for '{}' (depth {}, graph state {:?}):",
+                        target, depth, status.state
+                    );
+                    if edges.is_empty() {
+                        println!("  No reverse dependencies found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{} | {} | {}]--> {} (conf: {:.2})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.provenance.resolution_status.as_str(),
+                                e.provenance.classification.as_str(),
+                                e.target_id,
+                                e.provenance.confidence
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Explain { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let mut explanation = index.explain_target(&target, depth);
+                if let Some(obj) = explanation.as_object_mut() {
+                    obj.insert(
+                        "graph_status".to_string(),
+                        serde_json::to_value(&status).unwrap_or(Value::Null),
+                    );
+                }
+                if force_json {
+                    print_json(&explanation)?;
+                } else {
+                    println!(
+                        "Knowledge Graph Explanation for '{}' (state: {:?}):",
+                        target, status.state
+                    );
+                    println!("{}", serde_json::to_string_pretty(&explanation)?);
+                }
+            }
+            GraphAction::Reindex => {
+                let status = knowledge_graph::sync_knowledge_graph(root, true)?;
+                println!(
+                    "✓ Full Knowledge Graph Reindex Complete: {} nodes, {} edges across {} files.",
+                    status.node_count, status.edge_count, status.indexed_files_count
+                );
+            }
+        },
     }
     Ok(())
 }
@@ -1662,7 +2236,7 @@ fn main() {
 mod tests {
     use super::*;
     use analyzer::{estimate_tokens, language, matches_pattern, parse_file, redact, tokens};
-    use model::{analysis_key, Evidence, EvidenceTier};
+    use model::{Evidence, EvidenceTier, analysis_key};
 
     #[test]
     fn test_secret_redaction() {
@@ -1761,12 +2335,16 @@ mod tests {
         let code = b"class OrderProcessor:\n    def process_order(self, order_id):\n        pass\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.py", code, "rev1").unwrap();
         assert_eq!(record.language, "python");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderProcessor" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
     }
 
     #[test]
@@ -1774,15 +2352,21 @@ mod tests {
         let code = b"export interface IOrder { id: string; }\nexport class OrderService implements IOrder {\n  getOrder(id: string) { return id; }\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.ts", code, "rev1").unwrap();
         assert_eq!(record.language, "typescript");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "IOrder" && s.kind == "INTERFACE"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "getOrder" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "IOrder" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "getOrder" && s.kind == "METHOD")
+        );
     }
 
     #[test]
@@ -1791,12 +2375,16 @@ mod tests {
         let (record, symbols, _) =
             parse_file(Path::new("."), "CartService.cs", code, "rev1").unwrap();
         assert_eq!(record.language, "csharp");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "CartService" && s.kind == "CLASS"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Checkout" && s.kind == "METHOD"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "CartService" && s.kind == "CLASS")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Checkout" && s.kind == "METHOD")
+        );
     }
 
     #[test]
@@ -1804,15 +2392,21 @@ mod tests {
         let code = b"pub struct OrderService;\nimpl OrderService {\n    pub fn process_order(&self) {}\n}\npub trait OrderRepository {}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.rs", code, "rev1").unwrap();
         assert_eq!(record.language, "rust");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "process_order" && s.kind == "FUNCTION"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "process_order" && s.kind == "FUNCTION")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderRepository" && s.kind == "TRAIT")
+        );
     }
 
     #[test]
@@ -1820,17 +2414,25 @@ mod tests {
         let code = b"package orders\n\ntype OrderService struct {}\n\nfunc (s *OrderService) ExportCSV() error { return nil }\n\ntype Exporter interface {\n    Export() error\n}\n";
         let (record, symbols, _) = parse_file(Path::new("."), "order.go", code, "rev1").unwrap();
         assert_eq!(record.language, "go");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == "STRUCT"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Exporter" && s.kind == "INTERFACE"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "orders" && s.kind == "MODULE"));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == "STRUCT")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService.ExportCSV" && s.kind == "METHOD")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Exporter" && s.kind == "INTERFACE")
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "orders" && s.kind == "MODULE")
+        );
     }
 }

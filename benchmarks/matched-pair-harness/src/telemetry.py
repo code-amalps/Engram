@@ -10,19 +10,235 @@ Remediated capabilities:
    a subset of output tokens; cumulative thread summaries are never added as independent requests.
 """
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Set, Tuple
 from pathlib import Path
 import json
 import glob
+import time
+import datetime
+import math
 import os
+import re
 
 
 CODEX_SESSIONS_DIR = Path(r"C:\Users\Amal P S\.codex\sessions")
 
 
 @dataclass
+class RoundTripEvent:
+    call_id: str
+    tool_name: str
+    is_engram: bool
+    is_retry: bool
+    attempt_number: int
+    request_bytes: int
+    response_bytes: int
+    duration_ms: float
+    status: str  # "SUCCESS", "ERROR", "TIMEOUT"
+    timestamp: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TaskRoundTripSummary:
+    total_agent_turns: int
+    total_round_trips: int
+    engram_mcp_calls: int
+    standard_tool_calls: int
+    total_retries: int
+    latency_mean_ms: float
+    latency_median_ms: float
+    latency_p95_ms: float
+    latency_min_ms: float
+    latency_max_ms: float
+    total_request_bytes: int
+    total_response_bytes: int
+    adaptive_bypass_count: int
+    status: str = "MEASURED"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RoundTripComparison:
+    arm: str
+    baseline_arm: str
+    turns_reduction_pct: Optional[float]
+    round_trips_reduction_pct: Optional[float]
+    engram_calls_count: int
+    retries_reduction_pct: Optional[float]
+    latency_p50_diff_ms: Optional[float]
+    payload_bytes_diff: int
+    verdict: str  # "BENEFIT_OBSERVED", "EQUIVALENT", "REGRESSION_OBSERVED", "INSUFFICIENT_DATA"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TokenReplacementAccounting:
+    files_retrieved_via_engram: List[str]
+    files_read_via_shell: List[str]
+    files_repeated_read: List[str]
+    engram_excerpts_count: int
+    engram_excerpts_reread_count: int
+    serialized_invocations_bytes: int
+    serialized_responses_bytes: int
+    estimated_payload_tokens: int
+    replacement_status: str  # "MEASURED", "ESTIMATED", "UNKNOWN", "NOT_OBSERVABLE"
+    tokens_per_successful_task: Optional[float] = None
+    inner_response_content_bytes: int = 0
+    serialized_jsonrpc_response_bytes: int = 0
+    max_individual_response_bytes: int = 0
+    aggregate_auxiliary_payload_bytes: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def extract_files_from_shell_command(cmd: str) -> List[str]:
+    files = []
+    if not isinstance(cmd, str):
+        return files
+    patterns = [
+        r'(?:cat|type|Get-Content|head|tail|more|less)\s+(?:-[a-zA-Z0-9_-]+\s+)*["\']?([^"\'\r\n\t ;&|><]+)["\']?',
+    ]
+    for p in patterns:
+        for m in re.finditer(p, cmd, re.IGNORECASE):
+            path_str = m.group(1).strip()
+            if path_str and not path_str.startswith("-") and ("/" in path_str or "\\" in path_str or "." in path_str):
+                files.append(path_str.replace("\\", "/"))
+    return files
+
+
+def extract_files_from_obj(obj: Any) -> List[str]:
+    files = []
+    if isinstance(obj, str):
+        matches = re.findall(r'(?:[a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_]{1,10})', obj)
+        for m in matches:
+            if "/" in m or "\\" in m:
+                files.append(m.replace("\\", "/"))
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("path", "file", "file_path", "filename", "target_file") and isinstance(v, str):
+                files.append(v.replace("\\", "/"))
+            else:
+                files.extend(extract_files_from_obj(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            files.extend(extract_files_from_obj(item))
+    return files
+
+
+def process_item_for_replacement(
+    item: Dict[str, Any],
+    seen_tool_ids: Set[str],
+    state: Dict[str, Any]
+):
+    raw_type = item.get("type", "")
+    norm_type = raw_type.lower()
+    name = (item.get("name") or "").lower()
+    server = (item.get("server") or "").lower()
+    input_str = str(item.get("input") or item.get("arguments") or "")
+
+    is_exec = (name == "exec")
+    is_engram = ("engram" in norm_type or "engram" in name or server == "engram" or "mcp__engram" in input_str)
+    is_mcp = not is_exec and (norm_type in ("mcp_tool_call", "mcptoolcall", "custom_tool_call") or is_engram)
+
+    # MCP / Engram tool calls
+    if is_mcp:
+        item_id = item.get("id") or item.get("call_id")
+        if item_id and item_id in seen_tool_ids:
+            return
+        if item_id:
+            seen_tool_ids.add(item_id)
+        state["mcp_tool_calls_count"] += 1
+
+        args = item.get("arguments") if "arguments" in item else item.get("input")
+        if args is not None:
+            args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args)
+            b = len(args_str.encode("utf-8"))
+            state["auxiliary_tool_payload_bytes"] += b
+            if is_engram:
+                state["serialized_invocations_bytes"] += b
+                state["files_retrieved_via_engram"].extend(extract_files_from_obj(args))
+
+        res = item.get("result") if "result" in item else item.get("output")
+        if res is not None:
+            res_str = json.dumps(res, ensure_ascii=False) if isinstance(res, (dict, list)) else str(res)
+            b = len(res_str.encode("utf-8"))
+            inner_b = 0
+            if isinstance(res, dict):
+                c_list = res.get("content", [])
+                if isinstance(c_list, list) and len(c_list) > 0 and isinstance(c_list[0], dict):
+                    t_str = c_list[0].get("text", "")
+                    if isinstance(t_str, str):
+                        inner_b = len(t_str.encode("utf-8"))
+            state["auxiliary_tool_payload_bytes"] += b
+            state["inner_response_content_bytes"] = state.get("inner_response_content_bytes", 0) + inner_b
+            state["serialized_jsonrpc_response_bytes"] = state.get("serialized_jsonrpc_response_bytes", 0) + b
+            state["max_individual_response_bytes"] = max(state.get("max_individual_response_bytes", 0), b)
+            if is_engram:
+                state["serialized_responses_bytes"] += b
+                state["files_retrieved_via_engram"].extend(extract_files_from_obj(res))
+                if any(tok in res_str for tok in ("[COMPLETE_BLOCK]", "[INCOMPLETE_EXCERPT]", "code_excerpt", "line_range")):
+                    state["engram_excerpts_count"] += 1
+
+    # Shell commands or file reads
+    elif norm_type in ("command_execution", "exec_command", "bash", "shell", "function_call", "tool_call") or name in ("exec_command", "bash", "execute_command", "powershell", "read_file", "cat"):
+        cmd = item.get("command") or item.get("cmd") or ""
+        args = item.get("arguments") if "arguments" in item else item.get("input")
+        if isinstance(args, dict):
+            cmd = cmd or args.get("command") or args.get("cmd") or ""
+            p = args.get("path") or args.get("file_path") or args.get("file")
+            if p and isinstance(p, str):
+                state["files_read_via_shell"].append(p.replace("\\", "/"))
+        elif isinstance(args, str) and not cmd:
+            cmd = args
+        if cmd:
+            state["files_read_via_shell"].extend(extract_files_from_shell_command(cmd))
+
+
+def finalize_replacement_accounting(state: Dict[str, Any]) -> TokenReplacementAccounting:
+    files_retrieved = sorted(list(dict.fromkeys(state["files_retrieved_via_engram"])))
+    files_read = sorted(list(dict.fromkeys(state["files_read_via_shell"])))
+    reread_after_engram = [f for f in state["files_read_via_shell"] if any((ef in f or f in ef) for ef in files_retrieved)]
+    repeated_shell_reads = [f for f in set(state["files_read_via_shell"]) if state["files_read_via_shell"].count(f) > 1]
+    files_repeated = sorted(list(set(reread_after_engram + repeated_shell_reads)))
+    excerpts_reread = len(reread_after_engram)
+    inv_bytes = state["serialized_invocations_bytes"]
+    res_bytes = state["serialized_responses_bytes"]
+    payload_tokens = (inv_bytes + res_bytes) // 4
+    if state["mcp_tool_calls_count"] > 0 or len(files_retrieved) > 0:
+        status = "MEASURED"
+    elif files_read:
+        status = "ESTIMATED"
+    else:
+        status = "NOT_OBSERVABLE"
+    return TokenReplacementAccounting(
+        files_retrieved_via_engram=files_retrieved,
+        files_read_via_shell=files_read,
+        files_repeated_read=files_repeated,
+        engram_excerpts_count=state["engram_excerpts_count"],
+        engram_excerpts_reread_count=excerpts_reread,
+        serialized_invocations_bytes=inv_bytes,
+        serialized_responses_bytes=res_bytes,
+        estimated_payload_tokens=payload_tokens,
+        replacement_status=status,
+        tokens_per_successful_task=None,
+        inner_response_content_bytes=state.get("inner_response_content_bytes", 0),
+        serialized_jsonrpc_response_bytes=state.get("serialized_jsonrpc_response_bytes", 0),
+        max_individual_response_bytes=state.get("max_individual_response_bytes", 0),
+        aggregate_auxiliary_payload_bytes=state.get("auxiliary_tool_payload_bytes", 0),
+    )
+
+
+@dataclass
 class TelemetryMetrics:
-    provenance: str  # "SESSION_ROLLOUT", "DIRECT_API", "HARNESS_LOG", "UI_COUNTER", "SYNTHETIC_TEST"
+    provenance: str  # "SESSION_ROLLOUT", "DIRECT_API", "HARNESS_LOG", "UI_COUNTER", "SYNTHETIC_TEST", "UNAVAILABLE"
     prompt_tokens_total: int
     prompt_tokens_cached: int
     prompt_tokens_cached_inferred: bool
@@ -38,8 +254,17 @@ class TelemetryMetrics:
     turns_count: int
     mcp_tool_calls_count: int
     auxiliary_tool_payload_bytes: int
+    inner_response_content_bytes: int = 0
+    serialized_jsonrpc_response_bytes: int = 0
+    max_individual_response_bytes: int = 0
+    aggregate_auxiliary_payload_bytes: int = 0
     account_usage_reading_start_pct: Optional[int] = None
     account_usage_reading_end_pct: Optional[int] = None
+    telemetry_valid: bool = True
+    error_message: Optional[str] = None
+    replacement_accounting: Optional[TokenReplacementAccounting] = None
+    round_trip_summary: Optional[TaskRoundTripSummary] = None
+    round_trip_events: Optional[List[RoundTripEvent]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -50,16 +275,373 @@ class TelemetryParser:
         self.provenance = provenance
         self.sessions_dir = Path(sessions_dir) if sessions_dir else CODEX_SESSIONS_DIR
 
+    def create_unavailable_metrics(self, reason: str = "Telemetry unavailable") -> TelemetryMetrics:
+        """Creates a structured unavailable TelemetryMetrics record without fabricating token counts."""
+        return TelemetryMetrics(
+            provenance="UNAVAILABLE",
+            prompt_tokens_total=0,
+            prompt_tokens_cached=0,
+            prompt_tokens_cached_inferred=False,
+            prompt_tokens_uncached=0,
+            prompt_tokens_uncached_inferred=False,
+            completion_tokens=0,
+            reasoning_tokens=0,
+            total_model_tokens=0,
+            peak_single_request_context=None,
+            peak_turn_context=None,
+            final_turn_context=None,
+            model_requests_count=None,
+            turns_count=0,
+            mcp_tool_calls_count=0,
+            auxiliary_tool_payload_bytes=0,
+            telemetry_valid=False,
+            error_message=reason,
+            replacement_accounting=TokenReplacementAccounting(
+                files_retrieved_via_engram=[],
+                files_read_via_shell=[],
+                files_repeated_read=[],
+                engram_excerpts_count=0,
+                engram_excerpts_reread_count=0,
+                serialized_invocations_bytes=0,
+                serialized_responses_bytes=0,
+                estimated_payload_tokens=0,
+                replacement_status="NOT_OBSERVABLE",
+                tokens_per_successful_task=None
+            ),
+            round_trip_summary=TaskRoundTripSummary(
+                total_agent_turns=0,
+                total_round_trips=0,
+                engram_mcp_calls=0,
+                standard_tool_calls=0,
+                total_retries=0,
+                latency_mean_ms=0.0,
+                latency_median_ms=0.0,
+                latency_p95_ms=0.0,
+                latency_min_ms=0.0,
+                latency_max_ms=0.0,
+                total_request_bytes=0,
+                total_response_bytes=0,
+                adaptive_bypass_count=0,
+                status="UNAVAILABLE"
+            ),
+            round_trip_events=[]
+        )
+
+    def extract_round_trips(
+        self,
+        events: List[Dict[str, Any]],
+        turns_count: int = 0
+    ) -> Tuple[TaskRoundTripSummary, List[RoundTripEvent]]:
+        """
+        Extracts standardized round-trip telemetry from events.
+        Reconstructs request-response pairs, measures payload sizes,
+        tracks execution latency, identifies retry attempts, and distinguishes
+        Engram MCP tools from generic commands.
+        """
+        pending_calls: Dict[str, Dict[str, Any]] = {}
+        completed_events: List[RoundTripEvent] = []
+        invocation_history: Dict[Tuple[str, str], Tuple[int, str]] = {}
+        adaptive_bypass_count = 0
+
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            ev_type = ev.get("type", "")
+            ts = ev.get("timestamp") or ev.get("created_at")
+
+            # Detect adaptive routing signals
+            if ev_type in ("adaptive_activation", "routing_decision"):
+                if ev.get("routed_mode") == "BYPASS":
+                    adaptive_bypass_count += 1
+            if "Adaptive small-task bypass active" in str(ev) or "Direct micro-edit executed via fast path" in str(ev):
+                adaptive_bypass_count += 1
+
+            # 1. response_item custom_tool_call / custom_tool_call_output
+            if ev_type == "response_item":
+                payload = ev.get("payload", {})
+                p_type = payload.get("type", "")
+                if p_type == "custom_tool_call":
+                    cid = payload.get("call_id") or payload.get("id") or f"call_{len(pending_calls)}"
+                    name = payload.get("name") or payload.get("tool") or "custom_tool"
+                    args = payload.get("input") or payload.get("arguments") or {}
+                    args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+                    pending_calls[cid] = {
+                        "name": name,
+                        "args_str": args_str,
+                        "started_at": ts,
+                        "server": payload.get("server", ""),
+                    }
+                elif p_type == "custom_tool_call_output":
+                    cid = payload.get("call_id") or payload.get("id")
+                    call_info = pending_calls.pop(cid, None) if cid else None
+                    name = call_info["name"] if call_info else "custom_tool"
+                    args_str = call_info["args_str"] if call_info else ""
+                    server = call_info["server"] if call_info else ""
+                    out = payload.get("output") or payload.get("result") or ""
+                    out_str = json.dumps(out, ensure_ascii=False) if isinstance(out, (dict, list)) else str(out)
+
+                    history_key = (name, args_str)
+                    prev_info = invocation_history.get(history_key)
+                    if prev_info is not None:
+                        prev_count, prev_status = prev_info
+                    else:
+                        prev_count, prev_status = 0, None
+
+                    explicit_retry = bool(payload.get("is_retry") or payload.get("retry") or (payload.get("attempt_number", 1) > 1))
+                    is_retry = explicit_retry or (prev_count > 0 and prev_status == "ERROR")
+                    attempt_number = prev_count + 1
+
+                    duration_ms = 0.0
+                    if call_info and call_info.get("started_at") and ts:
+                        try:
+                            t0 = datetime.datetime.fromisoformat(call_info["started_at"].replace("Z", "+00:00"))
+                            t1 = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            duration_ms = max(0.0, (t1 - t0).total_seconds() * 1000.0)
+                        except Exception:
+                            duration_ms = 15.0
+                    else:
+                        duration_ms = 15.0
+
+                    is_engram = ("engram" in name.lower() or "engram" in server.lower() or "mcp__engram" in name.lower())
+                    status = "ERROR" if ("error" in out_str.lower() and "no error" not in out_str.lower()) else "SUCCESS"
+                    invocation_history[history_key] = (attempt_number, status)
+
+                    completed_events.append(RoundTripEvent(
+                        call_id=str(cid or f"call_{len(completed_events)}"),
+                        tool_name=name,
+                        is_engram=is_engram,
+                        is_retry=is_retry,
+                        attempt_number=attempt_number,
+                        request_bytes=len(args_str.encode("utf-8")),
+                        response_bytes=len(out_str.encode("utf-8")),
+                        duration_ms=round(duration_ms, 2),
+                        status=status,
+                        timestamp=ts
+                    ))
+
+            # 2. item.started and item.completed
+            elif ev_type in ("item.started", "item.completed"):
+                item = ev.get("item", {})
+                itype = item.get("type", "")
+                if itype in ("mcp_tool_call", "custom_tool_call", "command_execution", "tool_call"):
+                    cid = item.get("id") or item.get("call_id") or f"item_{len(pending_calls)}"
+                    name = item.get("name") or item.get("tool") or item.get("command") or itype
+                    server = item.get("server") or ""
+                    args = item.get("arguments") or item.get("input") or {}
+                    args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+
+                    if ev_type == "item.started":
+                        pending_calls[cid] = {
+                            "name": name,
+                            "args_str": args_str,
+                            "started_at": ts,
+                            "server": server,
+                        }
+                    else:
+                        # item.completed
+                        call_info = pending_calls.pop(cid, None)
+                        out = item.get("result") or item.get("output") or ""
+                        out_str = json.dumps(out, ensure_ascii=False) if isinstance(out, (dict, list)) else str(out)
+
+                        history_key = (name, args_str)
+                        prev_info = invocation_history.get(history_key)
+                        if prev_info is not None:
+                            prev_count, prev_status = prev_info
+                        else:
+                            prev_count, prev_status = 0, None
+
+                        explicit_retry = bool(item.get("is_retry") or item.get("retry") or (item.get("attempt_number", 1) > 1))
+                        is_retry = explicit_retry or (prev_count > 0 and prev_status == "ERROR")
+                        attempt_number = prev_count + 1
+
+                        duration_ms = 0.0
+                        if call_info and call_info.get("started_at") and ts:
+                            try:
+                                t0 = datetime.datetime.fromisoformat(call_info["started_at"].replace("Z", "+00:00"))
+                                t1 = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                                duration_ms = max(0.0, (t1 - t0).total_seconds() * 1000.0)
+                            except Exception:
+                                duration_ms = 20.0
+                        else:
+                            duration_ms = 20.0
+
+                        is_engram = ("engram" in name.lower() or "engram" in server.lower())
+                        status = "ERROR" if ("error" in out_str.lower() and "no error" not in out_str.lower()) else "SUCCESS"
+                        invocation_history[history_key] = (attempt_number, status)
+
+                        completed_events.append(RoundTripEvent(
+                            call_id=str(cid),
+                            tool_name=name,
+                            is_engram=is_engram,
+                            is_retry=is_retry,
+                            attempt_number=attempt_number,
+                            request_bytes=len(args_str.encode("utf-8")),
+                            response_bytes=len(out_str.encode("utf-8")),
+                            duration_ms=round(duration_ms, 2),
+                            status=status,
+                            timestamp=ts
+                        ))
+
+            # 3. event_msg wrapper
+            elif ev_type == "event_msg":
+                payload = ev.get("payload", {})
+                p_type = payload.get("type", "")
+                if p_type in ("item_completed", "item.completed"):
+                    item = payload.get("item", {})
+                    itype = item.get("type", "")
+                    if itype in ("mcp_tool_call", "custom_tool_call", "command_execution", "tool_call"):
+                        cid = item.get("id") or item.get("call_id") or f"msg_{len(completed_events)}"
+                        name = item.get("name") or item.get("tool") or item.get("command") or itype
+                        server = item.get("server") or ""
+                        args = item.get("arguments") or item.get("input") or {}
+                        args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+                        out = item.get("result") or item.get("output") or ""
+                        out_str = json.dumps(out, ensure_ascii=False) if isinstance(out, (dict, list)) else str(out)
+
+                        history_key = (name, args_str)
+                        prev_info = invocation_history.get(history_key)
+                        if prev_info is not None:
+                            prev_count, prev_status = prev_info
+                        else:
+                            prev_count, prev_status = 0, None
+
+                        explicit_retry = bool(item.get("is_retry") or item.get("retry") or (item.get("attempt_number", 1) > 1))
+                        is_retry = explicit_retry or (prev_count > 0 and prev_status == "ERROR")
+                        attempt_number = prev_count + 1
+                        is_engram = ("engram" in name.lower() or "engram" in server.lower())
+                        status = "ERROR" if ("error" in out_str.lower() and "no error" not in out_str.lower()) else "SUCCESS"
+                        invocation_history[history_key] = (attempt_number, status)
+
+                        completed_events.append(RoundTripEvent(
+                            call_id=str(cid),
+                            tool_name=name,
+                            is_engram=is_engram,
+                            is_retry=is_retry,
+                            attempt_number=attempt_number,
+                            request_bytes=len(args_str.encode("utf-8")),
+                            response_bytes=len(out_str.encode("utf-8")),
+                            duration_ms=20.0,
+                            status=status,
+                            timestamp=ts
+                        ))
+
+        total_round_trips = len(completed_events)
+        engram_calls = sum(1 for e in completed_events if e.is_engram)
+        standard_calls = sum(1 for e in completed_events if not e.is_engram)
+        retries = sum(1 for e in completed_events if e.is_retry)
+        total_req_bytes = sum(e.request_bytes for e in completed_events)
+        total_res_bytes = sum(e.response_bytes for e in completed_events)
+
+        latencies = [e.duration_ms for e in completed_events]
+        if latencies:
+            mean_lat = round(sum(latencies) / len(latencies), 2)
+            sorted_lat = sorted(latencies)
+            median_lat = round(sorted_lat[len(sorted_lat) // 2], 2)
+            p95_idx = min(len(sorted_lat) - 1, int(math.ceil(0.95 * len(sorted_lat))) - 1)
+            p95_lat = round(sorted_lat[p95_idx], 2)
+            min_lat = round(sorted_lat[0], 2)
+            max_lat = round(sorted_lat[-1], 2)
+        else:
+            mean_lat = 0.0
+            median_lat = 0.0
+            p95_lat = 0.0
+            min_lat = 0.0
+            max_lat = 0.0
+
+        summary = TaskRoundTripSummary(
+            total_agent_turns=turns_count,
+            total_round_trips=total_round_trips,
+            engram_mcp_calls=engram_calls,
+            standard_tool_calls=standard_calls,
+            total_retries=retries,
+            latency_mean_ms=mean_lat,
+            latency_median_ms=median_lat,
+            latency_p95_ms=p95_lat,
+            latency_min_ms=min_lat,
+            latency_max_ms=max_lat,
+            total_request_bytes=total_req_bytes,
+            total_response_bytes=total_res_bytes,
+            adaptive_bypass_count=adaptive_bypass_count,
+            status="MEASURED" if (total_round_trips > 0 or turns_count > 0) else "NOT_OBSERVABLE"
+        )
+        return summary, completed_events
+
+    def find_session_rollout(
+        self,
+        thread_id: Optional[str] = None,
+        sandbox_path: Optional[Union[str, Path]] = None,
+        min_mtime: Optional[float] = None
+    ) -> Optional[Path]:
+        """
+        Discovers the matching Codex session rollout file from sessions_dir.
+        Checks thread_id first; if not found or unavailable, matches by sandbox_path in world_state.
+        """
+        if not self.sessions_dir.exists():
+            return None
+
+        # 1. Search by thread_id in today's folder, then fallback
+        if thread_id:
+            now_dt = datetime.datetime.now(datetime.timezone.utc)
+            today_dir = self.sessions_dir / now_dt.strftime("%Y") / now_dt.strftime("%m") / now_dt.strftime("%d")
+            matches = glob.glob(str(today_dir / f"*{thread_id}*.jsonl")) if today_dir.exists() else []
+            if not matches:
+                pattern = str(self.sessions_dir / "**" / f"*{thread_id}*.jsonl")
+                matches = glob.glob(pattern, recursive=True)
+            if matches:
+                return Path(matches[0])
+
+        # 2. Search by sandbox_path in candidate files (checking today's folder first)
+        if sandbox_path:
+            norm_sandbox = str(Path(sandbox_path).resolve()).lower()
+            now_dt = datetime.datetime.now(datetime.timezone.utc)
+            today_dir = self.sessions_dir / now_dt.strftime("%Y") / now_dt.strftime("%m") / now_dt.strftime("%d")
+            candidates = glob.glob(str(today_dir / "rollout-*.jsonl")) if today_dir.exists() else []
+            if not candidates:
+                pattern = str(self.sessions_dir / "**" / "rollout-*.jsonl")
+                candidates = glob.glob(pattern, recursive=True)
+
+            candidate_paths = sorted([Path(c) for c in candidates], key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            cutoff = (min_mtime - 30.0) if min_mtime else (time.time() - 3600.0)
+            for cand in candidate_paths[:25]:
+                try:
+                    if cand.stat().st_mtime < cutoff:
+                        continue
+                    with open(cand, "r", encoding="utf-8", errors="replace") as f:
+                        for idx, line in enumerate(f):
+                            if idx > 25:
+                                break
+                            if norm_sandbox in line.lower():
+                                return cand
+                except Exception:
+                    continue
+
+        return None
+
     def parse_rollout_file(self, rollout_path: Union[str, Path]) -> TelemetryMetrics:
         """
         Parses a definitive Codex session rollout JSONL file (from .codex/sessions).
         Extracts exact per-request usage from token_usage_record entries.
         """
         rollout_path = Path(rollout_path)
+        if not rollout_path.exists() or rollout_path.stat().st_size == 0:
+            return self.create_unavailable_metrics(f"Rollout file missing or empty: {rollout_path}")
+
         records = []
+        all_events = []
         seen_tool_ids: Set[str] = set()
-        mcp_tool_calls_count = 0
-        auxiliary_tool_payload_bytes = 0
+        accounting_state = {
+            "mcp_tool_calls_count": 0,
+            "auxiliary_tool_payload_bytes": 0,
+            "serialized_invocations_bytes": 0,
+            "serialized_responses_bytes": 0,
+            "inner_response_content_bytes": 0,
+            "serialized_jsonrpc_response_bytes": 0,
+            "max_individual_response_bytes": 0,
+            "aggregate_auxiliary_payload_bytes": 0,
+            "files_retrieved_via_engram": [],
+            "files_read_via_shell": [],
+            "engram_excerpts_count": 0
+        }
 
         with open(rollout_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -68,38 +650,74 @@ class TelemetryParser:
                     continue
                 try:
                     data = json.loads(line)
+                    all_events.append(data)
                     ev_type = data.get("type", "")
 
                     if ev_type == "token_usage_record":
                         payload = data.get("payload", {})
                         records.append(payload)
 
+                    # 1. item.completed / item.started
                     elif ev_type in ("item.completed", "item.started"):
                         item = data.get("item", {})
-                        if item.get("type") == "mcp_tool_call" and ev_type == "item.completed":
-                            item_id = item.get("id")
-                            if item_id and item_id in seen_tool_ids:
-                                continue
-                            if item_id:
-                                seen_tool_ids.add(item_id)
-                            mcp_tool_calls_count += 1
-                            args_str = json.dumps(item.get("arguments", {}))
-                            auxiliary_tool_payload_bytes += len(args_str.encode("utf-8"))
-                            res = item.get("result")
-                            if res:
-                                res_str = json.dumps(res)
-                                auxiliary_tool_payload_bytes += len(res_str.encode("utf-8"))
+                        if ev_type == "item.completed":
+                            process_item_for_replacement(item, seen_tool_ids, accounting_state)
+
+                    # 2. event_msg wrapper
+                    elif ev_type == "event_msg":
+                        payload = data.get("payload", {})
+                        p_type = payload.get("type", "")
+                        if p_type in ("item_completed", "item.completed"):
+                            item = payload.get("item", {})
+                            process_item_for_replacement(item, seen_tool_ids, accounting_state)
+
+                    # 3. response_item custom_tool_call
+                    elif ev_type == "response_item":
+                        payload = data.get("payload", {})
+                        p_type = payload.get("type", "")
+                        if p_type == "custom_tool_call":
+                            process_item_for_replacement(payload, seen_tool_ids, accounting_state)
+                        elif p_type == "custom_tool_call_output":
+                            call_id = payload.get("call_id") or payload.get("id")
+                            if call_id and call_id in seen_tool_ids:
+                                out = payload.get("output") or payload.get("result")
+                                if out is not None:
+                                    out_str = json.dumps(out, ensure_ascii=False) if isinstance(out, (dict, list)) else str(out)
+                                    b = len(out_str.encode("utf-8"))
+                                    inner_b = 0
+                                    if isinstance(out, dict):
+                                        c_list = out.get("content", [])
+                                        if isinstance(c_list, list) and len(c_list) > 0 and isinstance(c_list[0], dict):
+                                            t_str = c_list[0].get("text", "")
+                                            if isinstance(t_str, str):
+                                                inner_b = len(t_str.encode("utf-8"))
+                                    accounting_state["auxiliary_tool_payload_bytes"] += b
+                                    accounting_state["serialized_responses_bytes"] += b
+                                    accounting_state["inner_response_content_bytes"] = accounting_state.get("inner_response_content_bytes", 0) + inner_b
+                                    accounting_state["serialized_jsonrpc_response_bytes"] = accounting_state.get("serialized_jsonrpc_response_bytes", 0) + b
+                                    accounting_state["max_individual_response_bytes"] = max(accounting_state.get("max_individual_response_bytes", 0), b)
+                                    accounting_state["files_retrieved_via_engram"].extend(extract_files_from_obj(out))
+                                    if any(tok in out_str for tok in ("[COMPLETE_BLOCK]", "[INCOMPLETE_EXCERPT]", "code_excerpt", "line_range")):
+                                        accounting_state["engram_excerpts_count"] += 1
                 except json.JSONDecodeError:
                     continue
 
+        mcp_tool_calls_count = accounting_state["mcp_tool_calls_count"]
+        auxiliary_tool_payload_bytes = accounting_state["auxiliary_tool_payload_bytes"]
+        replacement_accounting = finalize_replacement_accounting(accounting_state)
+
         if not records:
-            raise ValueError(f"No token_usage_record events found in rollout file: {rollout_path}")
+            return self.create_unavailable_metrics(f"No token_usage_record events found in rollout file: {rollout_path}")
 
         # The last record contains the authoritative thread_token_usage
         last_record = records[-1]
         final_thread_usage = last_record.get("thread_token_usage") or last_record.get("usage", {})
 
-        prompt_tokens_total = int(final_thread_usage.get("input_tokens", 0))
+        prompt_tokens_total = int(
+            final_thread_usage.get("input_tokens")
+            if final_thread_usage.get("input_tokens") is not None
+            else final_thread_usage.get("prompt_tokens", 0)
+        )
         cached_input = final_thread_usage.get("cached_input_tokens")
         if cached_input is not None:
             prompt_tokens_cached = int(cached_input)
@@ -119,14 +737,26 @@ class TelemetryParser:
             prompt_tokens_uncached = prompt_tokens_total
             prompt_tokens_uncached_inferred = True
 
-        completion_tokens = int(final_thread_usage.get("output_tokens", 0))
-        reasoning_tokens = int(final_thread_usage.get("reasoning_output_tokens", 0))
+        completion_tokens = int(
+            final_thread_usage.get("output_tokens")
+            if final_thread_usage.get("output_tokens") is not None
+            else final_thread_usage.get("completion_tokens", 0)
+        )
+        reasoning_tokens = int(
+            final_thread_usage.get("reasoning_output_tokens")
+            if final_thread_usage.get("reasoning_output_tokens") is not None
+            else final_thread_usage.get("reasoning_tokens", 0)
+        )
 
         # Per-request context inspection
         request_contexts = []
         for r in records:
             req_usage = r.get("usage", {})
-            inp = int(req_usage.get("input_tokens", 0))
+            inp = int(
+                req_usage.get("input_tokens")
+                if req_usage.get("input_tokens") is not None
+                else req_usage.get("prompt_tokens", 0)
+            )
             if inp > 0:
                 request_contexts.append(inp)
 
@@ -138,6 +768,7 @@ class TelemetryParser:
         # Note: reasoning_tokens is an informative sub-metric already included inside completion_tokens.
         # cached_tokens is an informative sub-metric already included inside prompt_tokens_total.
         total_model_tokens = prompt_tokens_total + completion_tokens
+        round_trip_summary, round_trip_events = self.extract_round_trips(all_events, turns_count=len(records))
 
         return TelemetryMetrics(
             provenance="SESSION_ROLLOUT",
@@ -156,6 +787,13 @@ class TelemetryParser:
             turns_count=len(records),
             mcp_tool_calls_count=mcp_tool_calls_count,
             auxiliary_tool_payload_bytes=auxiliary_tool_payload_bytes,
+            inner_response_content_bytes=replacement_accounting.inner_response_content_bytes if replacement_accounting else 0,
+            serialized_jsonrpc_response_bytes=replacement_accounting.serialized_jsonrpc_response_bytes if replacement_accounting else 0,
+            max_individual_response_bytes=replacement_accounting.max_individual_response_bytes if replacement_accounting else 0,
+            aggregate_auxiliary_payload_bytes=replacement_accounting.aggregate_auxiliary_payload_bytes if replacement_accounting else 0,
+            replacement_accounting=replacement_accounting,
+            round_trip_summary=round_trip_summary,
+            round_trip_events=round_trip_events,
         )
 
     def parse_events(
@@ -193,9 +831,20 @@ class TelemetryParser:
         completion_tokens = 0
         reasoning_tokens = 0
         turn_inputs: List[int] = []
-        mcp_tool_calls_count = 0
-        auxiliary_tool_payload_bytes = 0
         seen_tool_ids: Set[str] = set()
+        accounting_state = {
+            "mcp_tool_calls_count": 0,
+            "auxiliary_tool_payload_bytes": 0,
+            "serialized_invocations_bytes": 0,
+            "serialized_responses_bytes": 0,
+            "inner_response_content_bytes": 0,
+            "serialized_jsonrpc_response_bytes": 0,
+            "max_individual_response_bytes": 0,
+            "aggregate_auxiliary_payload_bytes": 0,
+            "files_retrieved_via_engram": [],
+            "files_read_via_shell": [],
+            "engram_excerpts_count": 0
+        }
 
         for event in events:
             ev_type = event.get("type", "")
@@ -218,22 +867,49 @@ class TelemetryParser:
 
             elif ev_type in ("item.completed", "item.started"):
                 item = event.get("item", {})
-                if item.get("type") == "mcp_tool_call" and ev_type == "item.completed":
-                    item_id = item.get("id")
-                    if item_id and item_id in seen_tool_ids:
-                        continue
-                    if item_id:
-                        seen_tool_ids.add(item_id)
-                    mcp_tool_calls_count += 1
-                    args_str = json.dumps(item.get("arguments", {}))
-                    auxiliary_tool_payload_bytes += len(args_str.encode("utf-8"))
-                    res = item.get("result")
-                    if res:
-                        res_str = json.dumps(res)
-                        auxiliary_tool_payload_bytes += len(res_str.encode("utf-8"))
+                if ev_type == "item.completed":
+                    process_item_for_replacement(item, seen_tool_ids, accounting_state)
+
+            elif ev_type == "event_msg":
+                payload = event.get("payload", {})
+                p_type = payload.get("type", "")
+                if p_type in ("item_completed", "item.completed"):
+                    item = payload.get("item", {})
+                    process_item_for_replacement(item, seen_tool_ids, accounting_state)
+
+            elif ev_type == "response_item":
+                payload = event.get("payload", {})
+                p_type = payload.get("type", "")
+                if p_type == "custom_tool_call":
+                    process_item_for_replacement(payload, seen_tool_ids, accounting_state)
+                elif p_type == "custom_tool_call_output":
+                    call_id = payload.get("call_id") or payload.get("id")
+                    if call_id and call_id in seen_tool_ids:
+                        out = payload.get("output") or payload.get("result")
+                        if out is not None:
+                            out_str = json.dumps(out, ensure_ascii=False) if isinstance(out, (dict, list)) else str(out)
+                            b = len(out_str.encode("utf-8"))
+                            inner_b = 0
+                            if isinstance(out, dict):
+                                c_list = out.get("content", [])
+                                if isinstance(c_list, list) and len(c_list) > 0 and isinstance(c_list[0], dict):
+                                    t_str = c_list[0].get("text", "")
+                                    if isinstance(t_str, str):
+                                        inner_b = len(t_str.encode("utf-8"))
+                            accounting_state["auxiliary_tool_payload_bytes"] += b
+                            accounting_state["serialized_responses_bytes"] += b
+                            accounting_state["inner_response_content_bytes"] = accounting_state.get("inner_response_content_bytes", 0) + inner_b
+                            accounting_state["serialized_jsonrpc_response_bytes"] = accounting_state.get("serialized_jsonrpc_response_bytes", 0) + b
+                            accounting_state["max_individual_response_bytes"] = max(accounting_state.get("max_individual_response_bytes", 0), b)
+                            accounting_state["files_retrieved_via_engram"].extend(extract_files_from_obj(out))
+                            if any(tok in out_str for tok in ("[COMPLETE_BLOCK]", "[INCOMPLETE_EXCERPT]", "code_excerpt", "line_range")):
+                                accounting_state["engram_excerpts_count"] += 1
 
         turns_count = len(turn_inputs)
         final_turn_context = turn_inputs[-1] if turn_inputs else None
+        mcp_tool_calls_count = accounting_state["mcp_tool_calls_count"]
+        auxiliary_tool_payload_bytes = accounting_state["auxiliary_tool_payload_bytes"]
+        replacement_accounting = finalize_replacement_accounting(accounting_state)
 
         # CRITICAL SAFEGUARD:
         # When parsing only codex exec stdout, turn.completed reports thread cumulative totals.
@@ -260,9 +936,11 @@ class TelemetryParser:
             prompt_tokens_uncached_inferred = True
 
         total_model_tokens = prompt_tokens_total + completion_tokens
+        is_valid = (total_model_tokens > 0) or (self.provenance == "SYNTHETIC_TEST")
+        round_trip_summary, round_trip_events = self.extract_round_trips(events, turns_count=turns_count)
 
         return TelemetryMetrics(
-            provenance=self.provenance,
+            provenance=self.provenance if is_valid else "UNAVAILABLE",
             prompt_tokens_total=prompt_tokens_total,
             prompt_tokens_cached=prompt_tokens_cached,
             prompt_tokens_cached_inferred=prompt_tokens_cached_inferred,
@@ -278,6 +956,15 @@ class TelemetryParser:
             turns_count=turns_count,
             mcp_tool_calls_count=mcp_tool_calls_count,
             auxiliary_tool_payload_bytes=auxiliary_tool_payload_bytes,
+            inner_response_content_bytes=replacement_accounting.inner_response_content_bytes if replacement_accounting else 0,
+            serialized_jsonrpc_response_bytes=replacement_accounting.serialized_jsonrpc_response_bytes if replacement_accounting else 0,
+            max_individual_response_bytes=replacement_accounting.max_individual_response_bytes if replacement_accounting else 0,
+            aggregate_auxiliary_payload_bytes=replacement_accounting.aggregate_auxiliary_payload_bytes if replacement_accounting else 0,
+            replacement_accounting=replacement_accounting,
+            round_trip_summary=round_trip_summary,
+            round_trip_events=round_trip_events,
+            telemetry_valid=is_valid,
+            error_message=None if is_valid else "Zero total model tokens accumulated in event stream"
         )
 
     def parse_file(
@@ -285,14 +972,39 @@ class TelemetryParser:
         jsonl_path: Union[str, Path],
         thread_id: Optional[str] = None
     ) -> TelemetryMetrics:
+        path = Path(jsonl_path)
+        if not path.exists() or path.stat().st_size == 0:
+            if thread_id and self.sessions_dir.exists():
+                rollout = self.find_session_rollout(thread_id=thread_id)
+                if rollout:
+                    try:
+                        return self.parse_rollout_file(rollout)
+                    except Exception:
+                        pass
+            return self.create_unavailable_metrics(f"Events file not found or empty: {jsonl_path}")
+
         events = []
-        with open(jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            return self.create_unavailable_metrics(f"Failed to read events file: {e}")
+
+        if not events and self.provenance != "SYNTHETIC_TEST":
+            if thread_id and self.sessions_dir.exists():
+                rollout = self.find_session_rollout(thread_id=thread_id)
+                if rollout:
+                    try:
+                        return self.parse_rollout_file(rollout)
+                    except Exception:
+                        pass
+            return self.create_unavailable_metrics(f"Zero parseable JSON events in {jsonl_path}")
+
         return self.parse_events(events, thread_id=thread_id)

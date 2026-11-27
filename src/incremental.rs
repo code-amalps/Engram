@@ -7,7 +7,7 @@
 //! - Fallback: Safe full-analysis fallback when incremental correctness cannot be established.
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -18,7 +18,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::analyzer::{excluded, ignore_patterns, language, parse_file, reconcile_symbol_ids};
+use crate::analyzer::{language, parse_file_ast, reconcile_symbol_ids};
 use crate::model;
 use crate::storage::{config_hash, db, hash, now, revision, root_path};
 
@@ -163,19 +163,18 @@ pub fn find_tier2_relational_dependents(
 
     let mut dependent_files = HashSet::new();
 
-    // 1. Files importing Tier 1 files directly
+    // 1. Files importing Tier 1 files directly (including deleted/renamed paths)
     for t1_file in tier1_files {
         let pattern_full = format!("%{t1_file}%");
-        let stem = Path::new(t1_file)
-            .file_stem()
-            .and_then(|s| s.to_str())
+        let path_no_ext = t1_file
+            .rsplit_once('.')
+            .map(|(prefix, _)| prefix)
             .unwrap_or(t1_file);
-        let path_no_ext = t1_file.strip_suffix(&format!(".{stem}")).unwrap_or(t1_file);
         let pattern_stem = format!("%{path_no_ext}%");
 
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT path FROM relationships 
-             WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3) 
+            "SELECT DISTINCT path FROM relationships
+             WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3)
                AND invalidated_at_revision IS NULL",
         )?;
         let rows = stmt.query_map(params![t1_file, pattern_full, pattern_stem], |r| {
@@ -194,8 +193,8 @@ pub fn find_tier2_relational_dependents(
         let pattern_sym_scope = format!("%::{sym}");
         let pattern_sym_any = format!("%{sym}%");
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT path FROM relationships 
-             WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3) 
+            "SELECT DISTINCT path FROM relationships
+             WHERE (target = ?1 OR target LIKE ?2 OR target LIKE ?3)
                AND invalidated_at_revision IS NULL",
         )?;
         let rows = stmt.query_map(params![sym, pattern_sym_scope, pattern_sym_any], |r| {
@@ -281,16 +280,10 @@ fn incremental_analyze_internal(
 
     init_meta_cache(&conn)?;
 
-    let patterns = ignore_patterns(&root);
+    let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
     let mut candidate_files = Vec::new();
 
-    for entry in ignore::WalkBuilder::new(&root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .build()
-    {
+    for entry in engine.build_walk() {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -299,13 +292,20 @@ fn incremental_analyze_internal(
         if p.is_dir() {
             continue;
         }
-        if excluded(&root, p, &patterns) {
+        if engine.is_excluded(p, false) {
             continue;
         }
         if language(p).is_none() {
             continue;
         }
-        let rel = p.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+        let p_norm = crate::discovery::normalize_path(p);
+        let Ok(rel) = p_norm
+            .strip_prefix(engine.root())
+            .or_else(|_| p.strip_prefix(&root))
+        else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
         candidate_files.push((p.to_path_buf(), rel));
     }
 
@@ -370,13 +370,20 @@ fn incremental_analyze_internal(
         } else {
             bytes
         };
-        let (rec, symbols, rels) = parse_file(&root, rel, &bytes, &rev)?;
-        for s in &symbols {
+        let parsed = parse_file_ast(&root, rel, &bytes, &rev)?;
+        for s in &parsed.symbols {
             tier1_symbol_names.push(s.name.clone());
         }
 
         tier1_reparsed_files.push(rel.clone());
-        tier1_parsed_data.push((rec, symbols, rels, file_analysis_key));
+        tier1_parsed_data.push((
+            parsed.file,
+            parsed.symbols,
+            parsed.relationships,
+            parsed.members,
+            parsed.parse_status,
+            file_analysis_key,
+        ));
     }
 
     // Detect deleted and renamed files
@@ -402,9 +409,33 @@ fn incremental_analyze_internal(
         }
     }
 
-    // TIER 2: Relational graph invalidation and re-linking
+    // TIER 2: Relational graph invalidation and re-linking (include changed, deleted, and renamed files/symbols)
+    let mut tier1_affected_paths = tier1_reparsed_files.clone();
+    tier1_affected_paths.extend(tier1_deleted_files.iter().cloned());
+    let mut tier1_affected_symbols = tier1_symbol_names.clone();
+    for (old_p, new_p) in &tier1_renamed_files {
+        tier1_affected_paths.push(old_p.clone());
+        tier1_affected_paths.push(new_p.clone());
+    }
+    for old_path in tier1_deleted_files
+        .iter()
+        .chain(tier1_renamed_files.iter().map(|(o, _)| o))
+    {
+        if let Ok(mut st) = conn.prepare(
+            "SELECT name FROM entities WHERE path = ?1 AND invalidated_at_revision IS NULL",
+        ) {
+            if let Ok(rows) = st.query_map(params![old_path], |r| r.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    if !tier1_affected_symbols.contains(&row) {
+                        tier1_affected_symbols.push(row);
+                    }
+                }
+            }
+        }
+    }
+
     let tier2_relinked_files =
-        find_tier2_relational_dependents(&conn, &tier1_reparsed_files, &tier1_symbol_names)?;
+        find_tier2_relational_dependents(&conn, &tier1_affected_paths, &tier1_affected_symbols)?;
 
     let mut tier2_relinked_entities = 0;
 
@@ -465,14 +496,31 @@ fn incremental_analyze_internal(
         tx.execute("UPDATE entities SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
         tx.execute("UPDATE entity_versions SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
         tx.execute("UPDATE relationships SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, del])?;
+        tx.execute("DELETE FROM entity_members WHERE entity_id IN (SELECT entity_id FROM entities WHERE path = ?1)", params![del])?;
         diagnostics.push(format!("DELETED_FILE: '{}'", del));
     }
 
     let mut assigned_ids = HashSet::new();
 
     // Persist Tier 1 parsed updates
-    for (rec, mut symbols, rels, file_analysis_key) in tier1_parsed_data {
+    for (rec, mut symbols, rels, mut members, parse_status, file_analysis_key) in tier1_parsed_data
+    {
+        let old_ids: Vec<String> = symbols.iter().map(|s| s.id.clone()).collect();
         reconcile_symbol_ids(&tx, &mut symbols, &current_paths, &mut assigned_ids)?;
+        let id_map: HashMap<String, String> = old_ids
+            .into_iter()
+            .zip(symbols.iter().map(|s| s.id.clone()))
+            .filter(|(old, new)| old != new)
+            .collect();
+
+        if !id_map.is_empty() {
+            for m in &mut members {
+                if let Some(new_id) = id_map.get(&m.entity_id) {
+                    m.entity_id = new_id.clone();
+                    m.member_id = crate::storage::member_id(&m.entity_id, &m.name, &m.signature);
+                }
+            }
+        }
 
         tx.execute(
             "INSERT INTO files(path, content_hash, analysis_key, language, excerpt, revision, analyzed_at)
@@ -490,6 +538,7 @@ fn incremental_analyze_internal(
         tx.execute("UPDATE entities SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, rec.path])?;
         tx.execute("UPDATE entity_versions SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, rec.path])?;
         tx.execute("UPDATE relationships SET invalidated_at_revision = ?1 WHERE path = ?2 AND invalidated_at_revision IS NULL", params![rev, rec.path])?;
+        tx.execute("DELETE FROM entity_members WHERE entity_id IN (SELECT entity_id FROM entities WHERE path = ?1)", [&rec.path])?;
 
         for s in symbols {
             tx.execute("INSERT OR IGNORE INTO entity_identity(entity_id, kind, created_at_revision) VALUES(?1, ?2, ?3)", params![s.id, s.kind, rev])?;
@@ -499,11 +548,12 @@ fn incremental_analyze_internal(
                 params![Uuid::new_v4().to_string(), s.id, s.path, s.name, s.kind, s.line as i64, s.end_line as i64, s.signature, s.fingerprint, rev],
             )?;
             tx.execute(
-                "INSERT OR REPLACE INTO entities(entity_id, path, name, kind, start_line, end_line, signature, ast_fingerprint, created_at_revision, invalidated_at_revision, status)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'OBSERVED')",
-                params![s.id, s.path, s.name, s.kind, s.line as i64, s.end_line as i64, s.signature, s.fingerprint, rev],
+                "INSERT OR REPLACE INTO entities(entity_id, path, name, kind, start_line, end_line, signature, ast_fingerprint, created_at_revision, invalidated_at_revision, status, parse_status, is_external)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'OBSERVED', ?10, 0)",
+                params![s.id, s.path, s.name, s.kind, s.line as i64, s.end_line as i64, s.signature, s.fingerprint, rev, parse_status.as_str()],
             )?;
         }
+        crate::storage::insert_entity_members(&tx, &members)?;
 
         for r in rels {
             let rel_id = format!(
@@ -511,10 +561,11 @@ fn incremental_analyze_internal(
                 &hash(format!("{}\0{}\0{}\0{}", rec.path, r.kind, r.target, r.line).as_bytes())
                     [..24]
             );
+            let is_ext = if r.is_external { 1 } else { 0 };
             tx.execute(
-                "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![r.source, r.target, r.kind, r.evidence, r.confidence, rec.path, r.line as i64, rev],
+                "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision, is_external)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![r.source, r.target, r.kind, r.evidence, r.confidence, rec.path, r.line as i64, rev, is_ext],
             )?;
             tx.execute(
                 "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, details_json)
@@ -528,7 +579,7 @@ fn incremental_analyze_internal(
     for t2_file in &tier2_relinked_files {
         let abs_t2 = root.join(t2_file);
         if let Ok(bytes) = fs::read(&abs_t2) {
-            if let Ok((rec, _symbols, rels)) = parse_file(&root, t2_file, &bytes, &rev) {
+            if let Ok(parsed) = parse_file_ast(&root, t2_file, &bytes, &rev) {
                 // Count affected entities in dependent file
                 let ent_count: usize = tx.query_row(
                     "SELECT COUNT(*) FROM entities WHERE path = ?1 AND invalidated_at_revision IS NULL",
@@ -544,23 +595,24 @@ fn incremental_analyze_internal(
                 )?;
 
                 // Re-insert fresh relationships
-                for r in rels {
+                for r in parsed.relationships {
                     let rel_id = format!(
                         "rel_{}",
                         &hash(
-                            format!("{}\0{}\0{}\0{}", rec.path, r.kind, r.target, r.line)
+                            format!("{}\0{}\0{}\0{}", parsed.file.path, r.kind, r.target, r.line)
                                 .as_bytes()
                         )[..24]
                     );
+                    let is_ext = if r.is_external { 1 } else { 0 };
                     tx.execute(
-                        "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision)
-                         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        params![r.source, r.target, r.kind, r.evidence, r.confidence, rec.path, r.line as i64, rev],
+                        "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision, is_external)
+                         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![r.source, r.target, r.kind, r.evidence, r.confidence, parsed.file.path, r.line as i64, rev, is_ext],
                     )?;
                     tx.execute(
                         "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, details_json)
                          VALUES(?1, ?2, 'RELATIONSHIP', 'EXTRACTED', ?3, 'TREE_SITTER', ?4, ?5, ?6, ?7)",
-                        params![rel_id, r.confidence, rec.path, r.line as i64, now(), json!({"edge_type": &r.kind}).to_string()],
+                        params![rel_id, r.confidence, parsed.file.path, r.line as i64, now(), json!({"edge_type": &r.kind}).to_string()],
                     ).ok();
                 }
             }
@@ -594,13 +646,14 @@ fn incremental_analyze_internal(
                     &hash(format!("{}\0{}\0{}\0{}", path, r.kind, r.target, r.line).as_bytes())
                         [..24]
                 );
+                let is_ext = if r.is_external { 1 } else { 0 };
                 tx.execute(
-                    "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision) 
-                     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![r.source, r.target, r.kind, r.evidence, r.confidence, path, r.line as i64, rev],
+                    "INSERT INTO relationships(source_id, target, kind, evidence, confidence, path, line, created_at_revision, is_external)
+                     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![r.source, r.target, r.kind, r.evidence, r.confidence, path, r.line as i64, rev, is_ext],
                 )?;
                 tx.execute(
-                    "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, details_json) 
+                    "INSERT INTO evidence(evidence_id, target_id, target_type, tier, confidence, source_type, source_path, source_line, recorded_at, details_json)
                      VALUES(?1, ?2, 'RELATIONSHIP', 'EXTRACTED', ?3, 'TREE_SITTER', ?4, ?5, ?6, ?7)",
                     params![rel_id, r.confidence, path, r.line as i64, now(), json!({"edge_type": &r.kind}).to_string()],
                 ).ok();
@@ -608,7 +661,23 @@ fn incremental_analyze_internal(
         }
     }
 
+    if !tier1_reparsed_files.is_empty()
+        || !tier1_deleted_files.is_empty()
+        || !tier1_renamed_files.is_empty()
+        || !tier2_relinked_files.is_empty()
+    {
+        tx.execute(
+            "INSERT INTO metadata(key, value) VALUES('index_generation', '1')
+             ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)",
+            [],
+        )?;
+    }
+
     tx.commit()?;
+    crate::compiler::clear_workspace_cache(&root);
+    if let Err(e) = crate::knowledge_graph::sync_knowledge_graph(&root, false) {
+        diagnostics.push(format!("KNOWLEDGE_GRAPH_SYNC_WARNING: {e}"));
+    }
 
     let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 

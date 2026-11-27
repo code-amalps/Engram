@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow};
-use ignore::WalkBuilder;
 use regex::Regex;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -1460,6 +1459,18 @@ fn extract_fallback_symbols(source: &str, path: &str, lang: &str, out: &mut Vec<
     }
 }
 
+fn is_inside_decorator(node: Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "decorator" {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+#[allow(clippy::collapsible_if)]
 pub fn extract_call_target(n: Node, src: &[u8], lang: &str) -> Option<String> {
     match lang {
         "rust" => {
@@ -1493,6 +1504,9 @@ pub fn extract_call_target(n: Node, src: &[u8], lang: &str) -> Option<String> {
         }
         "typescript" | "javascript" => {
             if n.kind() == "call_expression" {
+                if is_inside_decorator(n) {
+                    return None;
+                }
                 if let Some(func_node) = n.child_by_field_name("function") {
                     if func_node.kind() == "identifier" {
                         let text = node_text(func_node, src);
@@ -1512,6 +1526,9 @@ pub fn extract_call_target(n: Node, src: &[u8], lang: &str) -> Option<String> {
         }
         "python" => {
             if n.kind() == "call" {
+                if is_inside_decorator(n) {
+                    return None;
+                }
                 if let Some(func_node) = n.child_by_field_name("function") {
                     if func_node.kind() == "identifier" {
                         let text = node_text(func_node, src);
@@ -2035,43 +2052,24 @@ pub fn matches_pattern(path: &str, pattern: &str) -> bool {
 }
 
 pub fn excluded(root: &Path, path: &Path, patterns: &[(String, String)]) -> bool {
-    let Ok(rel) = path.strip_prefix(root) else {
-        return true;
-    };
-    let rel = rel.to_string_lossy().replace('\\', "/");
-    if rel.split('/').any(|p| {
-        matches!(
-            p,
-            ".git"
-                | "node_modules"
-                | "vendor"
-                | "dist"
-                | "build"
-                | "coverage"
-                | "target"
-                | ".next"
-                | ".venv"
-                | "venv"
-                | "__pycache__"
-                | "bin"
-                | "obj"
-                | ".engram"
-        )
-    }) {
-        return true;
+    crate::discovery::DiscoveryEngine::for_root_with_patterns(root, patterns)
+        .is_excluded(path, path.is_dir())
+}
+
+/// Helper to determine if a directory entry should be pruned during traversal.
+///
+/// Preserves production pruning of build artifacts, dependencies, caches, and
+/// benchmark datasets/run directories via the authoritative DiscoveryEngine,
+/// while allowing legitimate customer source directories (e.g. `reports`, `datasets`,
+/// `assets`, `build`, `results`) to remain discoverable unless configured otherwise.
+pub fn is_pruned_dir_entry(entry: &ignore::DirEntry) -> bool {
+    let mut curr = entry.path();
+    for _ in 0..entry.depth() {
+        if let Some(p) = curr.parent() {
+            curr = p;
+        }
     }
-    let base = path.file_name().unwrap_or_default().to_string_lossy();
-    if base == ".env"
-        || base.starts_with(".env.")
-        || base.ends_with(".pem")
-        || base.ends_with(".key")
-    {
-        return true;
-    }
-    patterns.iter().any(|(cat, p)| {
-        cat != "SOURCE" && cat != "GENERATED" && cat != "SECRET" && matches_pattern(&rel, p)
-            || cat == "SECRET" && matches_pattern(&rel, p)
-    })
+    crate::discovery::DiscoveryEngine::for_root(curr).is_dir_entry_pruned(entry)
 }
 
 pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
@@ -2086,15 +2084,9 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         &project_config_hash,
     );
     let mut conn = db(&root)?;
-    let patterns = ignore_patterns(&root);
+    let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
     let mut files = Vec::new();
-    for entry in WalkBuilder::new(&root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .build()
-    {
+    for entry in engine.build_walk() {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -2103,13 +2095,20 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         if p.is_dir() {
             continue;
         }
-        if excluded(&root, p, &patterns) {
+        if engine.is_excluded(p, false) {
             continue;
         }
         if language(p).is_none() {
             continue;
         }
-        let rel = p.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+        let p_norm = crate::discovery::normalize_path(p);
+        let Ok(rel) = p_norm
+            .strip_prefix(engine.root())
+            .or_else(|_| p.strip_prefix(&root))
+        else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
         files.push((p.to_path_buf(), rel));
     }
     crate::incremental::init_meta_cache(&conn)?;
@@ -2376,7 +2375,6 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
 
 pub fn ensure_fresh(root: &Path) -> Result<()> {
     let root = root_path(root)?;
-    let patterns = ignore_patterns(&root);
     let conn = db(&root)?;
     let mut hashes = HashMap::new();
     {
@@ -2388,16 +2386,11 @@ pub fn ensure_fresh(root: &Path) -> Result<()> {
     }
     let mut stale = false;
     let mut scanned = HashSet::new();
-    for entry in WalkBuilder::new(&root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .build()
-    {
+    let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
+    for entry in engine.build_walk() {
         let Ok(e) = entry else { continue };
         let p = e.path();
-        if p.is_dir() || excluded(&root, p, &patterns) {
+        if p.is_dir() || engine.is_excluded(p, false) {
             continue;
         }
         if language(p).is_none() {
@@ -2407,7 +2400,11 @@ pub fn ensure_fresh(root: &Path) -> Result<()> {
         if b.len() > 2_000_000 || b.contains(&0) {
             continue;
         }
-        let Ok(rel) = p.strip_prefix(&root) else {
+        let p_norm = crate::discovery::normalize_path(p);
+        let Ok(rel) = p_norm
+            .strip_prefix(engine.root())
+            .or_else(|_| p.strip_prefix(&root))
+        else {
             continue;
         };
         let rel = rel.to_string_lossy().replace('\\', "/");
@@ -2426,7 +2423,8 @@ pub fn ensure_fresh(root: &Path) -> Result<()> {
 }
 
 pub fn tokens(s: &str) -> Vec<String> {
-    let re = Regex::new(r"[\p{L}\p{N}]{2,}").unwrap();
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"[\p{L}\p{N}]{2,}").unwrap());
     re.find_iter(&s.to_lowercase())
         .map(|m| m.as_str().to_string())
         .collect()

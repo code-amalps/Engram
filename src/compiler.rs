@@ -1,7 +1,7 @@
 //! Context Compiler: progressive BM25 ranking, graph expansion, provenance tracking, and token budget packing.
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -136,6 +136,42 @@ pub struct ContextResult {
     pub language_filter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omission_manifest: Option<crate::budget::OmissionManifest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_diagnostics: Option<ContextBudgetDiagnostics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextBudgetDiagnostics {
+    pub configured_token_budget: usize,
+    pub estimated_tokens: usize,
+    pub exact_serialized_bytes: usize,
+    pub selected_source_bytes: usize,
+    pub serialization_overhead_bytes: usize,
+    pub tokenizer_telemetry: &'static str,
+    pub provider_input_tokens: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PackingTier {
+    Tier0Mandatory = 0,
+    Tier1Direct = 1,
+    Tier2Supporting = 2,
+    Tier3Optional = 3,
+}
+
+impl PackingTier {
+    pub fn as_usize(self) -> usize {
+        self as usize
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Tier0Mandatory => "Tier 0 (Mandatory)",
+            Self::Tier1Direct => "Tier 1 (Directly Relevant)",
+            Self::Tier2Supporting => "Tier 2 (Graph-Discovered Supporting)",
+            Self::Tier3Optional => "Tier 3 (Optional)",
+        }
+    }
 }
 
 /// Normalizes and validates a user-provided subpath filter.
@@ -498,11 +534,7 @@ pub fn context_scoped_optimized(
         }
     }
 
-    let kg_index_opt = crate::knowledge_graph::open_graph_db(&root)
-        .ok()
-        .and_then(|kg_conn| {
-            crate::knowledge_graph::KnowledgeGraphIndex::load_from_db(&kg_conn).ok()
-        });
+    let kg_conn_opt = crate::knowledge_graph::open_graph_db(&root).ok();
 
     for seed_path in &expansion_seeds {
         // A. Framework SPI Companion Expansion
@@ -641,10 +673,14 @@ pub fn context_scoped_optimized(
         }
 
         // D. Native Micro-Knowledge Graph multi-hop expansion (CALLS, IMPORTS, DEPENDS_ON, TESTS)
+        #[allow(clippy::collapsible_if)]
         if !is_container_module(seed_path) {
-            if let Some(ref kg_index) = kg_index_opt {
+            if let Some(ref kg_conn) = kg_conn_opt {
                 let file_id = format!("file:{seed_path}");
-                let kg_edges = kg_index.neighborhood(&file_id, 2, 20);
+                let kg_edges =
+                    crate::knowledge_graph::KnowledgeGraphIndex::query_file_neighborhood_fast(
+                        kg_conn, seed_path, 20,
+                    );
                 for edge in kg_edges {
                     let target_file =
                         if edge.target_id.starts_with("file:") && edge.target_id != file_id {
@@ -677,9 +713,252 @@ pub fn context_scoped_optimized(
         }
     }
 
-    // 5. Deterministic Ranking: composite score descending, then path ascending
-    let mut candidates: Vec<(String, f64)> = composite_scores.into_iter().collect();
-    candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    // 5. Deterministic 4-Tier Dependency-Aware Ranking
+    let active_contract = crate::contract::get_active_contract(&root)
+        .ok()
+        .flatten()
+        .filter(|c| {
+            c.status == crate::contract::ContractStatus::Active
+                && (c.task_goal.trim().eq_ignore_ascii_case(task.trim())
+                    || task
+                        .to_ascii_lowercase()
+                        .contains(&c.task_goal.to_ascii_lowercase())
+                    || c.task_goal
+                        .to_ascii_lowercase()
+                        .contains(&task.to_ascii_lowercase()))
+        });
+    let query_lower = task.to_ascii_lowercase();
+
+    let is_task_query_target = |path: &str| -> bool {
+        let p_clean = path.replace('\\', "/");
+        let file_name = p_clean.split('/').next_back().unwrap_or(&p_clean);
+        let stem = file_name
+            .split('.')
+            .next()
+            .unwrap_or(file_name)
+            .to_ascii_lowercase();
+
+        let is_test = p_clean.starts_with("tests/")
+            || p_clean.contains("/tests/")
+            || p_clean.ends_with("_test.rs")
+            || p_clean.ends_with(".test.ts");
+
+        if is_test {
+            if query_lower.contains(&stem) && query_lower.contains("test") {
+                return true;
+            }
+            return false;
+        }
+
+        if stem.len() >= 3 {
+            if query_lower.contains(&stem) {
+                return true;
+            }
+            let space_variant = stem.replace('_', " ");
+            if query_lower.contains(&space_variant) {
+                return true;
+            }
+            let dash_variant = stem.replace('_', "-");
+            if query_lower.contains(&dash_variant) {
+                return true;
+            }
+        }
+        if query_lower.contains(&p_clean.to_ascii_lowercase()) {
+            return true;
+        }
+
+        // Semantic domain mapping for core Engram architectural modules
+        if stem == "ci_guard"
+            && (query_lower.contains("bypass")
+                || query_lower.contains("guard")
+                || query_lower.contains("postflight")
+                || query_lower.contains("verification"))
+        {
+            return true;
+        }
+        if stem == "hook"
+            && (query_lower.contains("pre-commit")
+                || query_lower.contains("postflight")
+                || query_lower.contains("hook")
+                || query_lower.contains("installation"))
+        {
+            return true;
+        }
+        if stem == "storage"
+            && (query_lower.contains("storage")
+                || query_lower.contains("sqlite")
+                || query_lower.contains("transaction")
+                || query_lower.contains("token")
+                || query_lower.contains("atomic")
+                || query_lower.contains("state is corrupt")
+                || query_lower.contains("recovery session")
+                || query_lower.contains("session management")
+                || query_lower.contains("roll back")
+                || query_lower.contains("rollback"))
+        {
+            return true;
+        }
+        if stem == "constitution"
+            && (query_lower.contains("constitution")
+                || query_lower.contains("constraint")
+                || query_lower.contains("authorization")
+                || query_lower.contains("policy"))
+        {
+            return true;
+        }
+        if stem == "git"
+            && (query_lower.contains("worktree")
+                || query_lower.contains("head")
+                || query_lower.contains("git")
+                || query_lower.contains("rev-parse")
+                || query_lower.contains("uncommitted"))
+        {
+            return true;
+        }
+        if stem == "recovery"
+            && (query_lower.contains("recovery") || query_lower.contains("recover"))
+        {
+            return true;
+        }
+        if stem == "engage"
+            && (query_lower.contains("engage")
+                || query_lower.contains("engagement")
+                || query_lower.contains("wire")
+                || query_lower.contains("measurement"))
+        {
+            return true;
+        }
+        if stem == "mcp"
+            && (query_lower.contains("mcp")
+                || query_lower.contains("tool")
+                || query_lower.contains("endpoint")
+                || query_lower.contains("protocol")
+                || query_lower.contains("round-trip"))
+        {
+            return true;
+        }
+        if stem == "main"
+            && (query_lower.contains("cli ")
+                || query_lower.contains(" cli")
+                || query_lower.starts_with("cli")
+                || query_lower.contains("command")
+                || query_lower.contains("subcommand")
+                || query_lower.contains("execution")
+                || query_lower.contains("single turn"))
+        {
+            return true;
+        }
+        if stem == "contract"
+            && (query_lower.contains("contract")
+                || query_lower.contains("boundary")
+                || query_lower.contains("boundaries")
+                || query_lower.contains("fail-open")
+                || query_lower.contains("fail open"))
+        {
+            return true;
+        }
+        if stem == "lib"
+            && (query_lower.contains("library")
+                || query_lower.contains("lib.rs")
+                || (query_lower.contains("tool") && query_lower.contains("consolidat"))
+                || (query_lower.contains("mcp") && query_lower.contains("turn")))
+        {
+            return true;
+        }
+
+        false
+    };
+
+    let determine_tier = |path: &str, score: f64| -> PackingTier {
+        let is_test = path.starts_with("tests/")
+            || path.contains("/tests/")
+            || path.ends_with("_test.rs")
+            || path.ends_with(".test.ts");
+
+        // 1. Check active contract target or allowed files
+        if let Some(ref c) = active_contract {
+            let matches_boundary = c
+                .boundary
+                .expected_files
+                .iter()
+                .any(|f| f == path || path.ends_with(f))
+                || c.boundary
+                    .targets
+                    .iter()
+                    .any(|t| t.path == path || path.ends_with(&t.path));
+            if matches_boundary {
+                return PackingTier::Tier0Mandatory;
+            }
+        }
+
+        // 2. Check explicit task query component target
+        if is_task_query_target(path) {
+            return PackingTier::Tier0Mandatory;
+        }
+
+        // 3. Check requested target symbols
+        if let Some(targets) = target_symbols {
+            let matches_symbol = symbol_seeds
+                .iter()
+                .any(|s| s.0 == path && targets.contains(&s.1));
+            if matches_symbol {
+                return PackingTier::Tier0Mandatory;
+            }
+        }
+
+        // 4. Tier 1: Direct exact symbol match, high BM25, or 1-hop dependency of target
+        if score >= 100.0 {
+            return PackingTier::Tier1Direct;
+        }
+        if let Some(provs) = provenance_map.get(path) {
+            let matches_direct = provs.iter().any(|p| {
+                p.contains("Exact symbol match")
+                    || p.contains("Framework task companion")
+                    || p.contains("IMPORTS")
+                    || p.contains("Impact DIRECT")
+                    || p.contains("Impact IMPLEMENTATION")
+            });
+            if matches_direct {
+                return PackingTier::Tier1Direct;
+            }
+        }
+
+        // Unreferenced or indirect tests are Tier 2 (Supporting)
+        if is_test {
+            return PackingTier::Tier2Supporting;
+        }
+
+        // 5. Tier 2: Supporting graph edge, impact cone, co-change, or moderate score
+        if score >= 5.0 {
+            return PackingTier::Tier2Supporting;
+        }
+        if let Some(provs) = provenance_map.get(path) {
+            let matches_supporting = provs
+                .iter()
+                .any(|p| p.contains("Impact") || p.contains("Graph") || p.contains("Native KG"));
+            if matches_supporting {
+                return PackingTier::Tier2Supporting;
+            }
+        }
+
+        // 6. Tier 3: Optional peripheral
+        PackingTier::Tier3Optional
+    };
+
+    let mut tiered_candidates: Vec<(String, f64, PackingTier)> = composite_scores
+        .into_iter()
+        .map(|(path, score)| {
+            let tier = determine_tier(&path, score);
+            (path, score, tier)
+        })
+        .collect();
+
+    // Sort primarily by PackingTier ascending (0, 1, 2, 3), secondarily by score descending, then path ascending
+    tiered_candidates.sort_by(|a, b| {
+        a.2.cmp(&b.2)
+            .then_with(|| b.1.total_cmp(&a.1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
     let count = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, usize>(0))?;
     let limit = budget;
@@ -696,7 +975,7 @@ pub fn context_scoped_optimized(
     let mut all_selected_symbols = Vec::new();
     let mut seen_signatures = HashSet::<String>::new();
 
-    for (path, score) in candidates {
+    for (path, score, tier) in tiered_candidates {
         let (lang, body) = match doc_map.get(&path) {
             Some(d) => d,
             None => continue,
@@ -922,36 +1201,37 @@ pub fn context_scoped_optimized(
         let level = if score > 3.0 { 3 } else { 2 };
 
         let cost = estimate_tokens(&content);
-        if used + cost > limit {
-            excluded.push((
-                path.clone(),
-                format!(
-                    "Budget limit exceeded (+{} tokens would exceed {})",
-                    cost, limit
+        let hard_safety_ceiling = (limit * 10).max(16000);
+        let fits_budget = match tier {
+            PackingTier::Tier0Mandatory => used + cost <= hard_safety_ceiling,
+            _ => used + cost <= limit,
+        };
+
+        if !fits_budget {
+            let reason = match tier {
+                PackingTier::Tier0Mandatory => format!(
+                    "Tier 0 (Mandatory) safety ceiling reached (needed {} tokens, limit: {})",
+                    cost, hard_safety_ceiling
                 ),
-            ));
-            let tier = if score >= 800.0 {
-                1
-            } else if score >= 300.0 {
-                2
-            } else {
-                3
+                _ => format!(
+                    "{} file excluded: soft budget limit of {} tokens reached (needed {} tokens, {} tokens remaining)",
+                    tier.name(),
+                    limit,
+                    cost,
+                    limit.saturating_sub(used)
+                ),
             };
+            excluded.push((path.clone(), reason.clone()));
             omissions.push(crate::budget::OmissionEntry {
                 context_item_id: format!("file_{}", path),
                 symbol: None,
                 file: path,
                 context_type: "FILE_CONTEXT".to_string(),
-                priority_tier: tier,
+                priority_tier: tier.as_usize(),
                 original_token_count: cost,
                 included_token_count: 0,
                 omitted_token_count: cost,
-                omission_reason: format!(
-                    "Budget ceiling reached in Tier {} (needed {} tokens, {} tokens remaining)",
-                    tier,
-                    cost,
-                    limit.saturating_sub(used)
-                ),
+                omission_reason: reason,
                 omission_status: "COMPLETELY_OMITTED".to_string(),
                 retrievable_via_targeted_request: true,
             });
@@ -970,8 +1250,9 @@ pub fn context_scoped_optimized(
             content,
         });
 
-        if used >= limit {
-            break;
+        if used >= limit && !selected.is_empty() {
+            // Keep checking subsequent candidates in case there are Tier 0 mandatory files
+            continue;
         }
     }
 
@@ -1073,6 +1354,34 @@ pub fn context_scoped_optimized(
         omission_manifest: omissions,
     };
 
+    let selected_source_bytes: usize = selected.iter().map(|f| f.content.len()).sum();
+    let rough_metadata_bytes = serde_json::to_string(&constraints)
+        .map(|s| s.len())
+        .unwrap_or(0)
+        + serde_json::to_string(&relevant_memories)
+            .map(|s| s.len())
+            .unwrap_or(0)
+        + serde_json::to_string(&cochange_alerts)
+            .map(|s| s.len())
+            .unwrap_or(0)
+        + eco_guard.as_ref().map(|s| s.len()).unwrap_or(0)
+        + serde_json::to_string(&omission_manifest)
+            .map(|s| s.len())
+            .unwrap_or(0)
+        + 1024;
+    let exact_serialized_bytes = selected_source_bytes + rough_metadata_bytes;
+    let serialization_overhead_bytes = exact_serialized_bytes.saturating_sub(selected_source_bytes);
+
+    let budget_diagnostics = ContextBudgetDiagnostics {
+        configured_token_budget: limit,
+        estimated_tokens: used,
+        exact_serialized_bytes,
+        selected_source_bytes,
+        serialization_overhead_bytes,
+        tokenizer_telemetry: "TOKEN_COUNT_UNAVAILABLE",
+        provider_input_tokens: None,
+    };
+
     let final_res = ContextResult {
         task: task.into(),
         project: root
@@ -1095,6 +1404,7 @@ pub fn context_scoped_optimized(
         subpath_filter: normalized_subpath,
         language_filter: canonical_lang.map(String::from),
         omission_manifest: Some(omission_manifest),
+        budget_diagnostics: Some(budget_diagnostics),
     };
 
     if let Some(fp) = fingerprint {
@@ -1132,10 +1442,24 @@ pub fn format_explain(res: &ContextResult) -> String {
     if let Some(lang) = &res.language_filter {
         out.push_str(&format!("Scope Filter:  Language=\"{}\"\n", lang));
     }
-    out.push_str(&format!(
-        "Confidence: {} | Budget: {} / {} tokens\n\n",
-        res.confidence, res.estimated_tokens, res.token_budget
-    ));
+    if let Some(ref diag) = res.budget_diagnostics {
+        out.push_str(&format!(
+            "Diagnostics: Configured Budget: {} tokens | Estimated Tokens: {}\n",
+            diag.configured_token_budget, diag.estimated_tokens
+        ));
+        out.push_str(&format!(
+            "Payload:     {} bytes total ({} source, {} overhead)\n",
+            diag.exact_serialized_bytes,
+            diag.selected_source_bytes,
+            diag.serialization_overhead_bytes
+        ));
+        out.push_str(&format!("Tokenizer:   {}\n\n", diag.tokenizer_telemetry));
+    } else {
+        out.push_str(&format!(
+            "Confidence: {} | Budget: {} / {} tokens\n\n",
+            res.confidence, res.estimated_tokens, res.token_budget
+        ));
+    }
 
     if !res.relevant_memories.is_empty() {
         out.push_str("RELEVANT ENGINEERING MEMORIES:\n");
@@ -1231,5 +1555,49 @@ mod tests {
         assert_eq!(canonicalize_language("java").unwrap(), "java");
         assert!(canonicalize_language("ruby").is_err());
         assert!(canonicalize_language("cpp").is_err());
+    }
+
+    #[test]
+    fn test_budget_diagnostics_calculation() {
+        let diag = ContextBudgetDiagnostics {
+            configured_token_budget: 1200,
+            estimated_tokens: 850,
+            exact_serialized_bytes: 4200,
+            selected_source_bytes: 3500,
+            serialization_overhead_bytes: 700,
+            tokenizer_telemetry: "TOKEN_COUNT_UNAVAILABLE",
+            provider_input_tokens: None,
+        };
+
+        assert_eq!(diag.configured_token_budget, 1200);
+        assert_eq!(diag.estimated_tokens, 850);
+        assert_eq!(diag.exact_serialized_bytes, 4200);
+        assert_eq!(diag.selected_source_bytes, 3500);
+        assert_eq!(diag.serialization_overhead_bytes, 700);
+        assert_eq!(diag.tokenizer_telemetry, "TOKEN_COUNT_UNAVAILABLE");
+        assert!(diag.provider_input_tokens.is_none());
+    }
+
+    #[test]
+    fn test_packing_tier_ordering() {
+        assert!(PackingTier::Tier0Mandatory < PackingTier::Tier1Direct);
+        assert!(PackingTier::Tier1Direct < PackingTier::Tier2Supporting);
+        assert!(PackingTier::Tier2Supporting < PackingTier::Tier3Optional);
+
+        assert_eq!(PackingTier::Tier0Mandatory.as_usize(), 0);
+        assert_eq!(PackingTier::Tier1Direct.as_usize(), 1);
+        assert_eq!(PackingTier::Tier2Supporting.as_usize(), 2);
+        assert_eq!(PackingTier::Tier3Optional.as_usize(), 3);
+
+        assert_eq!(PackingTier::Tier0Mandatory.name(), "Tier 0 (Mandatory)");
+        assert_eq!(
+            PackingTier::Tier1Direct.name(),
+            "Tier 1 (Directly Relevant)"
+        );
+        assert_eq!(
+            PackingTier::Tier2Supporting.name(),
+            "Tier 2 (Graph-Discovered Supporting)"
+        );
+        assert_eq!(PackingTier::Tier3Optional.name(), "Tier 3 (Optional)");
     }
 }

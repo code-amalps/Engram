@@ -1470,31 +1470,88 @@ export class AppComponent {
 
 #[test]
 fn test_phase4c_golden_angular_scenario_b_replay() {
-    let angular_path = std::path::Path::new(
-        r"C:\Users\Amal P S\OneDrive\Projects\Test\angular-ngrx-material-starter",
-    );
-    if !angular_path.exists() {
-        eprintln!("Golden Angular repo not found, skipping");
-        return;
-    }
-    let conn = match db(angular_path) {
+    let mut temp_fixture_root: Option<PathBuf> = None;
+    let angular_path = match std::env::var_os("ENGRAM_ANGULAR_GOLDEN_REPO") {
+        Some(p) => {
+            let ext = PathBuf::from(p);
+            if !ext.exists() {
+                eprintln!("Configured ENGRAM_ANGULAR_GOLDEN_REPO not found, skipping");
+                return;
+            }
+            ext
+        }
+        None => {
+            // Portable self-contained Angular/NgRx Scenario B fixture
+            let root = std::env::temp_dir().join(format!(
+                "engram_phase4c_portable_angular_{}",
+                uuid::Uuid::new_v4()
+            ));
+            fs::create_dir_all(root.join("src/app/core/auth")).unwrap();
+            fs::create_dir_all(root.join("src/app/core/local-storage")).unwrap();
+            fs::write(
+                root.join("package.json"),
+                r#"{"name": "portable-angular-fixture", "dependencies": {"@angular/core": "^17.0.0", "@ngrx/effects": "^17.0.0"}}"#,
+            )
+            .unwrap();
+            fs::write(
+                root.join("src/app/core/auth/auth.actions.ts"),
+                "export const authLogin = () => ({ type: '[Auth] Login' });\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("src/app/core/local-storage/local-storage.service.ts"),
+                "export class LocalStorageService { getItem(key: string): string | null { return null; } }\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("src/app/core/auth/auth.effects.ts"),
+                r#"import { Injectable } from '@angular/core';
+import { Actions } from '@ngrx/effects';
+import { LocalStorageService } from '../local-storage/local-storage.service';
+import { authLogin } from './auth.actions';
+
+@Injectable()
+export class AuthEffects {
+  run() { return authLogin(); }
+  constructor(private actions$: Actions, private ls: LocalStorageService) {}
+}
+"#,
+            )
+            .unwrap();
+            fs::write(
+                root.join("src/app/core/auth/auth.effects.spec.ts"),
+                "import { AuthEffects } from './auth.effects';\ndescribe('AuthEffects', () => { it('works', () => { void AuthEffects; }); });\n",
+            )
+            .unwrap();
+            analyze(&root).unwrap();
+            temp_fixture_root = Some(root.clone());
+            root
+        }
+    };
+    let conn = match db(&angular_path) {
         Ok(c) => c,
         Err(_) => {
             eprintln!("Could not open db for Golden Angular, skipping");
+            if let Some(tmp) = temp_fixture_root {
+                let _ = fs::remove_dir_all(tmp);
+            }
             return;
         }
     };
-    let cone_d1 = match compute_impact_cone(&conn, angular_path, "AuthEffects", 1) {
+    let cone_d1 = match compute_impact_cone(&conn, &angular_path, "AuthEffects", 1) {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
                 "AuthEffects not indexed in Golden Angular ({}), skipping",
                 e
             );
+            if let Some(tmp) = temp_fixture_root {
+                let _ = fs::remove_dir_all(tmp);
+            }
             return;
         }
     };
-    let cone_d2 = compute_impact_cone(&conn, angular_path, "AuthEffects", 2).unwrap();
+    let cone_d2 = compute_impact_cone(&conn, &angular_path, "AuthEffects", 2).unwrap();
 
     let m1 = cone_d1.metrics().expect("D1 metrics present");
     let m2 = cone_d2.metrics().expect("D2 metrics present");
@@ -1502,6 +1559,8 @@ fn test_phase4c_golden_angular_scenario_b_replay() {
     let bytes_d1 = m1.payload_bytes;
     let bytes_d2 = m2.payload_bytes;
     let inflation = bytes_d2 as f64 / bytes_d1 as f64;
+
+    assert!(bytes_d1 > 0 && bytes_d2 >= bytes_d1);
 
     eprintln!("\n=================== GOLDEN ANGULAR SCENARIO B REPLAY ===================");
     eprintln!(
@@ -1521,6 +1580,10 @@ fn test_phase4c_golden_angular_scenario_b_replay() {
         "Traversed Edges: {}, Pruned Edges: {}",
         m2.traversed_edges, m2.pruned_edges
     );
+
+    if let Some(tmp) = temp_fixture_root {
+        let _ = fs::remove_dir_all(tmp);
+    }
 }
 
 #[test]
@@ -1719,6 +1782,368 @@ export class Service {}
         cone.unresolved_paths()
             .iter()
             .any(|p| p.contains("non_existent_local"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_phase9_3_typescript_decorator_matrix() {
+    let root = std::env::temp_dir().join(format!("engram_phase9_3_dec_{}", uuid::Uuid::new_v4()));
+    if root.exists() {
+        let _ = fs::remove_dir_all(&root);
+    }
+    fs::create_dir_all(root.join("src")).unwrap();
+
+    // Leaf file
+    fs::write(
+        root.join("src/model.ts"),
+        r#"export interface AppConfig {
+    apiUrl: string;
+}
+"#,
+    )
+    .unwrap();
+
+    // Comprehensive TypeScript decorator fixture:
+    // - Class decorator with arguments: @Component({...})
+    // - Multiple decorators on one class: @Injectable(), @Tracked
+    // - Property decorators: @Input(), @Output()
+    // - Method decorator: @HostListener('click', ['$event'])
+    // - Parameter decorator: @Inject('APP_CONFIG')
+    // - Decorator factory invocation
+    fs::write(
+        root.join("src/decorated_service.ts"),
+        r#"import { Injectable, Component, Input, Output, HostListener, Inject } from '@angular/core';
+import { AppConfig } from './model';
+
+export function Tracked(target: any) {}
+
+@Injectable({ providedIn: 'root' })
+@Tracked
+@Component({
+    selector: 'app-root',
+    template: '<div>Hello</div>'
+})
+export class DecoratedService {
+    @Input() title: string = 'demo';
+    @Output() statusChanged: any;
+
+    constructor(@Inject('APP_CONFIG') private config: AppConfig) {}
+
+    @HostListener('click', ['$event'])
+    public handleClick(evt: any): void {
+        console.log('clicked');
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    analyze(&root).unwrap();
+    let conn = db(&root).unwrap();
+
+    // 1. Verify in raw SQLite relationships table: zero CALLS edges to decorator names!
+    let mut stmt = conn
+        .prepare("SELECT target, kind, line FROM relationships WHERE path = 'src/decorated_service.ts' AND kind = 'CALLS'")
+        .unwrap();
+    let calls: Vec<(String, String, usize)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    for (target, _kind, line) in &calls {
+        assert_ne!(
+            target, "Injectable",
+            "Decorators must not emit CALLS edge for @Injectable at line {}",
+            line
+        );
+        assert_ne!(
+            target, "Component",
+            "Decorators must not emit CALLS edge for @Component at line {}",
+            line
+        );
+        assert_ne!(
+            target, "Tracked",
+            "Decorators must not emit CALLS edge for @Tracked at line {}",
+            line
+        );
+        assert_ne!(
+            target, "Input",
+            "Decorators must not emit CALLS edge for @Input at line {}",
+            line
+        );
+        assert_ne!(
+            target, "Output",
+            "Decorators must not emit CALLS edge for @Output at line {}",
+            line
+        );
+        assert_ne!(
+            target, "HostListener",
+            "Decorators must not emit CALLS edge for @HostListener at line {}",
+            line
+        );
+        assert_ne!(
+            target, "Inject",
+            "Decorators must not emit CALLS edge for @Inject at line {}",
+            line
+        );
+    }
+
+    // 2. Compute impact cone and verify first-party nodes
+    let cone = compute_impact_cone(&conn, &root, "src/decorated_service.ts", 2).unwrap();
+    let m = cone.metrics().expect("Metrics present");
+
+    // Exactly 2 unique first-party file paths: decorated_service.ts and model.ts
+    let fp_paths = cone.first_party_paths();
+    assert_eq!(
+        fp_paths.len(),
+        2,
+        "Exactly 2 unique first-party file paths: {:?}",
+        fp_paths
+    );
+    assert!(
+        fp_paths
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("decorated_service.ts"))
+    );
+    assert!(
+        fp_paths
+            .iter()
+            .any(|p| p.replace('\\', "/").ends_with("model.ts"))
+    );
+
+    // 4 direct symbol entities in decorated_service.ts + 1 import-dependent file entity = 5 first-party nodes
+    assert_eq!(
+        m.first_party_nodes, 5,
+        "4 direct symbol entities + 1 import-dependent file entity"
+    );
+    assert_eq!(
+        m.external_terminal_nodes, 2,
+        "External terminal nodes (@angular/core import and log call)"
+    );
+    assert_eq!(
+        m.unresolved_nodes, 0,
+        "No unresolved nodes in clean fixture"
+    );
+
+    // Ensure caller_entities has zero decorator phantom files
+    for c in &cone.caller_entities {
+        assert_ne!(c.path, "Injectable");
+        assert_ne!(c.path, "Component");
+        assert_ne!(c.path, "Tracked");
+        assert_ne!(c.path, "Input");
+        assert_ne!(c.path, "Output");
+        assert_ne!(c.path, "HostListener");
+        assert_ne!(c.path, "Inject");
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_phase9_3_ordinary_calls_preservation() {
+    let root = std::env::temp_dir().join(format!("engram_phase9_3_calls_{}", uuid::Uuid::new_v4()));
+    if root.exists() {
+        let _ = fs::remove_dir_all(&root);
+    }
+    fs::create_dir_all(root.join("src")).unwrap();
+
+    fs::write(
+        root.join("src/callee.ts"),
+        r#"export function computeSum(a: number, b: number): number {
+    return a + b;
+}
+
+export class Worker {
+    public executeTask(): string {
+        return "done";
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("src/caller.ts"),
+        r#"import { computeSum, Worker } from './callee';
+
+function directHelper(val: number): number {
+    return val * 2;
+}
+
+export function runWorkflow(): void {
+    const sum = computeSum(10, 20);
+    const doubled = directHelper(sum);
+    const worker = new Worker();
+    worker.executeTask();
+}
+"#,
+    )
+    .unwrap();
+
+    analyze(&root).unwrap();
+    let conn = db(&root).unwrap();
+
+    // Verify CALLS relationships ARE generated for real ordinary calls
+    let mut stmt = conn
+        .prepare("SELECT target, kind, line FROM relationships WHERE path = 'src/caller.ts' AND kind = 'CALLS'")
+        .unwrap();
+    let calls: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    assert!(
+        calls.iter().any(|c| c == "computeSum"),
+        "Ordinary cross-file function call computeSum must be extracted as CALLS"
+    );
+    assert!(
+        calls.iter().any(|c| c == "directHelper"),
+        "Ordinary direct helper function call directHelper must be extracted as CALLS"
+    );
+    assert!(
+        calls.iter().any(|c| c == "executeTask"),
+        "Ordinary method invocation executeTask must be extracted as CALLS"
+    );
+
+    // Compute impact cone on caller.ts
+    let cone = compute_impact_cone(&conn, &root, "src/caller.ts", 2).unwrap();
+    let m = cone.metrics().expect("Metrics present");
+
+    // Exactly 2 unique first-party paths: caller.ts and callee.ts
+    let fp_paths = cone.first_party_paths();
+    assert_eq!(
+        fp_paths.len(),
+        2,
+        "Exactly 2 unique first-party paths (caller.ts and callee.ts)"
+    );
+    // 2 direct symbol entities (directHelper, runWorkflow) + 1 callee.ts import entity = 3 first-party nodes
+    assert_eq!(
+        m.first_party_nodes, 3,
+        "2 direct symbols + 1 callee entity = 3 first-party nodes"
+    );
+    // Caller entities must contain the ordinary call targets
+    assert!(
+        cone.caller_entities.iter().any(|c| c.path == "computeSum"),
+        "computeSum must be tracked in caller entities"
+    );
+    assert!(
+        cone.caller_entities
+            .iter()
+            .any(|c| c.path == "directHelper"),
+        "directHelper must be tracked in caller entities"
+    );
+    assert!(
+        cone.caller_entities.iter().any(|c| c.path == "executeTask"),
+        "executeTask must be tracked in caller entities"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_phase9_3_decorator_name_collision_boundary() {
+    let root =
+        std::env::temp_dir().join(format!("engram_phase9_3_boundary_{}", uuid::Uuid::new_v4()));
+    if root.exists() {
+        let _ = fs::remove_dir_all(&root);
+    }
+    fs::create_dir_all(root.join("src")).unwrap();
+
+    // Normal function deliberately named 'Injectable' and 'Component'
+    fs::write(
+        root.join("src/normal_functions.ts"),
+        r#"export function Injectable(): string {
+    return "ordinary function called Injectable";
+}
+
+export function Component(): string {
+    return "ordinary function called Component";
+}
+
+export function executeNormalCalls(): void {
+    // Normal calls to functions named Injectable and Component
+    const a = Injectable();
+    const b = Component();
+}
+"#,
+    )
+    .unwrap();
+
+    analyze(&root).unwrap();
+    let conn = db(&root).unwrap();
+
+    // Verify that normal function calls whose names match decorators ARE extracted!
+    let mut stmt = conn
+        .prepare("SELECT target, kind FROM relationships WHERE path = 'src/normal_functions.ts' AND kind = 'CALLS'")
+        .unwrap();
+    let calls: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    assert!(
+        calls.iter().any(|c| c == "Injectable"),
+        "Normal function call named 'Injectable()' MUST be extracted as CALLS (no blind name suppression!)"
+    );
+    assert!(
+        calls.iter().any(|c| c == "Component"),
+        "Normal function call named 'Component()' MUST be extracted as CALLS (no blind name suppression!)"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_phase9_3_python_decorator_preservation() {
+    let root = std::env::temp_dir().join(format!("engram_phase9_3_py_{}", uuid::Uuid::new_v4()));
+    if root.exists() {
+        let _ = fs::remove_dir_all(&root);
+    }
+    fs::create_dir_all(root.join("app")).unwrap();
+
+    fs::write(
+        root.join("app/server.py"),
+        r#"def route(path):
+    def decorator(f):
+        return f
+    return decorator
+
+@route('/health')
+def health_check():
+    return helper_log("ok")
+
+def helper_log(msg):
+    return msg
+"#,
+    )
+    .unwrap();
+
+    analyze(&root).unwrap();
+    let conn = db(&root).unwrap();
+
+    let mut stmt = conn
+        .prepare("SELECT target, kind FROM relationships WHERE path = 'app/server.py' AND kind = 'CALLS'")
+        .unwrap();
+    let calls: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Python @route('/health') must NOT be extracted as CALLS edge
+    assert!(
+        !calls.iter().any(|c| c == "route"),
+        "Python decorator @route must not emit CALLS edge"
+    );
+    // Ordinary function call helper_log MUST be extracted as CALLS edge
+    assert!(
+        calls.iter().any(|c| c == "helper_log"),
+        "Python ordinary call helper_log must be extracted as CALLS edge"
     );
 
     let _ = fs::remove_dir_all(&root);

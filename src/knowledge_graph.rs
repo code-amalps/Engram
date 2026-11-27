@@ -438,37 +438,18 @@ pub fn sync_knowledge_graph(root: &Path, force_full: bool) -> Result<GraphStatus
     let mut unsupported_files_count = 0;
     let mut last_error: Option<String> = None;
 
-    let walker = ignore::WalkBuilder::new(&root)
-        .hidden(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            name != "target"
-                && name != ".git"
-                && name != ".engram"
-                && name != "node_modules"
-                && name != "vendor"
-                && name != "dist"
-                && name != "build"
-                && name != "coverage"
-                && name != "benchmarks"
-                && name != "test_out"
-                && name != "releases"
-                && name != ".pytest_cache"
-                && name != "graphify-out"
-                && name != "assets"
-        })
-        .build();
-
-    for entry in walker.filter_map(Result::ok) {
+    let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
+    for entry in engine.build_walk().filter_map(Result::ok) {
         let path = entry.path();
         if path.is_file() {
-            if crate::analyzer::excluded(&root, path, &[]) {
+            if engine.is_excluded(path, false) {
                 continue;
             }
-            if let Ok(rel) = path.strip_prefix(&root) {
+            let p_norm = crate::discovery::normalize_path(path);
+            if let Ok(rel) = p_norm
+                .strip_prefix(engine.root())
+                .or_else(|_| path.strip_prefix(&root))
+            {
                 let rel_str = rel.to_string_lossy().replace('\\', "/");
                 let is_code = crate::analyzer::language(path).is_some();
                 let is_doc = rel_str.ends_with(".md");
@@ -1374,6 +1355,50 @@ impl KnowledgeGraphIndex {
 
         results.truncate(limit);
         results
+    }
+
+    /// Fast indexed direct neighborhood edge query avoiding full graph deserialization.
+    pub fn query_file_neighborhood_fast(
+        conn: &Connection,
+        seed_path: &str,
+        limit: usize,
+    ) -> Vec<GraphEdge> {
+        let file_id = format!("file:{seed_path}");
+        let mut stmt = match conn.prepare(
+            "SELECT id, source_id, target_id, category, source_path, source_line, content_hash, extraction_method, classification, confidence
+             FROM kg_edges
+             WHERE source_id = ?1 OR target_id = ?1
+             LIMIT ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let rows = match stmt.query_map(rusqlite::params![file_id, limit as i64], |r| {
+            let cat_str: String = r.get(3)?;
+            let class_str: String = r.get(8)?;
+            Ok(GraphEdge {
+                id: r.get(0)?,
+                source_id: r.get(1)?,
+                target_id: r.get(2)?,
+                category: RelationCategory::from_str_opt(&cat_str)
+                    .unwrap_or(RelationCategory::References),
+                provenance: EdgeProvenance {
+                    source_path: r.get(4)?,
+                    source_line: r.get::<_, Option<i64>>(5)?.map(|l| l as usize),
+                    content_hash: r.get(6)?,
+                    extraction_method: r.get(7)?,
+                    classification: EvidenceClassification::from_str_opt(&class_str)
+                        .unwrap_or(EvidenceClassification::DirectFact),
+                    confidence: r.get(9)?,
+                },
+            })
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return Vec::new(),
+        };
+
+        rows.flatten().collect()
     }
 
     /// Traces direct and transitive dependency relationships.

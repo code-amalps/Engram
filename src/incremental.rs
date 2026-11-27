@@ -18,7 +18,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::analyzer::{excluded, ignore_patterns, language, parse_file_ast, reconcile_symbol_ids};
+use crate::analyzer::{language, parse_file_ast, reconcile_symbol_ids};
 use crate::model;
 use crate::storage::{config_hash, db, hash, now, revision, root_path};
 
@@ -281,16 +281,10 @@ fn incremental_analyze_internal(
 
     init_meta_cache(&conn)?;
 
-    let patterns = ignore_patterns(&root);
+    let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
     let mut candidate_files = Vec::new();
 
-    for entry in ignore::WalkBuilder::new(&root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .build()
-    {
+    for entry in engine.build_walk() {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -299,13 +293,20 @@ fn incremental_analyze_internal(
         if p.is_dir() {
             continue;
         }
-        if excluded(&root, p, &patterns) {
+        if engine.is_excluded(p, false) {
             continue;
         }
         if language(p).is_none() {
             continue;
         }
-        let rel = p.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+        let p_norm = crate::discovery::normalize_path(p);
+        let Ok(rel) = p_norm
+            .strip_prefix(engine.root())
+            .or_else(|_| p.strip_prefix(&root))
+        else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
         candidate_files.push((p.to_path_buf(), rel));
     }
 

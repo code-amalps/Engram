@@ -333,10 +333,13 @@ pub fn classify_dependency(
         if workspace_files.contains(&clean) || workspace_files.contains(file_part) {
             return DependencyClassification::Workspace;
         }
-        if clean.starts_with('@')
+        if rel_is_ext
+            || clean.starts_with('@')
             || clean.starts_with("std::")
             || clean.starts_with("core::")
             || clean.starts_with("java.")
+            || file_part.starts_with('@')
+            || crate::analyzer::is_external_target(file_part)
         {
             return DependencyClassification::External;
         }

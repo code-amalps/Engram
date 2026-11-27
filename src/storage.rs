@@ -265,6 +265,7 @@ pub fn init_db(conn: &mut Connection) -> Result<()> {
             UNIQUE(entity_id, created_at_revision)
         );
         CREATE INDEX IF NOT EXISTS entity_versions_path ON entity_versions(path, invalidated_at_revision);
+        CREATE INDEX IF NOT EXISTS entity_versions_name ON entity_versions(name, invalidated_at_revision);
         CREATE TABLE IF NOT EXISTS relationships(
             source_id TEXT NOT NULL,
             target TEXT NOT NULL,
@@ -655,9 +656,13 @@ pub fn revision(root: &Path) -> String {
 pub fn config_hash(root: &Path) -> String {
     let mut config = Vec::new();
     for name in [
+        "engram.yaml",
+        "engram.yml",
         ".engram/config.yaml",
+        ".engram/config.yml",
         ".engram/constitution.yaml",
         ".engramignore",
+        ".gitignore",
     ] {
         config.extend_from_slice(name.as_bytes());
         if let Ok(bytes) = fs::read(root.join(name)) {

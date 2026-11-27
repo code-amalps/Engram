@@ -6,6 +6,7 @@ pub mod ci_guard;
 pub mod compiler;
 pub mod constitution;
 pub mod contract;
+pub mod discovery;
 pub mod doctor;
 pub mod drift;
 pub mod engage;

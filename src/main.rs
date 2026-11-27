@@ -67,6 +67,14 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Output format (e.g. 'json')
+    #[arg(long, global = true)]
+    format: Option<String>,
+
+    /// Display full deterministic build and provenance identity
+    #[arg(long)]
+    build_info: bool,
+
     #[command(subcommand)]
     command: Option<CommandLine>,
 }
@@ -676,7 +684,21 @@ fn init(root: &Path) -> Result<Value> {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let root = &cli.root;
-    let force_json = cli.json;
+    let force_json = cli.json
+        || cli
+            .format
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+
+    if cli.build_info {
+        if force_json {
+            println!("{}", engram::build_info::build_info_json());
+        } else {
+            println!("{}", engram::build_info::VERSION_FULL);
+        }
+        return Ok(());
+    }
 
     match cli.command {
         None => {

@@ -29,6 +29,34 @@ fn test_build_provenance_env_vars_present() {
         full_str.contains("profile:"),
         "Version must contain profile field"
     );
+    assert!(
+        full_str.contains("provenance:"),
+        "Version must contain provenance field"
+    );
+    assert!(
+        full_str.contains("fingerprint:"),
+        "Version must contain fingerprint field"
+    );
+    assert!(
+        full_str.contains("build_id:"),
+        "Version must contain build_id field"
+    );
+}
+
+#[test]
+fn test_build_provenance_extended_fields() {
+    assert!(!build_info::PROVENANCE_SOURCE.is_empty());
+    assert!(!build_info::SOURCE_FINGERPRINT.is_empty());
+    assert!(!build_info::LOCKFILE_SHA256.is_empty());
+    assert!(!build_info::BUILD_ID.is_empty());
+    assert!(build_info::SCHEMA_VERSION == "1" || build_info::SCHEMA_VERSION == "2");
+
+    // JSON build info format
+    let json_str = build_info::build_info_json();
+    let val: serde_json::Value = serde_json::from_str(&json_str).expect("Valid JSON");
+    assert!(val["schema_version"] == "1" || val["schema_version"] == "2");
+    assert_eq!(val["package_version"], build_info::VERSION);
+    assert_eq!(val["build_id"], build_info::BUILD_ID);
 }
 
 #[test]

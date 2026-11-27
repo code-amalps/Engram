@@ -35,6 +35,9 @@ tree-sitter-rust = "0.23"
 tree-sitter-typescript = "0.23"
 uuid = { version = "1.11", features = ["v4"] }
 
+[build-dependencies]
+sha2 = "0.10"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

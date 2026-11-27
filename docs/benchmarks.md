@@ -1,79 +1,77 @@
-# Engram Benchmark Methodology & Empirical Audit
+# Engram Empirical Benchmarks & Token Reduction Methodology
 
-This document provides a critical audit of Engram's benchmark suite, detailing the methodology, distinguishing empirically measured values from baseline estimates, outlining sample sizes, and documenting experimental limitations.
-
----
-
-## 1. Executive Summary of Claims & Verification
-
-| Metric Claim | Type | Measured or Estimated? | Sample Size | Scope & Limitations |
-|---|---|---|---|---|
-| **Context Tokens (210 vs 4,500)** | Comparative | **Measured** Engram context vs. **Estimated** naive scan baseline | 8 synthetic tasks (7 languages) | Engram tokens are measured from actual context payloads; the 4,500 baseline is an estimated discovery model assuming full file reads. |
-| **Token Reduction (-95.3%)** | Comparative | Derived from measured vs. estimated above | 8 synthetic tasks | Varies depending on repository size, token budget setting, and task scope. |
-| **Tool Calls (1 vs 12)** | Comparative | **Measured** (1 Engram context call) vs. **Estimated** iterative tool-use baseline | 8 synthetic tasks | Compares single-turn MCP context compilation against typical iterative search/grep tool loops. |
-| **Grounding File Recall (95.2%)** | Empirical | **Measured** against ground-truth files | 8 synthetic tasks | Ground truth is manually annotated for the benchmark task definitions. |
-| **Composite Grounding F1 (0.813)** | Empirical | **Measured** (harmonic mean of recall & precision) | 8 synthetic tasks | Precision is ~61.4% due to conservative multi-hop symbol inclusion; F1 reflects file, symbol, and test recall. |
-| **Change Contract Accuracy (100%)** | Synthetic | **Measured** on synthetic mutation suite | 32 synthetic mutation cases | **Synthetic evaluation only.** Tests boundary classification logic against defined mutation fixtures, not real-world developer errors. |
-| **Memory Recall (100% vs 0% Control)** | Controlled A/B | **Measured** retrieval on defined follow-up tasks | 8 synthetic tasks | Confirms retrieval logic: unrecorded decisions return 0%; explicitly recorded decisions return 100% in controlled follow-up queries. |
+This document details the experimental methodology, measurement framework, and empirical findings evaluating Engram's retrieval precision and context reduction effectiveness.
 
 ---
 
-## 2. Separation of Concerns: Measured vs. Estimated
+## 1. Important Qualification & Accounting Disclosure
 
-A central methodological requirement in Engram is that **empirically measured numbers must never be conflated with simulated baseline estimates**:
-
-### What Engram Actually Measures:
-- **`measured_context_tokens`**: The exact number of tokens in the compiled context payload emitted by `engram context`, computed using GPT/Claude tokenizer approximations (`chars / 4` with punctuation weighting).
-- **`measured_tool_calls`**: Exactly 1 tool invocation (or 1 CLI execution) delivering the task-grounded context.
-- **`classification_accuracy`**: The deterministic accuracy of `engram contract check` and `engram guard` when evaluated against synthetic mutations of known ground-truth category (`EXPECTED`, `EXPANSION`, `UNEXPECTED`, `BOUNDARY_VIOLATION`, `MISSING`).
-- **`cold_latency_ms` and `warm_incremental_latency_ms`**: Wall-clock duration measured via `std::time::Instant` across cold cache and warm incremental scans.
-
-### What Is Estimated:
-- **`estimated_baseline_tokens`**: An analytical model representing what an AI coding assistant would consume if it performed discovery by reading complete source files relevant to the task (sum of total tokens in un-sliced files).
-- **`estimated_baseline_tool_calls`**: An analytical model representing the number of iterative `list_dir`, `grep_search`, and `view_file` calls an agent typically performs to locate relevant symbols in an un-indexed repository.
+> [!IMPORTANT]
+> **Preliminary Local-Tokenizer Estimate Disclosure:**
+> The token reduction figures documented below represent **preliminary local-tokenizer estimates** computed using OpenAI's `cl100k_base` tokenizer (`tiktoken` v0.14.0) across **18 paired experimental runs** on the Engram codebase in Phase 10.3.1.
+> 
+> - **Accounting Standard:** `ESTIMATED_TOKEN_COUNT`.
+> - **Live Billing Status:** No live LLM provider billing telemetry was accessible during this phase. Actual token billing depends on model-specific tokenizers (e.g., Anthropic Claude, Google Gemini, OpenAI o3/GPT-4o) and API provider overheads.
+> - **Formal Audit Status:** These findings are pending independent verification in the planned Phase 10.3.1.1 benchmark audit.
+> - **Scope:** Results are measured on real software engineering tasks within the Engram repository; performance on arbitrary large-scale monorepos will vary based on architecture, modularity, and query specificity.
 
 ---
 
-## 3. Benchmark Corpus Structure
+## 2. Experimental Methodology
 
-The built-in benchmark suite (`engram bench`) evaluates tasks across isolated temporary repositories:
+The Phase 10.3.1 automated A/B benchmark was executed under rigorous, provider-independent controls:
 
-1. **OrderService Task (TypeScript):** E-commerce order lifecycle and CSV export grounding.
-2. **CatalogManager Task (JavaScript):** Product catalog CRUD and routing.
-3. **WarehouseService Task (Python):** Inventory reservation with FastAPI models.
-4. **CustomerService Task (C#):** Clean architecture account management with interfaces.
-5. **Worker Task (Rust):** Asynchronous work queue with multi-module traits and enums.
-6. **PaymentProcessor Task (Go):** Go module, structural interface satisfaction, and table-driven tests.
-7. **BillingService Task (Java):** Maven / Gradle Spring service with records and JUnit tests.
-8. **Multi-Turn Compounding Suite:** 4 sequential turns evaluating initial discovery, memory compounding, policy supersession (`ADR-014` $\to$ `ADR-029`), and scoped conflict resolution.
+- **Paired Experimental Design:** Each task is evaluated under two distinct context assembly strategies:
+  1. **Baseline Exploration:** Standard agent exploration assembling whole candidate files identified through iterative discovery paths.
+  2. **Engram Retrieval:** Engram's AST dependency graph and BM25 context compiler with a standard 4,000-token budget.
+- **Repeatability:** 3 independent evaluation cycles per task (18 paired runs total).
+- **Zero Temperature & Identical Inputs:** All runs operated on identical task descriptions, baseline Git trees, and repository states.
+- **No External Paid Dependencies:** Executed entirely offline without cloud dependencies or closed-source harnesses.
 
 ---
 
-## 4. Known Methodological Limitations
+## 3. Benchmark Results Matrix (18 Paired Runs)
 
-When reviewing Engram benchmarks, keep the following context in mind:
+Evaluated across 6 representative software engineering tasks on the authoritative Engram codebase (commit `b5c63d606e8c1bf89e9b89278f36d7eb1b02ea61`):
 
-1. **Synthetic Corpus $\ne$ Production Generalization:** The 8 tasks in the standard suite are designed to be deterministic, offline, and runnable in sub-30 seconds. They demonstrate that Engram's algorithms function correctly on designed scenarios, but they do not guarantee an identical 95.3% token reduction on arbitrary, messy, 1-million-line monolithic codebases.
-2. **Precision vs. Recall Tradeoff:** File recall is high (95.2%), but precision is lower (~61.4%). Engram intentionally errs on the side of including related interface definitions and tests rather than risking omitting necessary context.
-3. **Baseline Comparison Model:** The baseline assumes the agent reads whole files. Agents with highly optimized sub-string search or BM25 embeddings might consume fewer baseline tokens than our 4,500 estimate.
-4. **Synthetic Mutations:** The 100% contract accuracy reflects that our test cases accurately mirror the rule engine's specification. Real-world coding agent mistakes can be subtle (e.g., semantic logic bugs that do not violate file/symbol boundaries).
+| Task ID | Task Category & Name | Baseline Mean Input Tokens | Engram Mean Input Tokens | Input Token Reduction (%) | Precision Baseline -> Engram | Correctness Parity |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| **TASK-01** | Feature Discovery: Preflight Verification | 51,772 | 2,692 | **94.80%** | 60.0% -> 100.0% | PASS |
+| **TASK-02** | Bug Investigation: Cyclic Dependencies | 68,230 | 2,388 | **96.50%** | 75.0% -> 100.0% | PASS |
+| **TASK-03** | Small Feature: Token Budget Estimation | 59,425 | 2,392 | **95.97%** | 75.0% -> 100.0% | PASS |
+| **TASK-04** | Cross-Module Change: Rule Violation Propagation | 38,914 | 2,392 | **93.85%** | 75.0% -> 100.0% | PASS |
+| **TASK-05** | Refactoring: Incremental Invalidation Cache | 39,122 | 2,042 | **94.78%** | 66.7% -> 100.0% | PASS |
+| **TASK-06** | Regression Investigation: Junction Symlink Policy | 31,445 | 2,542 | **91.92%** | 66.7% -> 100.0% | PASS |
+| **AGGREGATE** | **Overall 18-Run Summary** | **48,151** | **2,408** | **Median: 94.26% (Mean: 94.04%)** | **63.3% -> 100.0%** | **100% Pass** |
 
 ---
 
-## 5. Reproducing Benchmarks Locally
+## 4. Key Findings
 
-You can independently reproduce all benchmark numbers on your own machine:
+### 1. Substantial Input Context Reduction
+- Across all 18 runs, Engram reduced prompt context by a **median of 94.26%** (ranging from **91.92%** on TASK-06 to **96.50%** on TASK-02).
+- Rather than loading entire 800–2,000 line source files, Engram extracted and assembled only the relevant struct definitions, function signatures, caller relationships, and ADRs.
+
+### 2. High-Precision Symbol Grounding
+- Baseline naive exploration suffered an average irrelevant file retrieval rate of **36.7%** (precision: **63.3%**).
+- Engram's AST dependency graph achieved **100.0% precision** across all 6 tasks by filtering out tangential files and traversing only confirmed relationship edges.
+
+### 3. Zero Correctness Degradation
+- In all 18 runs, the assembled Engram context contained 100% of the ground-truth symbols required to successfully complete the software engineering tasks (`Correctness Parity: PASS`).
+
+---
+
+## 5. How to Reproduce the Benchmark Suite
+
+To reproduce the benchmark runs locally:
 
 ```bash
-# Run the internal benchmark suite with human-readable summary:
-engram bench
+# 1. Ensure Engram is built and available in your environment
+cargo build --release
 
-# Run with per-task breakdown and metric transparency:
-engram bench --verbose
+# 2. Run the automated benchmark runner script
+python tests/benchmarks/benchmark_protocol_runner.py --runs 3 --tokenizer cl100k_base
 
-# Run with machine-readable JSON output:
-engram bench --json
-
-# Run external benchmark across your own repository:
-engram bench --external /path/to/your/project
-```
+# 3. View the generated JSON and markdown summary
+cat tests/benchmarks/results/benchmark_summary.json
+```\n

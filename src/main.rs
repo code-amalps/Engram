@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod archaeology;
+pub mod ast_deps;
 pub mod bench;
 pub mod budget;
 pub mod ci_guard;
@@ -429,6 +430,25 @@ pub enum GraphAction {
     },
     /// Inspect architectural subsystems and cross-module relationships
     Subsystems,
+    /// Query forward dependencies of a file, module, or symbol
+    Dependencies {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Query reverse dependencies (who imports, calls, implements, inherits, or tests target)
+    #[command(alias = "rdeps")]
+    ReverseDependencies {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Explain graph connections, resolution status, and provenance for a target
+    Explain {
+        target: String,
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
     /// Force a full re-index of the native micro-knowledge graph
     Reindex,
 }
@@ -2084,6 +2104,97 @@ fn run() -> Result<()> {
                             s.test_count
                         );
                     }
+                }
+            }
+            GraphAction::Dependencies { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.dependencies(&target, depth, false);
+                if force_json {
+                    print_json(json!({
+                        "target": target,
+                        "depth": depth,
+                        "graph_state": status.state.as_str(),
+                        "schema_version": status.schema_version,
+                        "dependencies": edges
+                    }))?;
+                } else {
+                    println!(
+                        "Dependencies for '{}' (depth {}, graph state {:?}):",
+                        target, depth, status.state
+                    );
+                    if edges.is_empty() {
+                        println!("  No outgoing dependencies found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{} | {} | {}]--> {} (conf: {:.2})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.provenance.resolution_status.as_str(),
+                                e.provenance.classification.as_str(),
+                                e.target_id,
+                                e.provenance.confidence
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::ReverseDependencies { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let edges = index.reverse_dependencies(&target, depth);
+                if force_json {
+                    print_json(json!({
+                        "target": target,
+                        "depth": depth,
+                        "graph_state": status.state.as_str(),
+                        "schema_version": status.schema_version,
+                        "reverse_dependencies": edges
+                    }))?;
+                } else {
+                    println!(
+                        "Reverse dependencies for '{}' (depth {}, graph state {:?}):",
+                        target, depth, status.state
+                    );
+                    if edges.is_empty() {
+                        println!("  No reverse dependencies found.");
+                    } else {
+                        for e in &edges {
+                            println!(
+                                "  {} --[{} | {} | {}]--> {} (conf: {:.2})",
+                                e.source_id,
+                                e.category.as_str(),
+                                e.provenance.resolution_status.as_str(),
+                                e.provenance.classification.as_str(),
+                                e.target_id,
+                                e.provenance.confidence
+                            );
+                        }
+                    }
+                }
+            }
+            GraphAction::Explain { target, depth } => {
+                let status = knowledge_graph::sync_knowledge_graph(root, false)?;
+                let conn = knowledge_graph::open_graph_db(root)?;
+                let index = knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+                let mut explanation = index.explain_target(&target, depth);
+                if let Some(obj) = explanation.as_object_mut() {
+                    obj.insert(
+                        "graph_status".to_string(),
+                        serde_json::to_value(&status).unwrap_or(Value::Null),
+                    );
+                }
+                if force_json {
+                    print_json(&explanation)?;
+                } else {
+                    println!(
+                        "Knowledge Graph Explanation for '{}' (state: {:?}):",
+                        target, status.state
+                    );
+                    println!("{}", serde_json::to_string_pretty(&explanation)?);
                 }
             }
             GraphAction::Reindex => {

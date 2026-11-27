@@ -216,8 +216,19 @@ pub fn migrate_database(conn: &mut Connection) -> Result<()> {
 }
 
 pub fn init_db(conn: &mut Connection) -> Result<()> {
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    let already_ready = get_schema_version(conn).ok() == Some(CURRENT_SCHEMA_VERSION)
+        && conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entity_versions' LIMIT 1",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    if already_ready {
+        return Ok(());
+    }
+    conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS files(
             path TEXT PRIMARY KEY,
@@ -417,7 +428,7 @@ pub fn db(root: &Path) -> Result<Connection> {
     let dir = cache_dir(root)?;
     fs::create_dir_all(&dir)?;
     let mut conn = Connection::open(dir.join("derived_symbols.db"))?;
-    conn.busy_timeout(std::time::Duration::from_secs(15))?;
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
     init_db(&mut conn)?;
     Ok(conn)
 }
@@ -427,7 +438,7 @@ pub fn db_at_path(db_file: &Path) -> Result<Connection> {
         fs::create_dir_all(parent)?;
     }
     let mut conn = Connection::open(db_file)?;
-    conn.busy_timeout(std::time::Duration::from_secs(15))?;
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
     init_db(&mut conn)?;
     Ok(conn)
 }

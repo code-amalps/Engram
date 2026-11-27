@@ -448,13 +448,26 @@ pub fn compute_impact_cone_with_budget(
     let norm_target = crate::go_parser::normalize_go_symbol_name(trimmed_target);
     let norm_java = crate::java_parser::normalize_java_symbol_name(trimmed_target);
 
-    // Build set of all indexed first-party workspace files
+    // Build set of all indexed first-party workspace files and symbols
     let mut workspace_files: HashSet<String> = HashSet::new();
     {
         let mut stmt = conn.prepare("SELECT path FROM files")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         for r in rows.flatten() {
             workspace_files.insert(r.replace('\\', "/"));
+        }
+    }
+    let mut workspace_symbol_paths: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT name, path FROM entity_versions WHERE invalidated_at_revision IS NULL ORDER BY path ASC",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows.flatten() {
+            workspace_symbol_paths
+                .entry(r.0)
+                .or_default()
+                .push(r.1.replace('\\', "/"));
         }
     }
 
@@ -694,10 +707,46 @@ pub fn compute_impact_cone_with_budget(
                 ) = row;
                 traversed_edges += 1;
                 let target_clean = target.trim();
-                let target_file_part = target_clean.split("::").next().unwrap_or(target_clean);
+                let resolved_sym_file = if kind != "CALLS"
+                    && !target_clean.contains('/')
+                    && !target_clean.contains('\\')
+                    && rel_is_ext_int == 0
+                {
+                    workspace_symbol_paths.get(target_clean).and_then(|paths| {
+                        if paths.len() == 1 {
+                            Some(paths[0].clone())
+                        } else {
+                            let curr_dir = Path::new(&curr_file)
+                                .parent()
+                                .and_then(|p| p.to_str())
+                                .unwrap_or("");
+                            paths.iter().find(|p| p.starts_with(curr_dir)).cloned()
+                        }
+                    })
+                } else {
+                    None
+                };
 
-                let classification =
-                    classify_dependency(target_clean, rel_is_ext_int != 0, &kind, &workspace_files);
+                // Skip type/symbol references back to self or the seed target file to avoid self-loop inflation
+                if kind == "REFERENCES" {
+                    if let Some(ref sym_f) = resolved_sym_file {
+                        if sym_f == &curr_file || sym_f == &resolved_target_file {
+                            continue;
+                        }
+                    } else if target_clean == resolved_target_file {
+                        continue;
+                    }
+                }
+
+                let target_file_part = resolved_sym_file
+                    .as_deref()
+                    .unwrap_or_else(|| target_clean.split("::").next().unwrap_or(target_clean));
+
+                let classification = if resolved_sym_file.is_some() {
+                    DependencyClassification::Workspace
+                } else {
+                    classify_dependency(target_clean, rel_is_ext_int != 0, &kind, &workspace_files)
+                };
                 let is_ext = classification == DependencyClassification::External;
                 let is_unresolved = classification == DependencyClassification::Unresolved;
 
@@ -843,13 +892,12 @@ pub fn compute_impact_cone_with_budget(
 
                 if !visited_nodes.contains(target_clean) {
                     visited_nodes.insert(target_clean.to_string());
-                    visited_nodes.insert(target_file_part.to_string());
-                    if next_depth < max_depth {
-                        queue.push_back((
-                            target_clean.to_string(),
-                            next_depth,
-                            target_file_part.to_string(),
-                        ));
+                    let is_new_file = visited_nodes.insert(target_file_part.to_string());
+                    if next_depth < max_depth && (resolved_sym_file.is_none() || is_new_file) {
+                        let q_node = resolved_sym_file
+                            .clone()
+                            .unwrap_or_else(|| target_clean.to_string());
+                        queue.push_back((q_node, next_depth, target_file_part.to_string()));
                     }
                 }
             }

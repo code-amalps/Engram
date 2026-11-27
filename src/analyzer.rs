@@ -127,6 +127,7 @@ pub fn recognized(kind: &str, lang: &str) -> Option<&'static str> {
         ("csharp", "interface_declaration") => Some("INTERFACE"),
         ("csharp", "struct_declaration") => Some("STRUCT"),
         ("csharp", "enum_declaration") => Some("ENUM"),
+        ("csharp", "record_declaration") => Some("CLASS"),
         ("csharp", "method_declaration") => Some("METHOD"),
         ("csharp", "constructor_declaration") => Some("CONSTRUCTOR"),
         ("rust", "function_item") => Some("FUNCTION"),
@@ -1249,58 +1250,6 @@ fn extract_rust_members(node: Node, src: &[u8], entity_id: &str, out: &mut Vec<E
     }
 }
 
-fn extract_typescript_imports(n: Node, src: &[u8], path: &str, rels: &mut Vec<Relationship>) {
-    if let Some(src_node) = n.child_by_field_name("source") {
-        let raw = node_text(src_node, src);
-        let spec = raw.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
-        if !spec.is_empty() {
-            let target = resolve_import_path(path, spec);
-            let is_ext = is_external_target(&target);
-            rels.push(Relationship {
-                source: path.into(),
-                target: target.clone(),
-                kind: "IMPORTS".into(),
-                evidence: "TREE_SITTER_IMPORT_SYNTAX".into(),
-                confidence: 0.99,
-                line: n.start_position().row + 1,
-                is_external: is_ext,
-            });
-
-            // Extract clean imported symbol specifiers without noise
-            let mut cursor = n.walk();
-            for child in n.children(&mut cursor) {
-                if child.kind() == "import_clause" {
-                    let mut ic_cursor = child.walk();
-                    for ic_child in child.children(&mut ic_cursor) {
-                        if ic_child.kind() == "named_imports" {
-                            let mut ni_cursor = ic_child.walk();
-                            for spec_node in ic_child.children(&mut ni_cursor) {
-                                if spec_node.kind() == "import_specifier" {
-                                    let sym_name = spec_node
-                                        .child_by_field_name("name")
-                                        .map(|x| node_text(x, src))
-                                        .unwrap_or_else(|| node_text(spec_node, src));
-                                    if !sym_name.is_empty() && sym_name != "import" {
-                                        rels.push(Relationship {
-                                            source: path.into(),
-                                            target: format!("{target}::{sym_name}"),
-                                            kind: "IMPORTS_SYMBOL".into(),
-                                            evidence: "TREE_SITTER_IMPORT_SPECIFIER".into(),
-                                            confidence: 0.99,
-                                            line: spec_node.start_position().row + 1,
-                                            is_external: is_ext,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn extract_fallback_symbols(source: &str, path: &str, lang: &str, out: &mut Vec<Symbol>) {
     if lang == "typescript" || lang == "javascript" {
         let class_re = Regex::new(
@@ -1470,98 +1419,13 @@ fn is_inside_decorator(node: Node) -> bool {
     false
 }
 
+pub(crate) fn is_inside_decorator_pub(node: Node) -> bool {
+    is_inside_decorator(node)
+}
+
 #[allow(clippy::collapsible_if)]
 pub fn extract_call_target(n: Node, src: &[u8], lang: &str) -> Option<String> {
-    match lang {
-        "rust" => {
-            if n.kind() == "call_expression" {
-                if let Some(func_node) = n.child_by_field_name("function") {
-                    let text = node_text(func_node, src);
-                    if !text.is_empty() {
-                        return Some(text);
-                    }
-                }
-            } else if n.kind() == "method_call_expression" {
-                if let Some(name_node) = n
-                    .child_by_field_name("name")
-                    .or_else(|| n.child_by_field_name("method"))
-                {
-                    let text = node_text(name_node, src);
-                    if !text.is_empty() {
-                        return Some(text);
-                    }
-                }
-                let mut cursor = n.walk();
-                for child in n.children(&mut cursor) {
-                    if child.kind() == "field_identifier" {
-                        let text = node_text(child, src);
-                        if !text.is_empty() {
-                            return Some(text);
-                        }
-                    }
-                }
-            }
-        }
-        "typescript" | "javascript" => {
-            if n.kind() == "call_expression" {
-                if is_inside_decorator(n) {
-                    return None;
-                }
-                if let Some(func_node) = n.child_by_field_name("function") {
-                    if func_node.kind() == "identifier" {
-                        let text = node_text(func_node, src);
-                        if !text.is_empty() {
-                            return Some(text);
-                        }
-                    } else if func_node.kind() == "member_expression" {
-                        if let Some(prop) = func_node.child_by_field_name("property") {
-                            let text = node_text(prop, src);
-                            if !text.is_empty() {
-                                return Some(text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        "python" => {
-            if n.kind() == "call" {
-                if is_inside_decorator(n) {
-                    return None;
-                }
-                if let Some(func_node) = n.child_by_field_name("function") {
-                    if func_node.kind() == "identifier" {
-                        let text = node_text(func_node, src);
-                        if !text.is_empty() {
-                            return Some(text);
-                        }
-                    } else if func_node.kind() == "attribute" {
-                        if let Some(attr) = func_node.child_by_field_name("attribute") {
-                            let text = node_text(attr, src);
-                            if !text.is_empty() {
-                                return Some(text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        "csharp" => {
-            if n.kind() == "invocation_expression" {
-                if let Some(expr) = n.child_by_field_name("expression") {
-                    if expr.kind() == "identifier" {
-                        return Some(node_text(expr, src));
-                    } else if expr.kind() == "member_access_expression" {
-                        if let Some(name) = expr.child_by_field_name("name") {
-                            return Some(node_text(name, src));
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    None
+    crate::ast_deps::extract_call_target_v2(n, src, lang)
 }
 
 pub fn visit_ast(
@@ -1615,49 +1479,8 @@ pub fn visit_ast(
         }
     }
 
-    let mut skip_children_imports = false;
-    if lang == "typescript" || lang == "javascript" {
-        if n.kind() == "import_statement" {
-            extract_typescript_imports(n, src, path, rels);
-            skip_children_imports = true;
-        }
-    } else if lang == "rust" {
-        if n.kind() == "use_declaration" {
-            let raw = node_text(n, src);
-            let spec = extract_import_specifier(&raw, lang);
-            if !spec.is_empty() {
-                let is_ext = is_external_target(&spec);
-                rels.push(Relationship {
-                    source: path.into(),
-                    target: spec,
-                    kind: "IMPORTS".into(),
-                    evidence: "TREE_SITTER_USE_DECLARATION".into(),
-                    confidence: 0.99,
-                    line: n.start_position().row + 1,
-                    is_external: is_ext,
-                });
-            }
-            skip_children_imports = true;
-        }
-    } else {
-        if n.kind().contains("import") || n.kind() == "using_directive" {
-            let raw = node_text(n, src);
-            let spec = extract_import_specifier(&raw, lang);
-            if !spec.is_empty() {
-                let target = resolve_import_path(path, &spec);
-                let is_ext = is_external_target(&target);
-                rels.push(Relationship {
-                    source: path.into(),
-                    target,
-                    kind: "IMPORTS".into(),
-                    evidence: "TREE_SITTER_IMPORT_SYNTAX".into(),
-                    confidence: 0.99,
-                    line: n.start_position().row + 1,
-                    is_external: is_ext,
-                });
-            }
-        }
-    }
+    let skip_children_imports =
+        crate::ast_deps::extract_node_relationships(n, src, path, lang, rels);
 
     if let Some(target) = extract_call_target(n, src, lang) {
         if !target.is_empty() && target.len() < 120 {
@@ -1837,75 +1660,8 @@ pub fn parse_file_ast(root: &Path, rel: &str, bytes: &[u8], rev: &str) -> Result
         }
     }
 
-    // Detect test-to-target relationship
-    if rel.ends_with(".spec.ts") {
-        if let Some(t) = rel.strip_suffix(".spec.ts").map(|p| format!("{p}.ts")) {
-            rels.push(Relationship {
-                source: rel.into(),
-                target: t,
-                kind: "TESTS".into(),
-                evidence: "NAMING_CONVENTION".into(),
-                confidence: 0.95,
-                line: 1,
-                is_external: false,
-            });
-        }
-    } else if rel.ends_with(".test.ts") {
-        if let Some(t) = rel.strip_suffix(".test.ts").map(|p| format!("{p}.ts")) {
-            rels.push(Relationship {
-                source: rel.into(),
-                target: t,
-                kind: "TESTS".into(),
-                evidence: "NAMING_CONVENTION".into(),
-                confidence: 0.95,
-                line: 1,
-                is_external: false,
-            });
-        }
-    } else if rel.starts_with("tests/") && rel.ends_with(".rs") {
-        let stem = rel
-            .trim_start_matches("tests/")
-            .trim_end_matches(".rs")
-            .trim_end_matches("_test");
-        rels.push(Relationship {
-            source: rel.into(),
-            target: format!("src/{stem}.rs"),
-            kind: "TESTS".into(),
-            evidence: "NAMING_CONVENTION".into(),
-            confidence: 0.95,
-            line: 1,
-            is_external: false,
-        });
-    } else if rel.starts_with("tests/") && rel.ends_with(".py") {
-        let stem = rel
-            .trim_start_matches("tests/")
-            .trim_end_matches(".py")
-            .trim_start_matches("test_")
-            .trim_end_matches("_test");
-        rels.push(Relationship {
-            source: rel.into(),
-            target: format!("src/orders/{stem}.py"),
-            kind: "TESTS".into(),
-            evidence: "NAMING_CONVENTION".into(),
-            confidence: 0.95,
-            line: 1,
-            is_external: false,
-        });
-    } else if rel.ends_with("Tests.cs") || rel.ends_with("Test.cs") {
-        let stem = rel
-            .trim_start_matches("tests/")
-            .trim_end_matches("Tests.cs")
-            .trim_end_matches("Test.cs");
-        rels.push(Relationship {
-            source: rel.into(),
-            target: format!("src/Cart/{stem}.cs"),
-            kind: "TESTS".into(),
-            evidence: "NAMING_CONVENTION".into(),
-            confidence: 0.95,
-            line: 1,
-            is_external: false,
-        });
-    }
+    // Enrich cross-file paths on disk & resolve test-to-target relationships cleanly
+    crate::ast_deps::enrich_paths_with_root(root, rel, lang, &mut rels, &symbols);
 
     let display = redact(&source);
     let record = FileRecord {
@@ -1914,7 +1670,6 @@ pub fn parse_file_ast(root: &Path, rel: &str, bytes: &[u8], rev: &str) -> Result
         language: lang.into(),
         excerpt: display.chars().take(20000).collect(),
     };
-    let _ = root;
     Ok(ParsedFile {
         file: record,
         symbols,
@@ -2355,7 +2110,7 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
     tx.commit()?;
     crate::compiler::clear_workspace_cache(&root);
 
-    // Sync ecosystem manifest intelligence into analytical store
+    // Sync ecosystem manifest intelligence and unified knowledge graph
     if let Ok(eco) = crate::manifest::detect_ecosystem(&root) {
         let _ = crate::manifest::sync_ecosystem_to_db(&conn, &eco);
     }
@@ -2364,6 +2119,8 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
         [],
         |r| r.get(0),
     )?;
+    drop(conn);
+    crate::knowledge_graph::sync_knowledge_graph(&root, false)?;
     Ok(AnalysisSummary {
         revision: rev,
         indexed_files: files.len(),
@@ -2376,6 +2133,15 @@ pub fn analyze(root: &Path) -> Result<AnalysisSummary> {
 pub fn ensure_fresh(root: &Path) -> Result<()> {
     let root = root_path(root)?;
     let conn = db(&root)?;
+    let stored_cfg: Option<String> = conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key='config_hash'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let cur_cfg = config_hash(&root);
+
     let mut hashes = HashMap::new();
     {
         let mut s = conn.prepare("SELECT path, content_hash FROM files")?;
@@ -2384,40 +2150,53 @@ pub fn ensure_fresh(root: &Path) -> Result<()> {
             hashes.insert(k, v);
         }
     }
-    let mut stale = false;
+    let mut stale = stored_cfg.as_deref() != Some(cur_cfg.as_str());
     let mut scanned = HashSet::new();
     let engine = crate::discovery::DiscoveryEngine::new_shared(&root);
-    for entry in engine.build_walk() {
-        let Ok(e) = entry else { continue };
-        let p = e.path();
-        if p.is_dir() || engine.is_excluded(p, false) {
-            continue;
-        }
-        if language(p).is_none() {
-            continue;
-        }
-        let Ok(b) = fs::read(p) else { continue };
-        if b.len() > 2_000_000 || b.contains(&0) {
-            continue;
-        }
-        let p_norm = crate::discovery::normalize_path(p);
-        let Ok(rel) = p_norm
-            .strip_prefix(engine.root())
-            .or_else(|_| p.strip_prefix(&root))
-        else {
-            continue;
-        };
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        scanned.insert(rel.clone());
-        if hashes.get(&rel) != Some(&hash(&b)) {
-            stale = true;
-            break;
+    if !stale {
+        for entry in engine.build_walk() {
+            let Ok(e) = entry else { continue };
+            let p = e.path();
+            if p.is_dir() || engine.is_excluded(p, false) {
+                continue;
+            }
+            if language(p).is_none() {
+                continue;
+            }
+            let Ok(b) = fs::read(p) else { continue };
+            if b.len() > 2_000_000 || b.contains(&0) {
+                continue;
+            }
+            let p_norm = crate::discovery::normalize_path(p);
+            let Ok(rel) = p_norm
+                .strip_prefix(engine.root())
+                .or_else(|_| p.strip_prefix(&root))
+            else {
+                continue;
+            };
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            scanned.insert(rel.clone());
+            if hashes.get(&rel) != Some(&hash(&b)) {
+                stale = true;
+                break;
+            }
         }
     }
-    if !stale && hashes.len() == scanned.len() {
+
+    let derived_up_to_date = !stale && hashes.len() == scanned.len();
+    drop(conn);
+
+    if derived_up_to_date {
+        crate::knowledge_graph::sync_knowledge_graph(&root, false)?;
         return Ok(());
     }
-    drop(conn);
+
+    if !hashes.is_empty() && stored_cfg.as_deref() == Some(cur_cfg.as_str()) {
+        if crate::incremental::incremental_analyze(&root).is_ok() {
+            return Ok(());
+        }
+    }
+
     let _ = analyze(&root)?;
     Ok(())
 }

@@ -2,6 +2,7 @@
 
 pub mod analyzer;
 pub mod archaeology;
+pub mod ast_deps;
 pub mod bench;
 pub mod budget;
 pub mod ci_guard;

@@ -535,6 +535,9 @@ pub fn context_scoped_optimized(
     }
 
     let kg_conn_opt = crate::knowledge_graph::open_graph_db(&root).ok();
+    let kg_index_opt = kg_conn_opt
+        .as_ref()
+        .and_then(|c| crate::knowledge_graph::KnowledgeGraphIndex::load_from_db(c).ok());
 
     for seed_path in &expansion_seeds {
         // A. Framework SPI Companion Expansion
@@ -672,10 +675,132 @@ pub fn context_scoped_optimized(
             }
         }
 
-        // D. Native Micro-Knowledge Graph multi-hop expansion (CALLS, IMPORTS, DEPENDS_ON, TESTS)
+        // D. Native Micro-Knowledge Graph multi-hop expansion (IMPORTS, CALLS, IMPLEMENTS, INHERITS, REFERENCES, TESTS)
         #[allow(clippy::collapsible_if)]
         if !is_container_module(seed_path) {
-            if let Some(ref kg_conn) = kg_conn_opt {
+            if let Some(ref kg_index) = kg_index_opt {
+                let mut best_neighbor_score: HashMap<String, f64> = HashMap::new();
+                let mut neighbor_provs: HashMap<String, Vec<String>> = HashMap::new();
+                let deps = kg_index.dependencies(seed_path, 2, false);
+                for edge in deps {
+                    if matches!(
+                        edge.provenance.resolution_status,
+                        crate::knowledge_graph::ResolutionStatus::External
+                            | crate::knowledge_graph::ResolutionStatus::Unresolved
+                    ) {
+                        continue;
+                    }
+                    let target_node = kg_index.nodes_by_id.get(&edge.target_id);
+                    let target_file = target_node
+                        .map(|n| n.relative_path.clone())
+                        .filter(|p| !p.is_empty())
+                        .or_else(|| edge.target_id.strip_prefix("file:").map(str::to_string));
+                    if let Some(raw_tf) = target_file {
+                        let clean_tf = raw_tf.replace('\\', "/");
+                        if doc_map.contains_key(&clean_tf) && clean_tf != *seed_path {
+                            let is_confirmed = edge.provenance.resolution_status
+                                == crate::knowledge_graph::ResolutionStatus::Resolved
+                                && edge.provenance.classification
+                                    != crate::knowledge_graph::EvidenceClassification::Inferred;
+                            let base_weight = if is_confirmed {
+                                if edge.category == crate::knowledge_graph::RelationCategory::Tests
+                                {
+                                    6.0
+                                } else if edge.provenance.classification
+                                    == crate::knowledge_graph::EvidenceClassification::DirectFact
+                                {
+                                    4.5
+                                } else {
+                                    4.0
+                                }
+                            } else {
+                                1.5
+                            };
+                            let boost = base_weight * edge.provenance.confidence;
+                            let ev_tag = if is_confirmed { "DIRECT" } else { "INFERRED" };
+                            let prov = format!(
+                                "Native KG {} [{}] {} via {} ({}:{}, conf: {:.2})",
+                                ev_tag,
+                                edge.provenance.resolution_status.as_str(),
+                                edge.category.as_str(),
+                                seed_path,
+                                edge.provenance.source_path,
+                                edge.provenance.source_line.unwrap_or(1),
+                                edge.provenance.confidence
+                            );
+                            best_neighbor_score
+                                .entry(clean_tf.clone())
+                                .and_modify(|s| {
+                                    if boost > *s {
+                                        *s = boost;
+                                    }
+                                })
+                                .or_insert(boost);
+                            let plist = neighbor_provs.entry(clean_tf).or_default();
+                            if !plist.contains(&prov) {
+                                plist.push(prov);
+                            }
+                        }
+                    }
+                }
+
+                // Multi-hop reverse impact (callers, implementors, subclasses, tests)
+                let impact_rep = kg_index.impact(seed_path, 2);
+                for finding in impact_rep.findings {
+                    let clean_tf = finding.relative_path.replace('\\', "/");
+                    if !clean_tf.is_empty()
+                        && doc_map.contains_key(&clean_tf)
+                        && clean_tf != *seed_path
+                    {
+                        let decay = 1.0 / (finding.hop.max(1) as f64);
+                        let is_confirmed = finding.classification
+                            != crate::knowledge_graph::EvidenceClassification::Inferred;
+                        let base_weight = if is_confirmed {
+                            if finding.relation == crate::knowledge_graph::RelationCategory::Tests {
+                                6.0
+                            } else {
+                                4.0
+                            }
+                        } else {
+                            1.5
+                        };
+                        let boost = base_weight * finding.confidence * decay;
+                        let ev_tag = if is_confirmed { "DIRECT" } else { "INFERRED" };
+                        let prov = format!(
+                            "Native KG {} reverse {} (hop {}) via {} (conf: {:.2})",
+                            ev_tag,
+                            finding.relation.as_str(),
+                            finding.hop,
+                            seed_path,
+                            finding.confidence
+                        );
+                        best_neighbor_score
+                            .entry(clean_tf.clone())
+                            .and_modify(|s| {
+                                if boost > *s {
+                                    *s = boost;
+                                }
+                            })
+                            .or_insert(boost);
+                        let plist = neighbor_provs.entry(clean_tf).or_default();
+                        if !plist.contains(&prov) {
+                            plist.push(prov);
+                        }
+                    }
+                }
+
+                for (clean_tf, boost) in best_neighbor_score {
+                    *composite_scores.entry(clean_tf.clone()).or_insert(0.0) += boost;
+                    if let Some(provs) = neighbor_provs.remove(&clean_tf) {
+                        let list = provenance_map.entry(clean_tf).or_default();
+                        for p in provs {
+                            if !list.contains(&p) {
+                                list.push(p);
+                            }
+                        }
+                    }
+                }
+            } else if let Some(ref kg_conn) = kg_conn_opt {
                 let file_id = format!("file:{seed_path}");
                 let kg_edges =
                     crate::knowledge_graph::KnowledgeGraphIndex::query_file_neighborhood_fast(
@@ -914,7 +1039,10 @@ pub fn context_scoped_optimized(
             let matches_direct = provs.iter().any(|p| {
                 p.contains("Exact symbol match")
                     || p.contains("Framework task companion")
+                    || p.contains("Native KG DIRECT")
                     || p.contains("IMPORTS")
+                    || p.contains("IMPLEMENTS")
+                    || p.contains("INHERITS")
                     || p.contains("Impact DIRECT")
                     || p.contains("Impact IMPLEMENTATION")
             });
@@ -963,13 +1091,15 @@ pub fn context_scoped_optimized(
     let count = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, usize>(0))?;
     let limit = budget;
     let mut used = 0;
+    let mut has_capacity_overflow = limit == 0;
     let mut selected = Vec::new();
     let mut excluded = Vec::new();
     let mut omissions = Vec::new();
 
-    // Reserve a small token slice for ecosystem and constraints
-    let overhead_tokens = estimate_tokens(&constraints.join("\n"))
-        + eco_guard.as_deref().map(estimate_tokens).unwrap_or(0);
+    // Reserve token slice for ecosystem guard and constraints without exceeding configured limit
+    let overhead_tokens = (estimate_tokens(&constraints.join("\n"))
+        + eco_guard.as_deref().map(estimate_tokens).unwrap_or(0))
+    .min(limit);
     used += overhead_tokens;
 
     let mut all_selected_symbols = Vec::new();
@@ -1045,7 +1175,7 @@ pub fn context_scoped_optimized(
 
         let body_lines: Vec<&str> = body.lines().collect();
         let remaining_tokens = limit.saturating_sub(used);
-        let max_chars = remaining_tokens.saturating_mul(4).max(220);
+        let max_chars = remaining_tokens.saturating_mul(4);
 
         let mut content = format!("FILE {path} [{lang}]\n");
 
@@ -1053,16 +1183,16 @@ pub fn context_scoped_optimized(
             content.push_str("SYMBOLS (COMPACT METADATA):\n");
             for (_ent_id, name, kind, start_line, end_line, sig) in &syms_meta {
                 let sig_key = format!("{}::{}", name, sig);
-                if seen_signatures.contains(&sig_key) {
-                    content.push_str(&format!(
-                        "- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"
-                    ));
-                    continue;
+                let line_str = if seen_signatures.contains(&sig_key) {
+                    format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n")
+                } else {
+                    seen_signatures.insert(sig_key);
+                    format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n")
+                };
+                if content.len() + line_str.len() > max_chars {
+                    break;
                 }
-                seen_signatures.insert(sig_key);
-                content.push_str(&format!(
-                    "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
-                ));
+                content.push_str(&line_str);
             }
         } else if !syms_meta.is_empty() {
             content.push_str("SYMBOLS & CODE EXCERPTS:\n");
@@ -1078,40 +1208,61 @@ pub fn context_scoped_optimized(
 
                 let sig_key = format!("{}::{}", name, sig);
                 if seen_signatures.contains(&sig_key) {
-                    content.push_str(&format!(
+                    let dedup_line = format!(
                         "- {kind} {name} (L{start_line}..L{end_line}): {sig} [DEDUPLICATED]\n"
-                    ));
+                    );
+                    if dedup_line.len() <= chars_available {
+                        content.push_str(&dedup_line);
+                        chars_available = chars_available.saturating_sub(dedup_line.len());
+                    }
                     continue;
                 }
                 seen_signatures.insert(sig_key);
 
                 if !is_requested {
-                    content.push_str(&format!(
-                        "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
-                    ));
+                    let sym_line = format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n");
+                    if sym_line.len() <= chars_available {
+                        content.push_str(&sym_line);
+                        chars_available = chars_available.saturating_sub(sym_line.len());
+                    }
                     continue;
                 }
 
                 if chars_available < 60 {
-                    content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [TRUNCATED: Budget Exceeded]\n"));
+                    let trunc_line = format!(
+                        "- {kind} {name} (L{start_line}..L{end_line}): {sig} [TRUNCATED: Budget Exceeded]\n"
+                    );
+                    if trunc_line.len() <= chars_available {
+                        content.push_str(&trunc_line);
+                        chars_available = chars_available.saturating_sub(trunc_line.len());
+                    }
                     continue;
                 }
 
                 let members = crate::storage::get_entity_members(&conn, ent_id).unwrap_or_default();
                 if !members.is_empty() {
-                    content.push_str(&format!("* {kind} {name} members:\n"));
-                    for m in &members {
-                        content.push_str(&format!(
-                            "  - {} {} {}: {}\n",
-                            if m.visibility.is_empty() {
-                                "pub"
-                            } else {
-                                &m.visibility
-                            },
-                            m.member_kind,
-                            m.name,
-                            m.signature
-                        ));
+                    let header = format!("* {kind} {name} members:\n");
+                    if header.len() <= chars_available {
+                        content.push_str(&header);
+                        chars_available = chars_available.saturating_sub(header.len());
+                        for m in &members {
+                            let mline = format!(
+                                "  - {} {} {}: {}\n",
+                                if m.visibility.is_empty() {
+                                    "pub"
+                                } else {
+                                    &m.visibility
+                                },
+                                m.member_kind,
+                                m.name,
+                                m.signature
+                            );
+                            if mline.len() > chars_available {
+                                break;
+                            }
+                            content.push_str(&mline);
+                            chars_available = chars_available.saturating_sub(mline.len());
+                        }
                     }
                 }
 
@@ -1130,20 +1281,34 @@ pub fn context_scoped_optimized(
                             &members,
                             lang,
                         );
-                        content.push_str(&format!(
+                        let blk = format!(
                             "--- {kind} {name} (Lines {start_line}..{end_line}) ---\n{sig}\n{bounded_str}\n\n"
-                        ));
-                        chars_available = chars_available.saturating_sub(bounded_str.len() + 60);
-                    } else if raw_block.len() <= chars_available {
-                        content.push_str(&format!(
+                        );
+                        if blk.len() <= chars_available {
+                            content.push_str(&blk);
+                            chars_available = chars_available.saturating_sub(blk.len());
+                        } else {
+                            let om_line = format!(
+                                "- {kind} {name} (L{start_line}..L{end_line}): {sig} [EXCERPT OMITTED: Budget Limit]\n"
+                            );
+                            if om_line.len() <= chars_available {
+                                content.push_str(&om_line);
+                                chars_available = chars_available.saturating_sub(om_line.len());
+                            }
+                        }
+                    } else if raw_block.len() + sig.len() + 60 <= chars_available {
+                        let blk = format!(
                             "--- {kind} {name} (Lines {start_line}..{end_line}) [COMPLETE_BLOCK] ---\n{sig}\n{raw_block}\n\n"
-                        ));
-                        chars_available = chars_available.saturating_sub(raw_block.len() + 60);
+                        );
+                        content.push_str(&blk);
+                        chars_available = chars_available.saturating_sub(blk.len());
                     } else {
                         let mut partial = Vec::new();
                         let mut partial_len = 0;
+                        let reserve = sig.len() + 140;
+                        let inner_cap = chars_available.saturating_sub(reserve);
                         for l in symbol_lines {
-                            if partial_len + l.len() + 1 > chars_available.saturating_sub(120) {
+                            if partial_len + l.len() + 1 > inner_cap {
                                 break;
                             }
                             partial_len += l.len() + 1;
@@ -1151,22 +1316,33 @@ pub fn context_scoped_optimized(
                         }
                         if !partial.is_empty() {
                             let partial_count = partial.len();
-                            content.push_str(&format!(
+                            let blk = format!(
                                 "--- {kind} {name} (Lines {start_line}..{}) [INCOMPLETE_EXCERPT: showing {} of {} lines] ---\n{sig}\n{}\n// [TRUNCATED to fit token budget]\n\n",
                                 start_line + partial_count - 1,
                                 partial_count,
                                 symbol_lines.len(),
                                 partial.join("\n")
-                            ));
-                            chars_available = chars_available.saturating_sub(partial_len + 120);
+                            );
+                            if blk.len() <= chars_available {
+                                content.push_str(&blk);
+                                chars_available = chars_available.saturating_sub(blk.len());
+                            }
                         } else {
-                            content.push_str(&format!("- {kind} {name} (L{start_line}..L{end_line}): {sig} [EXCERPT OMITTED: Budget Limit]\n"));
+                            let om_line = format!(
+                                "- {kind} {name} (L{start_line}..L{end_line}): {sig} [EXCERPT OMITTED: Budget Limit]\n"
+                            );
+                            if om_line.len() <= chars_available {
+                                content.push_str(&om_line);
+                                chars_available = chars_available.saturating_sub(om_line.len());
+                            }
                         }
                     }
                 } else {
-                    content.push_str(&format!(
-                        "- {kind} {name} (L{start_line}..L{end_line}): {sig}\n"
-                    ));
+                    let sym_line = format!("- {kind} {name} (L{start_line}..L{end_line}): {sig}\n");
+                    if sym_line.len() <= chars_available {
+                        content.push_str(&sym_line);
+                        chars_available = chars_available.saturating_sub(sym_line.len());
+                    }
                 }
             }
         } else {
@@ -1182,44 +1358,56 @@ pub fn context_scoped_optimized(
                 partial.push(*l);
             }
             if partial.len() == body_lines.len() {
-                content.push_str(&format!(
+                let blk = format!(
                     "Lines 1..{} [COMPLETE_BLOCK]:\n{}\n",
                     body_lines.len(),
                     body
-                ));
-            } else {
-                content.push_str(&format!(
+                );
+                if blk.len() <= chars_available {
+                    content.push_str(&blk);
+                }
+            } else if !partial.is_empty() {
+                let blk = format!(
                     "Lines 1..{} [INCOMPLETE_EXCERPT: showing {} of {} lines]:\n{}\n// [TRUNCATED to fit token budget]\n",
                     partial.len(),
                     partial.len(),
                     body_lines.len(),
                     partial.join("\n")
-                ));
+                );
+                if blk.len() <= chars_available {
+                    content.push_str(&blk);
+                }
             }
         }
 
         let level = if score > 3.0 { 3 } else { 2 };
 
         let cost = estimate_tokens(&content);
-        let hard_safety_ceiling = (limit * 10).max(16000);
-        let fits_budget = match tier {
-            PackingTier::Tier0Mandatory => used + cost <= hard_safety_ceiling,
-            _ => used + cost <= limit,
-        };
+        let fits_budget = used + cost <= limit && remaining_tokens > 0;
 
         if !fits_budget {
-            let reason = match tier {
-                PackingTier::Tier0Mandatory => format!(
-                    "Tier 0 (Mandatory) safety ceiling reached (needed {} tokens, limit: {})",
-                    cost, hard_safety_ceiling
-                ),
-                _ => format!(
-                    "{} file excluded: soft budget limit of {} tokens reached (needed {} tokens, {} tokens remaining)",
-                    tier.name(),
-                    limit,
-                    cost,
-                    limit.saturating_sub(used)
-                ),
+            let (status_tag, reason) = if tier == PackingTier::Tier0Mandatory {
+                has_capacity_overflow = true;
+                (
+                    "CAPACITY_OVERFLOW",
+                    format!(
+                        "Tier 0 (Mandatory) item exceeds remaining token budget of {} tokens (needed {} tokens, {} remaining)",
+                        limit,
+                        cost,
+                        limit.saturating_sub(used)
+                    ),
+                )
+            } else {
+                (
+                    "COMPLETELY_OMITTED",
+                    format!(
+                        "{} file excluded: strict token budget limit of {} tokens reached (needed {} tokens, {} tokens remaining)",
+                        tier.name(),
+                        limit,
+                        cost,
+                        limit.saturating_sub(used)
+                    ),
+                )
             };
             excluded.push((path.clone(), reason.clone()));
             omissions.push(crate::budget::OmissionEntry {
@@ -1232,7 +1420,7 @@ pub fn context_scoped_optimized(
                 included_token_count: 0,
                 omitted_token_count: cost,
                 omission_reason: reason,
-                omission_status: "COMPLETELY_OMITTED".to_string(),
+                omission_status: status_tag.to_string(),
                 retrievable_via_targeted_request: true,
             });
             continue;
@@ -1249,11 +1437,6 @@ pub fn context_scoped_optimized(
             provenance: prov,
             content,
         });
-
-        if used >= limit && !selected.is_empty() {
-            // Keep checking subsequent candidates in case there are Tier 0 mandatory files
-            continue;
-        }
     }
 
     let confidence = selected
@@ -1329,7 +1512,7 @@ pub fn context_scoped_optimized(
         }
     }
 
-    let budget_status = if limit == 0 {
+    let budget_status = if limit == 0 || has_capacity_overflow {
         "CAPACITY_OVERFLOW".to_string()
     } else if !omissions.is_empty() {
         "TRUNCATED_AT_BUDGET".to_string()

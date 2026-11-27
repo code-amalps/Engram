@@ -540,8 +540,16 @@ pub fn trace_feature(root: &Path, req: &TraceRequest) -> Result<FeatureTrace> {
                     }
 
                     let target_id = &edge.target_id;
-                    if target_id.starts_with("symbol:ext::") {
-                        let ext_name = target_id.trim_start_matches("symbol:ext::");
+                    if target_id.starts_with("symbol:ext::")
+                        || target_id.starts_with("ext:pkg:")
+                        || target_id.starts_with("unresolved:")
+                    {
+                        let ext_name = target_id
+                            .strip_prefix("symbol:ext::")
+                            .or_else(|| target_id.strip_prefix("ext:pkg:"))
+                            .or_else(|| target_id.strip_prefix("unresolved:missing:"))
+                            .or_else(|| target_id.strip_prefix("unresolved:ambiguous:"))
+                            .unwrap_or(target_id);
                         if is_trivial_builtin_or_method(ext_name) {
                             continue;
                         }

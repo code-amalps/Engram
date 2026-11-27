@@ -3,8 +3,8 @@
   "task": "compute math calculator precision",
   "expected_files": [
     "src/math.rs",
-    "tests/math_test.rs",
     "src/service.rs",
+    "tests/math_test.rs",
     "src/lib.rs",
     "Cargo.toml"
   ],

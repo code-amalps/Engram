@@ -163,14 +163,13 @@ pub fn find_tier2_relational_dependents(
 
     let mut dependent_files = HashSet::new();
 
-    // 1. Files importing Tier 1 files directly
+    // 1. Files importing Tier 1 files directly (including deleted/renamed paths)
     for t1_file in tier1_files {
         let pattern_full = format!("%{t1_file}%");
-        let stem = Path::new(t1_file)
-            .file_stem()
-            .and_then(|s| s.to_str())
+        let path_no_ext = t1_file
+            .rsplit_once('.')
+            .map(|(prefix, _)| prefix)
             .unwrap_or(t1_file);
-        let path_no_ext = t1_file.strip_suffix(&format!(".{stem}")).unwrap_or(t1_file);
         let pattern_stem = format!("%{path_no_ext}%");
 
         let mut stmt = conn.prepare(
@@ -410,9 +409,33 @@ fn incremental_analyze_internal(
         }
     }
 
-    // TIER 2: Relational graph invalidation and re-linking
+    // TIER 2: Relational graph invalidation and re-linking (include changed, deleted, and renamed files/symbols)
+    let mut tier1_affected_paths = tier1_reparsed_files.clone();
+    tier1_affected_paths.extend(tier1_deleted_files.iter().cloned());
+    let mut tier1_affected_symbols = tier1_symbol_names.clone();
+    for (old_p, new_p) in &tier1_renamed_files {
+        tier1_affected_paths.push(old_p.clone());
+        tier1_affected_paths.push(new_p.clone());
+    }
+    for old_path in tier1_deleted_files
+        .iter()
+        .chain(tier1_renamed_files.iter().map(|(o, _)| o))
+    {
+        if let Ok(mut st) = conn.prepare(
+            "SELECT name FROM entities WHERE path = ?1 AND invalidated_at_revision IS NULL",
+        ) {
+            if let Ok(rows) = st.query_map(params![old_path], |r| r.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    if !tier1_affected_symbols.contains(&row) {
+                        tier1_affected_symbols.push(row);
+                    }
+                }
+            }
+        }
+    }
+
     let tier2_relinked_files =
-        find_tier2_relational_dependents(&conn, &tier1_reparsed_files, &tier1_symbol_names)?;
+        find_tier2_relational_dependents(&conn, &tier1_affected_paths, &tier1_affected_symbols)?;
 
     let mut tier2_relinked_entities = 0;
 
@@ -638,7 +661,23 @@ fn incremental_analyze_internal(
         }
     }
 
+    if !tier1_reparsed_files.is_empty()
+        || !tier1_deleted_files.is_empty()
+        || !tier1_renamed_files.is_empty()
+        || !tier2_relinked_files.is_empty()
+    {
+        tx.execute(
+            "INSERT INTO metadata(key, value) VALUES('index_generation', '1')
+             ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)",
+            [],
+        )?;
+    }
+
     tx.commit()?;
+    crate::compiler::clear_workspace_cache(&root);
+    if let Err(e) = crate::knowledge_graph::sync_knowledge_graph(&root, false) {
+        diagnostics.push(format!("KNOWLEDGE_GRAPH_SYNC_WARNING: {e}"));
+    }
 
     let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 

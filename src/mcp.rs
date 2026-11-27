@@ -1287,6 +1287,7 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
             if target.contains('/') || target.contains('\\') || target.contains('.') {
                 validate_workspace_path(&root, target)?;
             }
+            crate::analyzer::ensure_fresh(&root)?;
             Ok(impact(&root, target)?)
         }
         "engram_get_cochanges" => {
@@ -1699,6 +1700,36 @@ pub fn mcp_call_raw(root: &Path, name: &str, args: &Value) -> Result<Value> {
             let mem = crate::memory::ratify_decision(&root, decision_id, by, reason, commit)?;
             Ok(serde_json::to_value(mem)?)
         }
+        "engram_graph_explain" => {
+            let target = args["target"]
+                .as_str()
+                .or_else(|| args["symbol"].as_str())
+                .unwrap_or("")
+                .trim();
+            if target.is_empty() {
+                bail!("Target file or symbol must not be empty");
+            }
+            if target.contains('/') || target.contains('\\') || target.contains('.') {
+                validate_workspace_path(&root, target)?;
+            }
+            let depth = args["depth"].as_u64().unwrap_or(2).clamp(1, 5) as usize;
+            let status = crate::knowledge_graph::sync_knowledge_graph(&root, false)?;
+            let conn = crate::knowledge_graph::open_graph_db(&root)?;
+            let index = crate::knowledge_graph::KnowledgeGraphIndex::load_from_db(&conn)?;
+            let mut payload = index.explain_target(target, depth);
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "graph_freshness".to_string(),
+                    json!({
+                        "state": status.state.as_str(),
+                        "schema_version": status.schema_version,
+                        "index_generation": status.index_generation,
+                        "indexed_files_count": status.indexed_files_count
+                    }),
+                );
+            }
+            Ok(payload)
+        }
         _ => Err(anyhow!("Unknown tool: {name}")),
     }
 }
@@ -2044,6 +2075,22 @@ pub fn trace_feature_tool_definition() -> Value {
     })
 }
 
+pub fn graph_explain_tool_definition() -> Value {
+    json!({
+        "name": "engram_graph_explain",
+        "description": "Explain AST dependency graph outgoing dependencies, reverse dependencies, resolution status, and provenance for a target file or symbol.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": { "type": "string", "description": "Relative file path, module, or symbol name to inspect" },
+                "depth": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Traversal depth (default 2)" },
+                "max_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536, "description": "Maximum serialized response size in bytes (default 16384)" }
+            },
+            "required": ["target"]
+        }
+    })
+}
+
 pub fn tools_definitions() -> Value {
     let show_all = std::env::var("ENGRAM_SPECIALIST_TOOLS")
         .or_else(|_| std::env::var("ENGRAM_ALL_TOOLS"))
@@ -2065,6 +2112,7 @@ pub fn tools_definitions() -> Value {
     if show_trace {
         if let Some(arr) = defs.as_array_mut() {
             arr.push(trace_feature_tool_definition());
+            arr.push(graph_explain_tool_definition());
         }
     }
 

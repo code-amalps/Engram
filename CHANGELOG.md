@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.5] - 2026-11-27
+
+### Engram Stable Release
+
+#### Added
+- **Schema 2.0.0 Multi-File AST Dependency Graph:** Incremental structural symbol graph traversal, cross-file caller/callee resolution, and struct/trait relationship tracking.
+- **Micro-Knowledge Graph & Context Compiler:** Adaptive BM25 and structural context assembly with verified 1,200-token budget ceiling.
+- **Model Context Protocol (MCP) Integration:** 17 governed tools and live MCP resources (`engram://memories`, `engram://constitution`) supporting Cursor, Claude Desktop, and Windsurf.
+- **Change Contract Governance & Guard:** Multi-hop blast radius impact analysis and pre-commit Git hook enforcement.
+- **Build Identity Schema v2:** Complete provenance stamping including Git commit, compiler version, linker target, and tree hash.
+
+#### Changed
+- **Empirical Benchmarks Aligned:** Audited against canonical 18-run benchmark dataset; documented modeled ~85.0% complete agent prompt reduction (~84.0% task mean) under 4,600-token fixed host overhead.
+- **Multi-Platform Support:** Windows x64 native binary distribution with standalone packaging.
+
+---
+
 ## [1.5.4] - Proposed Technical Preview (Unreleased)
 
 ### Engram Product & Runtime

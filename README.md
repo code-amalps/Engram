@@ -230,24 +230,25 @@ In addition, Engram provides MCP Resources (`engram://memories`, `engram://const
 ## 6. Empirical Benchmarks & Token Reduction
 
 > [!IMPORTANT]
-> **Empirical Qualification & Accounting Disclosure:**
-> The token reduction figures below represent **preliminary local-tokenizer estimates** measured using OpenAI's `cl100k_base` tokenizer (`tiktoken` v0.14.0) across **18 paired experimental runs** on the authoritative Engram repository in Phase 10.3.1.
+> **Empirical Qualification & Benchmark Audit Disclosure:**
+> The token reduction figures documented below represent **independently audited local-tokenizer estimates** verified in Phase 10.3.1.1 using OpenAI's `cl100k_base` tokenizer (`tiktoken` v0.14.0) across **18 paired experimental runs** on the authoritative Engram codebase.
 > 
-> - **Accounting Standard:** `ESTIMATED_TOKEN_COUNT`.
-> - **Billing Status:** No live LLM provider billing telemetry was accessible; actual billing tokens depend on provider-specific tokenizers and API formatting.
-> - **Audit Status:** Findings are preliminary pending independent Phase 10.3.1.1 benchmark audit.
+> - **Scope of Measurement:** Figures measure **retrieved source context payload reduction against naive full-file ingestion (Measurement A)**. When modeling complete agent prompts including system instructions, 17 MCP tool schemas, and conversation history (Measurement B), Engram achieves a modeled **~85.0% reduction** in complete agent input tokens (task mean: ~84.0%).
+> - **Accounting Standard:** `ESTIMATED_TOKEN_COUNT` (local tokenizer estimation).
+> - **Billing Status:** No live LLM provider billing telemetry was accessible (`ACTUAL_TOKEN_USAGE_UNAVAILABLE`); actual billing tokens depend on commercial provider tokenizers, API formatting, and prompt caching.
+> - **Audit Status:** Audited and certified with scope limitations in Phase 10.3.1.1 (`BENCHMARK_AUDIT_CERTIFIED_WITH_LIMITATIONS`).
 
-### Phase 10.3.1 Results Matrix (18 Paired Runs across 6 Tasks)
+### Phase 10.3.1 Canonical Results Matrix (18 Paired Runs across 6 Tasks)
 
-| Task ID | Task Category & Name | Baseline Mean Input Tokens | Engram Mean Input Tokens | Input Token Reduction (%) | Retrieval Precision Baseline -> Engram | Correctness Parity |
+| Task ID | Task Category & Name | Baseline Mean Input Tokens | Engram Mean Input Tokens | Input Token Reduction (%) | Retrieval Precision Baseline -> Engram | Ground-Truth Context Coverage |
 |---|---|:---:|:---:|:---:|:---:|:---:|
-| **TASK-01** | Feature Discovery: Preflight Verification | 51,772 | 2,692 | **94.80%** | 60.0% -> 100.0% | PASS |
-| **TASK-02** | Bug Investigation: Cyclic Dependencies | 68,230 | 2,388 | **96.50%** | 75.0% -> 100.0% | PASS |
-| **TASK-03** | Small Feature: Token Budget Estimation | 59,425 | 2,392 | **95.97%** | 75.0% -> 100.0% | PASS |
-| **TASK-04** | Cross-Module Change: Rule Violation Propagation | 38,914 | 2,392 | **93.85%** | 75.0% -> 100.0% | PASS |
-| **TASK-05** | Refactoring: Incremental Invalidation Cache | 39,122 | 2,042 | **94.78%** | 66.7% -> 100.0% | PASS |
-| **TASK-06** | Regression Investigation: Junction Symlink Policy | 31,445 | 2,542 | **91.92%** | 66.7% -> 100.0% | PASS |
-| **AGGREGATE** | **Overall 18-Run Summary** | **48,151** | **2,408** | **Median: 94.26% (Mean: 94.04%)** | **63.3% -> 100.0%** | **100% Pass** |
+| **TASK-01** | Feature Discovery: Preflight Verification | 50,828 | 2,419 | **95.24%** | 60.0% -> 100.0% | 100% Present |
+| **TASK-02** | Bug Investigation: Cyclic Dependencies | 61,653 | 2,414 | **96.08%** | 75.0% -> 100.0% | 100% Present |
+| **TASK-03** | Small Feature: Token Budget Estimation | 45,591 | 2,410 | **94.71%** | 75.0% -> 100.0% | 100% Present |
+| **TASK-04** | Cross-Module Change: Rule Violation Propagation | 29,881 | 2,410 | **91.93%** | 75.0% -> 100.0% | 100% Present |
+| **TASK-05** | Refactoring: Incremental Invalidation Cache | 33,441 | 2,066 | **93.82%** | 66.7% -> 100.0% | 100% Present |
+| **TASK-06** | Regression Investigation: Junction Symlink Policy | 27,446 | 2,064 | **92.48%** | 66.7% -> 100.0% | 100% Present |
+| **AGGREGATE** | **Overall 18-Run Summary** | **41,473** | **2,297** | **Median: 94.26% (Mean: 94.04%)** | **69.7% -> 100.0%** | **100% Present** |
 
 *For complete methodology, paired comparison scripts, and replication commands, see [`docs/benchmarks.md`](docs/benchmarks.md).*
 
